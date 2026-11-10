@@ -1,6 +1,8 @@
 name: Insaf site checks
 
 on:
+  push:
+    branches: [feature/land-foundation-2026-11]
   pull_request:
     branches: [main]
   workflow_dispatch:
