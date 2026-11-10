@@ -3,6 +3,7 @@ import { env } from 'cloudflare:workers';
 import Base from '../layouts/Base.astro';
 import Icon from '../components/Icon.astro';
 import SectionHead from '../components/SectionHead.astro';
+import HomeHeroSlider from '../components/HomeHeroSlider.astro';
 import FundProgress from '../components/donate/FundProgress.astro';
 import DonateForm from '../components/donate/DonateForm.astro';
 import { listFunds } from '../server/donations';
@@ -39,10 +40,7 @@ Astro.response.headers.set('Cache-Control', error ? 'no-store' : 'public, max-ag
         </ul>
       </div>
       <div class="hero__visual">
-        <div class="arch">
-          <img src="/images/students-quran-1280.webp" srcset="/images/students-quran-640.webp 640w, /images/students-quran-1280.webp 1280w" sizes="(max-width: 900px) 90vw, 520px" alt="কুরআন হাতে মাদরাসাতুল ইনসাফের শিক্ষার্থীরা" width="1280" height="853" fetchpriority="high" />
-        </div>
-        <img class="hero__emblem" src="/images/emblem.webp" alt="" width="120" height="120" />
+        <HomeHeroSlider />
       </div>
     </div>
   </section>

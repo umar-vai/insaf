@@ -1,0 +1,131 @@
+---
+const slides = [
+  { image: 'students-quran', caption: 'কুরআন শিক্ষার মুহূর্ত', alt: 'মাদরাসাতুল ইনসাফের শিক্ষার্থীরা কুরআন নিয়ে পড়ছে' },
+  { image: 'students-books', caption: 'ইলম অর্জনের পরিবেশ', alt: 'মাদরাসাতুল ইনসাফের শিক্ষার্থীদের পাঠ্যবই ও পড়াশোনা' },
+  { image: 'students-outdoor', caption: 'শিক্ষার্থীদের দৈনন্দিন জীবন', alt: 'মাদরাসাতুল ইনসাফের শিক্ষার্থীরা বাইরের পরিবেশে' },
+] as const;
+---
+<div class="home-hero-slider" data-home-hero-slider aria-roledescription="carousel" aria-label="মাদরাসাতুল ইনসাফের তিনটি ছবি">
+  <div class="home-hero-slider__viewport" aria-live="off">
+    {slides.map((slide, i) => (
+      <figure class:list={['home-hero-slider__slide', i === 0 && 'is-active']} data-slide aria-hidden={i === 0 ? 'false' : 'true'}>
+        <img
+          src={`/images/${slide.image}-1280.webp`}
+          srcset={`/images/${slide.image}-640.webp 640w, /images/${slide.image}-1280.webp 1280w`}
+          sizes="(max-width: 900px) 90vw, 520px"
+          alt={slide.alt}
+          width="1280" height="853"
+          loading={i === 0 ? 'eager' : 'lazy'}
+          fetchpriority={i === 0 ? 'high' : 'auto'}
+        />
+        <figcaption>{slide.caption}</figcaption>
+      </figure>
+    ))}
+  </div>
+  <div class="home-hero-slider__controls">
+    <button class="home-hero-slider__arrow" data-slide-prev type="button" aria-label="আগের ছবি">‹</button>
+    <div class="home-hero-slider__dots" role="group" aria-label="ছবি নির্বাচন">
+      {slides.map((slide, i) => (
+        <button
+          type="button"
+          class:list={['home-hero-slider__dot', i === 0 && 'is-active']}
+          data-slide-dot={i}
+          aria-label={`${i + 1} নম্বর ছবি: ${slide.caption}`}
+          aria-current={i === 0 ? 'true' : 'false'}
+        ><span aria-hidden="true"></span></button>
+      ))}
+    </div>
+    <button class="home-hero-slider__arrow" data-slide-next type="button" aria-label="পরের ছবি">›</button>
+  </div>
+</div>
+
+<script>
+  const carousel = document.querySelector<HTMLElement>('[data-home-hero-slider]');
+  if (carousel) {
+    const slides = Array.from(carousel.querySelectorAll<HTMLElement>('[data-slide]'));
+    const dots = Array.from(carousel.querySelectorAll<HTMLButtonElement>('[data-slide-dot]'));
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let current = 0;
+    let timer: number | undefined;
+    let visible = true;
+    let startX: number | null = null;
+
+    const show = (next: number) => {
+      current = (next + slides.length) % slides.length;
+      slides.forEach((slide, i) => {
+        const active = i === current;
+        slide.classList.toggle('is-active', active);
+        slide.setAttribute('aria-hidden', String(!active));
+      });
+      dots.forEach((dot, i) => {
+        const active = i === current;
+        dot.classList.toggle('is-active', active);
+        dot.setAttribute('aria-current', String(active));
+      });
+    };
+    const pause = () => {
+      if (timer !== undefined) window.clearInterval(timer);
+      timer = undefined;
+    };
+    const play = () => {
+      pause();
+      if (reducedMotion.matches || document.hidden || !visible || carousel.matches(':hover') || carousel.contains(document.activeElement)) return;
+      timer = window.setInterval(() => show(current + 1), 5500);
+    };
+
+    carousel.querySelector('[data-slide-prev]')?.addEventListener('click', () => { show(current - 1); play(); });
+    carousel.querySelector('[data-slide-next]')?.addEventListener('click', () => { show(current + 1); play(); });
+    dots.forEach((dot, i) => dot.addEventListener('click', () => { show(i); play(); }));
+    carousel.addEventListener('mouseenter', pause);
+    carousel.addEventListener('mouseleave', play);
+    carousel.addEventListener('focusin', pause);
+    carousel.addEventListener('focusout', () => window.requestAnimationFrame(play));
+    carousel.addEventListener('touchstart', (event) => { startX = event.touches[0]?.clientX ?? null; }, { passive: true });
+    carousel.addEventListener('touchend', (event) => {
+      if (startX === null) return;
+      const delta = (event.changedTouches[0]?.clientX ?? startX) - startX;
+      startX = null;
+      if (Math.abs(delta) >= 45) { show(current + (delta < 0 ? 1 : -1)); play(); }
+    }, { passive: true });
+    document.addEventListener('visibilitychange', play);
+    reducedMotion.addEventListener('change', play);
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(([entry]) => { visible = Boolean(entry?.isIntersecting); play(); }, { threshold: 0.1 }).observe(carousel);
+    }
+    play();
+  }
+</script>
+
+<style>
+  .home-hero-slider {
+    position: relative;
+    border-radius: 27px;
+    border: 5px solid rgba(255,255,255,.13);
+    box-shadow: 0 22px 60px rgba(0,0,0,.25);
+    aspect-ratio: 4 / 4.15;
+    overflow: hidden;
+    background: #143e33;
+    isolation: isolate;
+  }
+  .home-hero-slider__viewport { position: absolute; inset: 0; }
+  .home-hero-slider__slide { position: absolute; inset: 0; margin: 0; opacity: 0; visibility: hidden; transition: opacity .75s ease, visibility .75s ease; pointer-events: none; }
+  .home-hero-slider__slide.is-active { opacity: 1; visibility: visible; pointer-events: auto; }
+  .home-hero-slider__slide::after { content: ''; position: absolute; inset: 54% 0 0; background: linear-gradient(transparent,rgba(0,17,15,.72)); }
+  .home-hero-slider__slide img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+  .home-hero-slider__slide figcaption { position: absolute; left: 24px; bottom: 26px; right: 150px; z-index: 1; color: #fff; font-size: clamp(.9rem,1.4vw,1.15rem); font-weight: 700; text-shadow: 0 1px 5px rgba(0,0,0,.25); }
+  .home-hero-slider__controls { position: absolute; right: 12px; bottom: 14px; z-index: 2; display: flex; gap: 6px; align-items: center; border: 1px solid rgba(255,255,255,.23); border-radius: 999px; padding: 5px; background: rgba(4,39,36,.62); backdrop-filter: blur(10px); }
+  .home-hero-slider__arrow { border: 0; background: transparent; color: #fff; border-radius: 50%; font-size: 1.8rem; line-height: 1; width: 36px; height: 36px; display: grid; place-items: center; cursor: pointer; }
+  .home-hero-slider__dots { display: flex; align-items: center; gap: 3px; }
+  .home-hero-slider__dot { background: transparent; border: 0; display: grid; place-items: center; width: 25px; height: 34px; cursor: pointer; padding: 0; }
+  .home-hero-slider__dot span { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.48); transition: all .25s ease; }
+  .home-hero-slider__dot.is-active span { background: #fff; width: 17px; border-radius: 10px; }
+  .home-hero-slider__arrow:hover,.home-hero-slider__arrow:focus-visible { background: rgba(255,255,255,.18); }
+  @media(max-width:520px) {
+    .home-hero-slider { aspect-ratio: 4 / 3.5; border-radius: 19px; }
+    .home-hero-slider__slide figcaption { left: 14px; right: 12px; bottom: 65px; font-size: .92rem; }
+    .home-hero-slider__controls { right: 10px; bottom: 10px; }
+  }
+  @media(prefers-reduced-motion:reduce) {
+    .home-hero-slider__slide,.home-hero-slider__dot span { transition: none; }
+  }
+</style>
