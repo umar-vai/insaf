@@ -14,7 +14,7 @@ const links = [
 const current = (href: string) => (path === href || path.startsWith(`${href}/`) ? 'page' : undefined);
 ---
 
-<header class="header" data-header>
+<header class:list={['header', isLandPage && 'header--foundation']} data-header>
   <div class="container header__row">
     <a class="brand" href="/" aria-label={`${SITE.name}, হোম`}>
       <img src="/logo-wide.webp" alt="" width="200" height="53" />
@@ -234,5 +234,32 @@ const current = (href: string) => (path === href || path.startsWith(`${href}/`) 
       font-size: var(--text-base);
       border-radius: 999px;
     }
+  }
+
+  /* Foundation-blue navigation is deliberately scoped to the land project. */
+  .header--foundation {
+    border-bottom-color: #b9dce9;
+    background: #edf9fe;
+  }
+  .header--foundation::before { background: rgb(239 249 253 / 0.97); }
+  .header--foundation[data-scrolled] {
+    border-color: #a2ccd9;
+    box-shadow: 0 5px 22px rgb(0 72 98 / 0.08);
+  }
+  .header--foundation .nav a:not(.button) { color: #144357; }
+  .header--foundation .nav a[aria-current='page'],
+  .header--foundation .nav a:not(.button):hover { color: #005f82; }
+  .header--foundation .nav a:not(.button)::after { background: #188bb0; }
+  .header--foundation .nav a.nav__me {
+    background: #fff;
+    color: #005f82;
+    border-color: #badce8;
+  }
+  .header--foundation .nav__cta { background: #005f82; color: #fff; border-color: #005f82; }
+  .header--foundation .nav__cta:hover { background: #003d57; }
+  .header--foundation .menu-button { color: #005f82; border-color: #badce8; background: #fff; }
+  @media (max-width: 960px) {
+    .header--foundation .nav { background: #effafe; background-image: none; }
+    .header--foundation .nav a:not(.button) { border-bottom-color: #d3e9f0; }
   }
 </style>
