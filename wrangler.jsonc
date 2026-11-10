@@ -1,6 +1,8 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "insaf",
+  // Muhammadabdullahfahad5@gmail.com's account, which also holds the madrasatulinsaf.org zone and Tamrin.
+  "account_id": "1fdb3252722874771d6dc733d7cd6cb4",
   "main": "./src/worker.ts",
   "compatibility_date": "2026-10-15",
   "compatibility_flags": ["nodejs_compat"],
@@ -50,7 +52,7 @@
         {
           "binding": "DB",
           "database_name": "insaf",
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          "database_id": "86ec2bf1-56fb-4bd6-9405-4dd5da58805e",
           "migrations_dir": "db/migrations"
         }
       ],
