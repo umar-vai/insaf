@@ -7,7 +7,7 @@ Astro on Cloudflare Workers, D1 (SQLite) for data, R2 for uploaded pictures and 
 ## What is in it
 
 **Public site:** home, about, admission, contact, FAQ, notices (`/blog`), policy pages, and donations:
-- `/land` the land purchase landing page for ads: goal (2 crore, set in Admin, Funds), progress bar, monthly graph, story timeline, recent donors, the form always one tap away. It counts both land funds (`land-buy` and the 200 member `land-giver` fund).
+- `/land` the land purchase landing page for ads: goal (2.5 crore, approved foundation campaign target; keep Admin Funds synchronized), progress bar, monthly graph, story timeline, recent donors, the form always one tap away. It counts both land funds (`land-buy` and the 200 member `land-giver` fund). The landing page uses the supplied Tamrin Education Network Foundation branding, and an optional `PUBLIC_FOUNDER_VIDEO_EMBED_URL` (a YouTube/Vimeo embed URL) for the founder's video. No video is embedded until its approved URL is supplied.
 - `/donate` all funds, `/donate/<fund>` each fund's story, progress, graph, updates and form, `/donate/done?ref=` the receipt.
 - `/zakat` the zakat worksheet from the old site, worked out in the browser (nothing is sent).
 - Where a donor came from is kept (utm_source, utm_campaign, or facebook for fbclid) and shown in Admin. The Meta Pixel (`META_PIXEL_ID` in `wrangler.jsonc`) gets PageView, InitiateCheckout and Donate/Purchase with the amount.
