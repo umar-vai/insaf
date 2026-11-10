@@ -3,6 +3,7 @@ import Icon from './Icon.astro';
 import { SITE } from '../lib/site';
 
 const path = Astro.url.pathname;
+const isLandPage = path === '/land' || path === '/land/';
 const links = [
   { href: '/about', label: 'আমাদের সম্পর্কে' },
   { href: '/admission', label: 'ভর্তি' },
@@ -34,7 +35,7 @@ const current = (href: string) => (path === href || path.startsWith(`${href}/`) 
       <a class="nav__me" href="/account" aria-current={current('/account')}>
         <Icon name="user" size={18} /> লগইন
       </a>
-      <a class="button button--gold nav__cta" href="/donate" aria-current={current('/donate')}>
+      <a class="button button--gold nav__cta" href={isLandPage ? '#donate-form' : '/donate'} aria-current={isLandPage ? undefined : current('/donate')}>
         <Icon name="heart" size={18} /> দান করুন
       </a>
     </nav>
