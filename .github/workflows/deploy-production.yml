@@ -49,3 +49,4 @@ jobs:
           CLOUDFLARE_ENV: production
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: npx wrangler deploy --env production
+# Deployment request for reviewed land + home slider: df82796c88efd6db532006cd03fb5b9c7d87e932
