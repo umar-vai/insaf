@@ -1,0 +1,34 @@
+name: Insaf site checks
+
+on:
+  push:
+    branches: [feature/land-foundation-2026-11]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Astro and TypeScript checks
+        run: npm run check
+      - name: Unit tests
+        run: npm test
+      - name: Production build (no deploy)
+        run: npm run build
+        env:
+          CLOUDFLARE_ENV: production

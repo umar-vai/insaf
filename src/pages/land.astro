@@ -1,5 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
+import '../styles/land-foundation.css';
 import Base from '../layouts/Base.astro';
 import Icon from '../components/Icon.astro';
 import SectionHead from '../components/SectionHead.astro';
@@ -9,7 +10,7 @@ import BankCard from '../components/donate/BankCard.astro';
 import BarChart from '../components/admin/BarChart.astro';
 import { fundUpdates, listFunds, monthlyTotals, recentGifts, storyHtml } from '../server/donations';
 import { LAND } from '../lib/land';
-import { SITE, whatsappUrl } from '../lib/site';
+import { FOUNDER, SITE, whatsappUrl } from '../lib/site';
 import { bnDigits, dateBn, mediaUrl, taka } from '../lib/format';
 import { monthBn } from '../lib/offline';
 
@@ -26,7 +27,10 @@ const landIds = [buy.id, members?.id].filter(Boolean) as string[];
 const raisedMinor = buy.raisedMinor + (members?.raisedMinor ?? 0);
 const donors = buy.donors + (members?.donors ?? 0);
 const gifts = buy.gifts + (members?.gifts ?? 0);
-const goalMinor = buy.goalMinor ?? LAND.goalMinor;
+// The approved foundation goal is authoritative; keep Admin fund data synchronized.
+const goalMinor = LAND.goalMinor;
+const founderVideoCandidate = import.meta.env.PUBLIC_FOUNDER_VIDEO_EMBED_URL ?? '';
+const founderVideo = /^https:\/\/(?:www\.)?(?:youtube(?:-nocookie)?\.com\/embed\/|player\.vimeo\.com\/video\/)[A-Za-z0-9_\-/?=&]+$/.test(founderVideoCandidate) ? founderVideoCandidate : null;
 
 const [months, recent, updates] = await Promise.all([
   Promise.all(landIds.map((id) => monthlyTotals(env.DB, id, 9))),
@@ -42,7 +46,7 @@ const WHY = [
   {
     icon: 'heart',
     title: 'সদকায়ে জারিয়া',
-    text: 'আপনার দানে কেনা জমির ওপর দাঁড়িয়ে একজন শিক্ষার্থী যতদিন কুরআন তিলাওয়াত করবে, তার সাওয়াব আপনি কিয়ামত পর্যন্ত পাবেন।',
+    text: 'ইলমের কাজে সহায়তা করার মাধ্যমে সদকায়ে জারিয়ার সওয়াবের আশা করা যায়।',
   },
   { icon: 'home', title: 'স্থায়ী ঠিকানা', text: 'এটি হবে দীনি শিক্ষার একটি মজবুত দুর্গ, যা আগামী প্রজন্মের ঈমান রক্ষায় কাজ করবে।' },
   { icon: 'users', title: 'প্রিয়জনদের স্মরণে', text: 'আপনি চাইলে আপনার মৃত বাবা-মা বা প্রিয়জনদের নামেও জমি ক্রয়ে শরিক হতে পারেন।' },
@@ -51,41 +55,92 @@ const WHY = [
 const FAQ = [
   {
     q: 'দানের টাকা কোথায় খরচ হবে?',
-    a: 'এই তহবিলের অর্থ শুধু মাদরাসার স্থায়ী ক্যাম্পাসের জমি ক্রয়ের জন্য সংরক্ষিত ও ব্যয় হয়।',
+    a: 'এই প্রকল্পটি তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশনের অধীনে মাদরাসাতুল ইনসাফের স্থায়ী ক্যাম্পাসের জমি ক্রয়ের জন্য। জমি তহবিলের দান আলাদাভাবে হিসাব করা হয়।',
   },
   { q: 'কীভাবে দান করব?', a: 'বিকাশ, নগদ, রকেট, কার্ড বা নেট ব্যাংকিংয়ে এই পেজ থেকেই দান করা যায়। বড় অঙ্কের দান মাদরাসার ব্যাংক অ্যাকাউন্টে পাঠাতে পারেন।' },
   { q: 'রসিদ পাব কি?', a: 'হ্যাঁ। পেমেন্ট নিশ্চিত হলেই রসিদ দেখা ও প্রিন্ট করা যায়। ব্যাংকে বা অফিসে দিলে অফিস থেকে রসিদ দেওয়া হয়।' },
   { q: 'মৃত বাবা-মায়ের পক্ষ থেকে দান করা যাবে?', a: 'অবশ্যই। ফর্মে “অন্য কারো পক্ষ থেকে দান” ঘরে তাঁদের নাম লিখে দিন।' },
+  { q: 'এই প্রকল্পের মোট লক্ষ্য কত?', a: 'জমি ক্রয়ের বর্তমান নির্ধারিত লক্ষ্য ২ কোটি ৫০ লাখ টাকা (৳২,৫০,০০,০০০)।' },
+  { q: 'এই প্রকল্প কোন প্রতিষ্ঠানের অধীনে?', a: 'তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশনের অধীনে মাদরাসাতুল ইনসাফের মাধ্যমে জমি প্রকল্পটি পরিচালিত হচ্ছে। ব্যাংক ট্রান্সফারের ক্ষেত্রে নিচে দেখানো অ্যাকাউন্টের নাম মিলিয়ে নিন।' },
 ] as const;
 ---
 
-<Base title="জমি ক্রয় প্রজেক্ট" description="মাদরাসাতুল ইনসাফের স্থায়ী ক্যাম্পাসের জমি কিনতে আপনার সদকায়ে জারিয়ায় শরিক হোন। বিকাশ, নগদ, কার্ডে নিরাপদে দান করুন।" image="/images/students-quran-1280.webp" bottomNav={false}>
-  <section class="lh on-dark">
-    <div class="container lh__grid">
-      <div class="lh__copy">
-        <p class="lh__eyebrow"><Icon name="pin" size={18} /> স্থায়ী ক্যাম্পাস ও ভূমি ক্রয় প্রজেক্ট</p>
-        <h1>মাদরাসার স্থায়ী ক্যাম্পাস গড়তে আপনার অংশীদারিত্ব নিশ্চিত করুন</h1>
-        <blockquote class="lh__hadith">
-          <p>“যখন মানুষ মৃত্যুবরণ করে তখন তার সমস্ত আমল বন্ধ হয়ে যায়, তিন প্রকার আমল ছাড়া: সদাকাহ জারিয়াহ, উপকারী জ্ঞান এবং সুসন্তান যে তার জন্য দু‘আ করে।”</p>
-          <cite>সহীহ মুসলিম, হাদীস ১৬৩১</cite>
-        </blockquote>
-        <div class="lh__progress">
-          <FundProgress raisedMinor={raisedMinor} goalMinor={goalMinor} donors={donors} gifts={gifts} onDark />
+<Base title="জমি ক্রয় প্রজেক্ট — তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশন" description="তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশনের অধীনে মাদরাসাতুল ইনসাফের স্থায়ী ক্যাম্পাসের জন্য ২.৫ কোটি টাকার জমি ক্রয় প্রকল্প।" image="/images/students-quran-1280.webp" bottomNav={false} foundationTheme>
+
+  <div class="foundation-ribbon"><div class="container foundation-ribbon__row">
+    <div class="foundation-lockup"><img src="/foundation-logo.svg" width="178" height="82" alt="Tamrin Education Network Foundation" /></div>
+    <div class="foundation-ribbon__text"><strong>তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশন</strong>এর অধীনে মাদরাসাতুল ইনসাফের উদ্যোগ</div>
+  </div></div>
+  <section class="foundation-hero" aria-labelledby="land-title">
+    <div class="container foundation-hero__grid">
+      <div class="foundation-hero__copy">
+        <span class="foundation-hero__eyebrow"><Icon name="heart" size={16} /> স্থায়ী ক্যাম্পাসের জমি ক্রয় প্রকল্প</span>
+        <h1 id="land-title">একখণ্ড জমি। <span>প্রজন্মের পর প্রজন্ম ইলমের আলো।</span></h1>
+        <p class="foundation-hero__lead">মাদরাসাতুল ইনসাফের শিক্ষার্থীদের জন্য স্থায়ী একটি ঠিকানা গড়তে আমরা জমি ক্রয়ের উদ্যোগ নিয়েছি। তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশনের অধীনে পরিচালিত এই প্রজেক্টে আপনার সামর্থ্য অনুযায়ী অংশ নিতে পারেন।</p>
+        <div class="foundation-hero__actions">
+          <a class="button button--gold" href="#donate-form"><Icon name="heart" size={18} /> এখনই জমির জন্য দান করুন</a>
+          <a class="button button--ghost" href="#land-story"><Icon name="arrow" size={17} /> প্রকল্পটি জানুন</a>
         </div>
-        <div class="lh__cta">
-          <a class="button button--gold" href="#donate-form"><Icon name="heart" size={18} /> এখনই দান করুন</a>
-          {members && <a class="button button--ghost" href="#members">জমি দাতা সদস্য হোন</a>}
-        </div>
+        <div class="foundation-hero__micro"><span><Icon name="check" size={16} /> নির্দিষ্ট জমি তহবিল</span><span><Icon name="check" size={16} /> পেমেন্ট রসিদ</span><span><Icon name="check" size={16} /> অগ্রগতির হিসাব</span></div>
       </div>
-      <div class="lh__form">
-        <DonateForm funds={formFunds} fund={buy.slug} title="জমি ক্রয় তহবিলে দান" from="/land" error={error} />
+      <div class="foundation-art" aria-hidden="true">
+        <div class="foundation-art__window">
+          <svg viewBox="0 0 560 520" xmlns="http://www.w3.org/2000/svg" focusable="false" aria-hidden="true">
+            <defs><linearGradient id="landSky" x1="0" y1="0" x2=".2" y2="1"><stop offset="0" stop-color="#e1f6f5"/><stop offset="1" stop-color="#a5d9e3"/></linearGradient><linearGradient id="landDome" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0989aa"/><stop offset="1" stop-color="#005477"/></linearGradient></defs>
+            <rect width="560" height="520" fill="url(#landSky)" />
+            <circle cx="463" cy="87" r="44" fill="#fff" opacity=".68" />
+            <path d="M0 286Q105 220 214 272T560 248V520H0Z" fill="#9acfcf" opacity=".62"/>
+            <path d="M0 350Q120 302 245 329T560 314V520H0Z" fill="#5da5ae" opacity=".48"/>
+            <path d="M0 411Q150 375 269 394T560 368V520H0Z" fill="#2e8192" opacity=".65"/>
+            <path d="M93 284 121 230 149 284Z M406 268 432 213 458 268Z" fill="#0c6f8c"/>
+            <rect x="107" y="283" width="28" height="154" fill="#d9f2ee"/><rect x="418" y="267" width="30" height="170" fill="#d9f2ee"/>
+            <path d="M117 264 121 225 125 264Z M428 244 432 205 436 244Z" fill="#006486"/>
+            <path d="M162 265V425H392V265H162Z" fill="#fdfefe"/>
+            <path d="M168 263Q182 239 204 225H350Q378 243 386 263Z" fill="#fdfefe"/>
+            <path d="M193 229Q199 179 275 131Q351 181 358 229Z" fill="url(#landDome)"/>
+            <rect x="269" y="109" width="11" height="30" rx="4" fill="#005f82"/><circle cx="275" cy="105" r="7" fill="#005f82"/>
+            <path d="M178 274H375" stroke="#d3e9eb" stroke-width="6"/>
+            <path d="M240 424V330Q240 291 278 291Q317 292 317 331V424Z" fill="#086e86"/>
+            <path d="M254 424V329Q254 304 278 304Q303 305 303 330V424Z" fill="#2c9ca7"/>
+            <path d="M194 424V362Q194 348 208 348Q223 348 223 363V424Z M338 424V362Q338 347 352 347Q367 347 367 362V424Z" fill="#84c8d4"/>
+            <rect x="168" y="423" width="218" height="10" rx="4" fill="#d0e9e9"/>
+            <path d="M0 467Q140 435 274 462T560 451V520H0Z" fill="#247f8e" opacity=".44"/>
+          </svg>
+        </div>
+        <div class="foundation-art__note"><span>۞</span><div><strong>একটি স্থায়ী ঠিকানার স্বপ্ন</strong>শিক্ষা ও সেবার অবকাঠামো গড়ার উদ্যোগ</div></div>
       </div>
     </div>
   </section>
 
+  <section class="foundation-donate" aria-labelledby="donate-title">
+    <div class="container foundation-donate__grid">
+      <div class="foundation-donate__copy">
+        <span class="foundation-donate__label">আমাদের সম্মিলিত লক্ষ্য</span>
+        <div class="foundation-donate__goal">৳২,৫০,০০,০০০</div>
+        <h2 id="donate-title">জমি ক্রয়ের লক্ষ্যে এগিয়ে চলি একসঙ্গে</h2>
+        <p>ছোট-বড় প্রতিটি দান একই জমি ক্রয় লক্ষ্য পূরণে সহযোগিতা করে। এখানে প্রদর্শিত সংগ্রহ, দাতা ও দানের সংখ্যা সংরক্ষিত লেনদেনের তথ্য থেকে আসছে।</p>
+        <div class="foundation-donate__progress"><FundProgress raisedMinor={raisedMinor} goalMinor={goalMinor} donors={donors} gifts={gifts} onDark /></div>
+      </div>
+      <div class="foundation-donate__form"><DonateForm funds={formFunds} fund={buy.slug} title="জমি ক্রয় তহবিলে দান করুন" from="/land" error={error} /></div>
+    </div>
+  </section>
+
+  <section class="foundation-family" aria-labelledby="family-title"><div class="container">
+    <div class="foundation-family__intro">
+      <p class="foundation-family__eyebrow">আমাদের প্রাতিষ্ঠানিক পরিবার</p>
+      <h2 id="family-title">একটি ফাউন্ডেশন, শিক্ষা ও সেবার যৌথ উদ্যোগ</h2>
+      <p>তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশন আমাদের প্যারেন্ট প্রতিষ্ঠান। এর অধীনে তামরিন ইনস্টিটিউট অব বাংলাদেশ এবং মাদরাসাতুল ইনসাফ তাদের নিজ নিজ শিক্ষা কার্যক্রম পরিচালনা করে।</p>
+    </div>
+    <div class="foundation-family__cards">
+      <article class="foundation-family__card"><small>শিক্ষা উদ্যোগ</small><h3>Tamrin Institute of Bangladesh</h3><p>অনলাইনভিত্তিক কুরআন ও আরবি শিক্ষার উদ্যোগ।</p></article>
+      <span class="foundation-family__link" aria-hidden="true">+</span>
+      <article class="foundation-family__card"><small>জমি প্রকল্পের উদ্যোগ</small><h3>মাদরাসাতুল ইনসাফ</h3><p>দীনি শিক্ষা ও স্থায়ী ক্যাম্পাস প্রতিষ্ঠার কার্যক্রম।</p></article>
+    </div>
+  </div></section>
+
   <section class="section">
     <div class="container">
-      <SectionHead eyebrow="কেন এই দান" title="এমন এক বিনিয়োগ, যার সাওয়াব কবরে শুয়েও পেতে থাকবেন" lead="একটি দীনি প্রতিষ্ঠানের ভিত্তি স্থাপন করা মানে নিজের জন্য জান্নাতে একটি ঘর নিশ্চিত করার আশা। আমাদের মাদরাসার স্থায়ী ক্যাম্পাস নির্মাণের লক্ষ্যে জমি ক্রয় প্রজেক্ট চলমান রয়েছে।" />
+      <SectionHead eyebrow="কেন এই দান" title="দীনি শিক্ষার স্থায়ী ভিত্তি গড়তে আপনার অবদান" lead="একটি দীনি শিক্ষাপ্রতিষ্ঠানের দীর্ঘমেয়াদি ভিত্তি তৈরি করতে স্থায়ী জমি অপরিহার্য। আমাদের মাদরাসার স্থায়ী ক্যাম্পাস নির্মাণের লক্ষ্যে জমি ক্রয় প্রজেক্ট চলমান রয়েছে।" />
       <div class="why">
         {
           WHY.map((w) => (
@@ -104,7 +159,7 @@ const FAQ = [
     </div>
   </section>
 
-  <section class="section section--tint">
+  <section class="section section--tint" id="land-story">
     <div class="container story">
       <div class="story__img" data-reveal>
         <img src="/images/students-outdoor-1280.webp" srcset="/images/students-outdoor-640.webp 640w, /images/students-outdoor-1280.webp 1280w" sizes="(max-width: 900px) 100vw, 45vw" alt="মাদরাসাতুল ইনসাফের শিক্ষার্থীরা" width="1280" height="853" loading="lazy" />
@@ -115,8 +170,31 @@ const FAQ = [
         <ul class="ticks">
           <li><Icon name="check" size={18} /> লক্ষ্য {taka(goalMinor)}</li>
           <li><Icon name="check" size={18} /> প্রতিটি দানের হিসাব আলাদা তহবিলে রাখা হয়</li>
-          <li><Icon name="check" size={18} /> শূরাভিত্তিক পরিচালনা ও জবাবদিহিমূলক ব্যবস্থাপনা</li>
+          <li><Icon name="check" size={18} /> প্রকল্পের সংগ্রহ ও অগ্রগতি নিয়মিত দেখার সুযোগ</li>
         </ul>
+      </div>
+    </div>
+  </section>
+
+
+  <section class="foundation-founder" aria-labelledby="founder-title">
+    <div class="container foundation-founder__grid">
+      <div class="foundation-founder__media">
+        {founderVideo ? (
+          <iframe src={founderVideo} title="প্রতিষ্ঠাতার ভিডিও বাণী" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+        ) : (
+          <div class="foundation-founder__placeholder" role="img" aria-label="প্রতিষ্ঠাতার ভিডিও বাণী সংযোজনের স্থান">
+            <strong>প্রতিষ্ঠাতার ভিডিও বাণী</strong>
+            <p>অনুমোদিত ভিডিও লিংক যুক্ত হলে এই অংশে সরাসরি ভিডিও দেখা যাবে।</p>
+          </div>
+        )}
+      </div>
+      <div class="foundation-founder__copy">
+        <p>প্রতিষ্ঠাতার বাণী</p>
+        <h2 id="founder-title">একটি প্রজন্মের জন্য দীর্ঘমেয়াদি শিক্ষার ঠিকানা</h2>
+        <p>এই জমি ক্রয় প্রকল্পের লক্ষ্য মাদরাসাতুল ইনসাফের জন্য নিজস্ব স্থায়ী স্থান নিশ্চিত করার পথে এগিয়ে যাওয়া। এর মাধ্যমে আগামী দিনে ধারাবাহিক দীনি শিক্ষা ও শিক্ষার্থীদের প্রয়োজনীয় অবকাঠামো তৈরির ভিত্তি স্থাপন সম্ভব হবে।</p>
+        <p>প্রতিষ্ঠাতার সরাসরি বক্তব্য ও প্রকল্পের বিস্তারিত পরিকল্পনা এই অংশে ভিডিওর মাধ্যমে উপস্থাপন করা যাবে।</p>
+        <div class="foundation-founder__name"><strong>{FOUNDER.name}</strong><span>{FOUNDER.role}, মাদরাসাতুল ইনসাফ</span></div>
       </div>
     </div>
   </section>
