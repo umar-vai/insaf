@@ -17,8 +17,10 @@ interface Props {
   whatsapp?: string;
   /** The phone bottom menu; the lesson player has its own bar instead. */
   bottomNav?: boolean;
+  /** Foundation-branded campaign pages only. */
+  foundationTheme?: boolean;
 }
-const { title, description = SITE.tagline, image = '/images/students-quran-1280.webp', whatsapp, bottomNav = true } = Astro.props;
+const { title, description = SITE.tagline, image = '/images/students-quran-1280.webp', whatsapp, bottomNav = true, foundationTheme = false } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const fullTitle = title === SITE.name ? `${SITE.nameBn} | ${SITE.slogan}` : `${title} | ${SITE.nameBn}`;
 ---
@@ -30,7 +32,7 @@ const fullTitle = title === SITE.name ? `${SITE.nameBn} | ${SITE.slogan}` : `${t
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <link rel="icon" href="/favicon.png" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <meta name="theme-color" content="#17362a" />
+    <meta name="theme-color" content={foundationTheme ? '#005f82' : '#17362a'} />
     <link rel="preload" href="/fonts/extra/anek-bangla-bengali-400-normal.woff2" as="font" type="font/woff2" crossorigin />
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
@@ -45,7 +47,7 @@ const fullTitle = title === SITE.name ? `${SITE.nameBn} | ${SITE.slogan}` : `${t
     <MetaPixel />
     <slot name="head" />
   </head>
-  <body>
+  <body class={foundationTheme ? 'foundation-theme' : undefined}>
     <a class="skip-link" href="#main">মূল অংশে যান</a>
     <EnvBanner />
     <Header />
