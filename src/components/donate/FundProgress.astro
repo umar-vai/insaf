@@ -1,0 +1,130 @@
+---
+import { bnDigits, taka } from '../../lib/format';
+import { percent } from '../../server/donations';
+
+// Raised so far against the goal. Every number here comes from counted gifts;
+// without a goal it shows the total only, never a made up target.
+interface Props {
+  raisedMinor: number;
+  goalMinor: number | null;
+  donors: number;
+  gifts?: number;
+  memberGoal?: number | null;
+  size?: 'lg' | 'sm';
+  onDark?: boolean;
+}
+const { raisedMinor, goalMinor, donors, gifts, memberGoal, size = 'lg', onDark = false } = Astro.props;
+const p = percent(raisedMinor, goalMinor);
+const left = goalMinor ? Math.max(0, goalMinor - raisedMinor) : 0;
+---
+
+<div class:list={['fp', `fp--${size}`, onDark && 'fp--dark']}>
+  <div class="fp__top">
+    <p class="fp__raised">
+      <strong>{taka(raisedMinor)}</strong>
+      <span>{goalMinor ? `সংগ্রহ হয়েছে, লক্ষ্য ${taka(goalMinor)}` : 'সংগ্রহ হয়েছে'}</span>
+    </p>
+    {p !== null && <p class="fp__pct">{bnDigits(p)}%</p>}
+  </div>
+  {
+    p !== null && (
+      <div class="fp__bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={p} aria-label="লক্ষ্যের কতটুকু পূরণ হয়েছে">
+        <span style={`--p:${Math.max(p, 1.5)}%`} />
+      </div>
+    )
+  }
+  <ul class="fp__facts">
+    <li><strong>{bnDigits(donors)}</strong> জন দাতা{memberGoal ? ` (লক্ষ্য ${bnDigits(memberGoal)} জন)` : ''}</li>
+    {gifts !== undefined && <li><strong>{bnDigits(gifts)}</strong>টি দান</li>}
+    {goalMinor && left > 0 && <li>বাকি <strong>{taka(left)}</strong></li>}
+  </ul>
+</div>
+
+<style>
+  .fp {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .fp__top {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+  .fp__raised {
+    margin: 0;
+    display: grid;
+    line-height: 1.2;
+  }
+  .fp__raised strong {
+    font: 750 var(--text-2xl) / 1.1 var(--font-display);
+    color: var(--color-primary);
+  }
+  .fp--sm .fp__raised strong {
+    font-size: var(--text-xl);
+  }
+  .fp__raised span,
+  .fp__facts {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+  .fp__pct {
+    margin: 0;
+    font: 700 var(--text-xl) / 1 var(--font-display);
+    color: var(--gold-500);
+  }
+  .fp__bar {
+    height: 14px;
+    border-radius: 999px;
+    background: var(--mint-100);
+    overflow: hidden;
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.08);
+  }
+  .fp--sm .fp__bar {
+    height: 9px;
+  }
+  .fp__bar span {
+    display: block;
+    height: 100%;
+    width: var(--p);
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--green-700), var(--green-600) 60%, var(--gold-300));
+    transform-origin: left;
+    animation: grow 1.4s var(--ease) both;
+  }
+  @keyframes grow {
+    from {
+      transform: scaleX(0);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .fp__bar span {
+      animation: none;
+    }
+  }
+  .fp__facts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-5);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .fp__facts strong {
+    color: var(--color-text);
+  }
+  .fp--dark .fp__raised strong,
+  .fp--dark .fp__facts strong {
+    color: var(--white);
+  }
+  .fp--dark .fp__raised span,
+  .fp--dark .fp__facts {
+    color: var(--color-on-dark-muted);
+  }
+  .fp--dark .fp__pct {
+    color: var(--gold-300);
+  }
+  .fp--dark .fp__bar {
+    background: rgb(255 255 255 / 0.12);
+  }
+</style>

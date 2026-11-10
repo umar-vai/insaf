@@ -1,0 +1,131 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import PortalLogin from '../../../../components/admin/PortalLogin.astro';
+import Icon from '../../../../components/Icon.astro';
+import TeacherFields from '../../../../components/admin/TeacherFields.astro';
+import { getTeacher, listBatches, parseTeacherForm, saveTeacher } from '../../../../server/office';
+import { addMonths, DAY_SHORT_BN, dayBn, monthBn, parseDays, timeBn, todayDhaka, waNumber } from '../../../../lib/offline';
+import { QUESTIONS, stars, teacherRatings } from '../../../../server/ratings';
+import { bnDigits, taka } from '../../../../lib/format';
+
+const id = Astro.params.id!;
+if (Astro.request.method === 'POST') {
+  const v = parseTeacherForm(await Astro.request.formData());
+  if (!v.ok) return Astro.redirect(`/admin/offline/teachers/${id}?error=${v.error}`, 303);
+  await saveTeacher(env.DB, Astro.locals.staff!, id, v.value);
+  return Astro.redirect(`/admin/offline/teachers/${id}?saved=1`, 303);
+}
+const teacher = await getTeacher(env.DB, id);
+if (!teacher) return new Response('Not found', { status: 404 });
+const since = addMonths(`${todayDhaka().slice(0, 7)}-01`, -5).slice(0, 7);
+const [batches, ratings] = await Promise.all([listBatches(env.DB, { teacherId: id }), teacherRatings(env.DB, id, since)]);
+const wa = waNumber(teacher.phone);
+const hasPassword = teacher.email ? Boolean(await env.DB.prepare('SELECT 1 AS x FROM students WHERE lower(email) = lower(?) AND password_hash IS NOT NULL').bind(teacher.email).first()) : false;
+---
+
+<Admin title={teacher.name}>
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/offline/teachers">শিক্ষক</a></p>
+      <h1>{teacher.name} {teacher.status === 'inactive' && <span class="pill pill--archived">এখন নেই</span>}</h1>
+      <p>{teacher.subject}{teacher.joinedOn && ` · যোগদান ${dayBn(teacher.joinedOn)}`}</p>
+    </div>
+    <div class="actions">
+      <a class="button button--ghost" href={`tel:${teacher.phone}`}><Icon name="phone" /> কল</a>
+      {wa && <a class="button button--wa" href={`https://wa.me/${wa}`} target="_blank" rel="noopener"><Icon name="whatsapp" /> WhatsApp</a>}
+    </div>
+  </header>
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__icon"><Icon name="calendar" /></span><span class="kpi__label">চালু ব্যাচ</span><strong class="kpi__value">{bnDigits(teacher.batches ?? 0)}</strong></div>
+    <div class="kpi kpi--info"><span class="kpi__icon"><Icon name="users" /></span><span class="kpi__label">মোট ছাত্র</span><strong class="kpi__value">{bnDigits(teacher.students ?? 0)}</strong></div>
+    <div class="kpi kpi--warn"><span class="kpi__icon"><Icon name="wallet" /></span><span class="kpi__label">মাসিক মূল বেতন</span><strong class="kpi__value">{taka(teacher.basicPayMinor)}</strong></div>
+  </div>
+
+  <section class="card block"><PortalLogin kind="teacher" id={teacher.id} email={teacher.email} hasPassword={hasPassword} /></section>
+
+  <section class="card block">
+    <div class="card__head"><h2>যে ব্যাচগুলো পড়ান</h2><a href="/admin/offline/batches?new=1#new">নতুন ব্যাচ</a></div>
+    {
+      batches.length === 0 ? (
+        <p class="muted">এখনো কোনো ব্যাচ দেওয়া হয়নি। ব্যাচের তথ্যে গিয়ে শিক্ষক বাছুন।</p>
+      ) : (
+        <ul class="list">
+          {batches.map((b) => (
+            <li>
+              <div><a href={`/admin/offline/batches/${b.id}`}><strong>{b.name}</strong></a> <span class="muted">· {b.courseTitle}</span>
+                <small>{parseDays(b.days).map((d) => DAY_SHORT_BN[d]).join(', ')} {timeBn(b.startTime)}</small></div>
+              <span>{bnDigits(b.students)} জন {b.status === 'archived' && <span class="pill pill--archived">বন্ধ</span>}</span>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </section>
+
+  <section class="card block">
+    <div class="card__head"><h2>ছাত্রদের মূল্যায়ন (শেষ ৬ মাস)</h2><small class="muted">{bnDigits(ratings.summary.count)}টি মূল্যায়ন · নাম দেখানো হয় না</small></div>
+    {
+      ratings.summary.count === 0 ? (
+        <p class="muted">এখনো কেউ মূল্যায়ন করেনি।</p>
+      ) : (
+        <>
+          <div class="rates">
+            {QUESTIONS.map((q) => (
+              <div><span class="muted">{q.label}</span><strong>{stars(ratings.summary[q.key])} <small>/ ৫</small></strong>
+                <span class="bar"><i style={`width:${((ratings.summary[q.key] ?? 0) / 5) * 100}%`}></i></span>
+              </div>
+            ))}
+          </div>
+          {ratings.byMonth.length > 1 && <p class="muted"><small>মাস অনুযায়ী সব মিলিয়ে: {ratings.byMonth.map((m) => `${monthBn(m.month)} ${stars(m.overall)}`).join(' · ')}</small></p>}
+          {ratings.comments.length > 0 && (
+            <ul class="list">{ratings.comments.map((c) => <li><span>“{c.comment}”</span><small>{monthBn(c.month)} · {stars(c.overall)}★</small></li>)}</ul>
+          )}
+        </>
+      )
+    }
+  </section>
+
+  <section class="card block">
+    <div class="card__head"><h2>তথ্য বদলান</h2></div>
+    <form method="post" class="form-grid">
+      <TeacherFields teacher={teacher} />
+      <button class="button">সংরক্ষণ</button>
+    </form>
+  </section>
+</Admin>
+
+<style>
+  .block {
+    margin-top: var(--space-5);
+  }
+  .rates {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+  }
+  .rates > div {
+    display: grid;
+    gap: 2px;
+    padding: var(--space-3);
+    background: #f8faf6;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+  }
+  .rates strong {
+    font: 700 var(--text-lg) / 1.2 var(--font-display);
+  }
+  .bar {
+    height: 6px;
+    border-radius: 99px;
+    background: var(--chart-grid);
+  }
+  .bar i {
+    display: block;
+    height: 100%;
+    border-radius: 99px;
+    background: var(--gold-500);
+  }
+</style>

@@ -1,0 +1,168 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotTeacher from '../../../components/NotTeacher.astro';
+import AttendanceSheet from '../../../components/AttendanceSheet.astro';
+import MaterialList from '../../../components/MaterialList.astro';
+import Icon from '../../../components/Icon.astro';
+import { createNotice, listNotices, roster, saveAttendance } from '../../../server/office';
+import { addMaterial, batchForTeacher, hideMaterial, listMaterials, teacherSession } from '../../../server/panels';
+import { getSettings } from '../../../server/settings';
+import { DAY_BN, isYmd, parseDays, studentCode, timeBn, todayDhaka } from '../../../lib/offline';
+import { bnDigits, dateBn } from '../../../lib/format';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const id = Astro.params.id!;
+const here = `/teacher/batch/${id}`;
+const { me, teacher } = await teacherSession(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect(`/account?return=${encodeURIComponent(here)}`, 303);
+const batch = teacher ? await batchForTeacher(env.DB, teacher.id, id) : null;
+if (teacher && !batch) return new Response('এই ব্যাচটি আপনার নয়।', { status: 403 });
+const s = await getSettings(env.DB);
+const today = todayDhaka();
+
+if (Astro.request.method === 'POST' && teacher && batch) {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+  const back = (q: string, hash = '') => Astro.redirect(`${here}?${q}${hash}`, 303);
+  if (!action && s.teacherTakesAttendance) {
+    // The attendance sheet posts without an action.
+    const marks: Record<string, string> = {};
+    for (const [k, v] of form) if (k.startsWith('s_')) marks[k.slice(2)] = String(v);
+    const day = String(form.get('day') ?? '');
+    const n = await saveAttendance(env.DB, me.email, id, day, marks, today);
+    return back(`day=${day}&${n ? 'saved=1' : 'error=1'}`);
+  }
+  if (action === 'material' && s.teacherCanShareMaterial) {
+    const r = await addMaterial(env.DB, env.MEDIA, me.email, id, form);
+    return back(r.ok ? 'saved=1' : `error=${r.error}`, '#materials');
+  }
+  if (action === 'hide-material' && s.teacherCanShareMaterial) {
+    await hideMaterial(env.DB, me.email, String(form.get('materialId') ?? ''), [id]);
+    return back('saved=1', '#materials');
+  }
+  if (action === 'notice' && s.teacherCanPostNotice) {
+    const title = String(form.get('title') ?? '').trim().slice(0, 160);
+    if (title.length < 2) return back('error=title', '#notices');
+    await createNotice(env.DB, me.email, { title, body: String(form.get('body') ?? '').trim().slice(0, 5000), audience: 'batch', targetId: id, pinned: false }, { bucket: env.MEDIA, file: form.get('file') });
+    return back('saved=1', '#notices');
+  }
+  return back('error=1');
+}
+
+const askedDay = Astro.url.searchParams.get('day') ?? today;
+const day = isYmd(askedDay) && askedDay <= today ? askedDay : today;
+const [rows, materials, notices] = batch
+  ? await Promise.all([roster(env.DB, id, day), listMaterials(env.DB, [id]), listNotices(env.DB, ['batch'], 200)])
+  : [[], [], []];
+const batchNotices = notices.filter((n) => n.targetId === id && n.status === 'published');
+const saved = Astro.url.searchParams.has('saved');
+const failed = Astro.url.searchParams.has('error');
+---
+
+{
+  !teacher || !batch ? (
+    <NotTeacher me={me} />
+  ) : (
+    <AccountShell me={me} active="t-home" title={batch.name} mode="teacher">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <p class="eyebrow"><a href="/teacher">শিক্ষক ড্যাশবোর্ড</a></p>
+            <h1>{batch.name}</h1>
+            <p>{batch.courseTitle} · {parseDays(batch.days).map((d) => DAY_BN[d]).join(', ')} · {timeBn(batch.startTime)}{batch.room && ` · ${batch.room}`}</p>
+          </div>
+        </header>
+        {saved && <p class="note note--good" role="status">সংরক্ষণ হয়েছে।</p>}
+        {failed && <p class="note note--bad" role="alert">কাজটি করা যায়নি। তথ্য দেখে আবার চেষ্টা করুন।</p>}
+
+        {s.teacherTakesAttendance && (
+          <section id="attendance">
+            <form class="card pick" method="get">
+              <label class="field"><span>হাজিরার তারিখ</span><input type="date" name="day" value={day} max={today} onchange="this.form.submit()" /></label>
+              <button class="button button--ghost">অন্য দিনের হাজিরা</button>
+            </form>
+            {rows.length === 0 ? (
+              <p class="card muted">এই ব্যাচে কোনো চলমান ছাত্র নেই।</p>
+            ) : (
+              <AttendanceSheet rows={rows} day={day} batchName={batch.name} marked={rows.filter((r) => r.status).length} />
+            )}
+          </section>
+        )}
+
+        <section class="card block">
+          <div class="card__head"><h2>ছাত্র তালিকা ({bnDigits(rows.length)} জন)</h2></div>
+          <ul class="list">
+            {rows.map((r) => (
+              <li>
+                <span>{r.roll && <span class="muted">রোল {bnDigits(r.roll)} · </span>}{r.name} <span class="id">{studentCode(r.studentNo)}</span></span>
+                {s.teacherSeesPhones && <a href={`tel:${r.phone}`}>{bnDigits(r.phone)}</a>}
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section class="card block" id="materials">
+          <div class="card__head"><h2>পড়ার উপকরণ</h2></div>
+          <MaterialList materials={materials} canHide={s.teacherCanShareMaterial} />
+          {s.teacherCanShareMaterial && (
+            <details>
+              <summary>নতুন উপকরণ দিন</summary>
+              <form method="post" enctype="multipart/form-data" class="form-grid add">
+                <input type="hidden" name="action" value="material" />
+                <label class="field wide"><span>শিরোনাম</span><input name="title" required minlength="2" maxlength="160" /></label>
+                <label class="field"><span>ফাইল (PDF, Word, অডিও, ছবি; ২৫ MB পর্যন্ত)</span><input type="file" name="file" /></label>
+                <label class="field"><span>অথবা লিংক (Google Drive, YouTube)</span><input name="url" type="url" placeholder="https://" /></label>
+                <button class="button">দিন</button>
+              </form>
+            </details>
+          )}
+        </section>
+
+        <section class="card block" id="notices">
+          <div class="card__head"><h2>এই ব্যাচের নোটিশ</h2></div>
+          {batchNotices.length === 0 ? <p class="muted">কোনো নোটিশ নেই।</p> : (
+            <ul class="list">
+              {batchNotices.map((n) => <li><div><strong>{n.title}</strong><small>{dateBn(n.createdAt)}</small>{n.body && <p class="body">{n.body}</p>}{n.fileName && <a href={`/api/notice-file/${n.id}`} target="_blank">{n.fileName}</a>}</div></li>)}
+            </ul>
+          )}
+          {s.teacherCanPostNotice && (
+            <details>
+              <summary>ব্যাচে নোটিশ দিন</summary>
+              <form method="post" class="form-grid add" enctype="multipart/form-data">
+                <input type="hidden" name="action" value="notice" />
+                <label class="field wide"><span>শিরোনাম</span><input name="title" required minlength="2" maxlength="160" /></label>
+                <label class="field wide"><span>বিস্তারিত</span><textarea name="body" rows="4" maxlength="5000"></textarea></label>
+                <label class="field wide"><span>ফাইল (ঐচ্ছিক)</span><input name="file" type="file" accept=".pdf,.doc,.docx,image/*" /></label>
+                <button class="button"><Icon name="bell" /> প্রকাশ করুন</button>
+              </form>
+            </details>
+          )}
+        </section>
+      </div>
+    </AccountShell>
+  )
+}
+
+<style>
+  .pick {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+  }
+  .pick .field {
+    flex: 1 1 200px;
+  }
+  .block {
+    margin-top: var(--space-5);
+  }
+  .add {
+    margin-top: var(--space-3);
+  }
+  .body {
+    margin: var(--space-1) 0 0;
+    white-space: pre-line;
+  }
+</style>

@@ -1,0 +1,143 @@
+---
+// One place for tickets in every panel: the list, a form to write a new one
+// (students and teachers), and the open ticket's messages with a reply box.
+// The page handles the forms (action = new, reply, close).
+import Icon from '../Icon.astro';
+import { TICKET_CATEGORIES, TICKET_CATEGORY_BN, TICKET_STATUS_BN, type Ticket, type TicketMessage } from '../../server/tickets';
+import { bnDigits, dateBn } from '../../lib/format';
+
+interface Props {
+  tickets: Ticket[];
+  open: { ticket: Ticket; messages: TicketMessage[] } | null;
+  /** The list page; a ticket opens at base plus t=<id>. */
+  base: string;
+  /** office: replies as staff and sees who wrote. Otherwise the asker's own view. */
+  side: 'office' | 'asker';
+  /** Who the asker is, when one account is several offline students (brothers and sisters). */
+  people?: { id: string; name: string }[];
+}
+const { tickets, open, base, side, people = [] } = Astro.props;
+const PILL = { open: 'pending', answered: 'paid', closed: 'draft' } as const;
+const link = (id: string) => `${base}${base.includes('?') ? '&' : '?'}t=${id}`;
+const who = (m: TicketMessage) => (m.authorKind === 'staff' ? 'অফিস' : open?.ticket.fromName || m.author);
+---
+
+<div class="cols cols--wide desk">
+  <section class="card">
+    {
+      open ? (
+        <>
+          <div class="card__head">
+            <div>
+              <h2>#{bnDigits(open.ticket.ticketNo)} {open.ticket.subject}</h2>
+              <small class="muted">
+                {TICKET_CATEGORY_BN[open.ticket.category]}
+                {side === 'office' && <> · {open.ticket.fromKind === 'teacher' ? 'শিক্ষক' : 'ছাত্র'}: {open.ticket.fromName} · <a href={`tel:${open.ticket.fromPhone}`}>{bnDigits(open.ticket.fromPhone)}</a></>}
+              </small>
+            </div>
+            <span class={`pill pill--${PILL[open.ticket.status]}`}>{TICKET_STATUS_BN[open.ticket.status]}</span>
+          </div>
+          <ol class="thread">
+            {open.messages.map((m) => (
+              <li class={m.authorKind === 'staff' ? 'office' : 'asker'}>
+                <small class="muted">{who(m)}{side === 'office' && m.authorKind === 'staff' && ` (${m.author})`} · {dateBn(m.createdAt, true)}</small>
+                <p>{m.body}</p>
+              </li>
+            ))}
+          </ol>
+          <form method="post" class="form-grid">
+            <input type="hidden" name="action" value="reply" />
+            <input type="hidden" name="ticketId" value={open.ticket.id} />
+            <label class="field wide"><span>{open.ticket.status === 'closed' ? 'আবার লিখলে টিকেটটি খুলে যাবে' : 'উত্তর লিখুন'}</span><textarea name="body" rows="4" required maxlength="4000"></textarea></label>
+            <button class="button"><Icon name="mail" /> পাঠান</button>
+          </form>
+          {open.ticket.status !== 'closed' && (
+            <form method="post" class="close">
+              <input type="hidden" name="action" value="close" />
+              <input type="hidden" name="ticketId" value={open.ticket.id} />
+              <button class="button button--ghost button--sm"><Icon name="check" /> সমাধান হয়েছে, বন্ধ করুন</button>
+            </form>
+          )}
+          <p><a href={base}>সব টিকেট</a></p>
+        </>
+      ) : side === 'asker' ? (
+        <>
+          <div class="card__head"><h2>অফিসকে লিখুন</h2></div>
+          <form method="post" class="form-grid">
+            <input type="hidden" name="action" value="new" />
+            {people.length > 1 && (
+              <label class="field">
+                <span>কার পক্ষ থেকে</span>
+                <select name="studentId">{people.map((p) => <option value={p.id}>{p.name}</option>)}</select>
+              </label>
+            )}
+            {people.length === 1 && <input type="hidden" name="studentId" value={people[0]!.id} />}
+            <label class="field">
+              <span>বিষয়</span>
+              <select name="category">{TICKET_CATEGORIES.map((c) => <option value={c}>{TICKET_CATEGORY_BN[c]}</option>)}</select>
+            </label>
+            <label class="field wide"><span>শিরোনাম</span><input name="subject" required minlength="3" maxlength="160" /></label>
+            <label class="field wide"><span>বিস্তারিত লিখুন</span><textarea name="body" rows="5" required minlength="3" maxlength="4000"></textarea></label>
+            <p class="wide muted"><small>অফিস উত্তর দিলে এখানেই দেখবেন।</small></p>
+            <button class="button"><Icon name="mail" /> পাঠান</button>
+          </form>
+        </>
+      ) : (
+        <div class="empty"><Icon name="mail" size={28} /><p>পাশের তালিকা থেকে একটি টিকেট খুলুন।</p></div>
+      )
+    }
+  </section>
+
+  <section class="card">
+    <div class="card__head"><h2>{side === 'office' ? 'টিকেট' : 'আমার টিকেট'}</h2></div>
+    {
+      tickets.length === 0 ? (
+        <p class="muted">কোনো টিকেট নেই।</p>
+      ) : (
+        <ul class="list">
+          {tickets.map((t) => (
+            <li class={t.id === open?.ticket.id ? 'current' : ''}>
+              <div>
+                <a href={link(t.id)}><strong>#{bnDigits(t.ticketNo)} {t.subject}</strong></a>
+                <small class="muted">{side === 'office' && `${t.fromName} · `}{TICKET_CATEGORY_BN[t.category]} · {dateBn(t.updatedAt)}</small>
+              </div>
+              <span class={`pill pill--${PILL[t.status]}`}>{TICKET_STATUS_BN[t.status]}</span>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </section>
+</div>
+
+<style>
+  .desk {
+    margin-top: 0;
+  }
+  .thread {
+    list-style: none;
+    margin: 0 0 var(--space-4);
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .thread li {
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+  }
+  .thread li.office {
+    background: var(--mint-50);
+    border-color: var(--leaf-200);
+  }
+  .thread p {
+    margin: var(--space-1) 0 0;
+    white-space: pre-line;
+  }
+  .close {
+    margin-top: var(--space-3);
+  }
+  .current {
+    background: var(--mint-50);
+  }
+</style>

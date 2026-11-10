@@ -1,0 +1,115 @@
+---
+// Course, batch, start date, discount and payment plan for an offline
+// enrollment, with a preview of the installments. The preview is only a
+// guide; the server works out the real schedule when saving.
+import type { OfflineCourse } from '../../server/offline';
+import type { Batch } from '../../server/office';
+import { durationBn, PLAN_MONTHS, planBn } from '../../lib/offline';
+import { taka } from '../../lib/format';
+
+interface Props {
+  courses: OfflineCourse[];
+  batches: Batch[];
+  today: string;
+  /** When true the course may be left empty (enrol later). */
+  optional?: boolean;
+}
+const { courses, batches, today, optional = false } = Astro.props;
+---
+
+<div class="enroll wide" data-enroll>
+  <label class="field">
+    <span>কোর্স</span>
+    <select name="courseId" required={!optional} data-course>
+      {optional && <option value="">এখন না, পরে ভর্তি করব</option>}
+      {
+        courses.map((c) => (
+          <option value={c.id} data-fee={c.feeMinor} data-admission={c.admissionFeeMinor} data-months={c.durationMonths}>
+            {c.title} ({taka(c.feeMinor)}, {durationBn(c.durationMonths)})
+          </option>
+        ))
+      }
+    </select>
+  </label>
+  <label class="field">
+    <span>ব্যাচ</span>
+    <select name="batchId" data-batch>
+      <option value="">ব্যাচ ঠিক হয়নি</option>
+      {batches.filter((b) => b.status === 'active').map((b) => <option value={b.id} data-course={b.courseId}>{b.name}{b.kind && ` (${b.kind})`}</option>)}
+    </select>
+  </label>
+  <label class="field"><span>রোল নম্বর (ঐচ্ছিক)</span><input name="roll" maxlength="20" inputmode="numeric" /></label>
+  <label class="field"><span>ভর্তির তারিখ (প্রথম কিস্তির তারিখ)</span><input name="startDate" type="date" required value={today} data-start /></label>
+  <label class="field"><span>ছাড় (টাকা, না থাকলে খালি)</span><input name="discount" inputmode="numeric" data-discount /></label>
+  <label class="field">
+    <span>কীভাবে টাকা দেবে</span>
+    <select name="plan" required data-plan>
+      {PLAN_MONTHS.map((m) => <option value={m} selected={m === 1}>{planBn(m)}</option>)}
+    </select>
+  </label>
+  <label class="field"><span>ভর্তির নোট (ঐচ্ছিক)</span><input name="note" maxlength="2000" /></label>
+  <p class="preview" data-preview aria-live="polite"></p>
+</div>
+
+<script>
+  const bn = (n: number | string) => String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]!);
+  const tk = (minor: number) => `${bn(Math.round(minor / 100).toLocaleString('en-IN'))} টাকা`;
+  const num = (s: string) => Number(s.replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d))).replace(/[,\s]/g, '')) || 0;
+  document.querySelectorAll<HTMLElement>('[data-enroll]').forEach((root) => {
+    const course = root.querySelector('[data-course]') as unknown as HTMLSelectElement;
+    const plan = root.querySelector('[data-plan]') as unknown as HTMLSelectElement;
+    const discount = root.querySelector('[data-discount]') as HTMLInputElement;
+    const out = root.querySelector<HTMLElement>('[data-preview]')!;
+    const batch = root.querySelector('[data-batch]') as unknown as HTMLSelectElement;
+    // Only the chosen course's batches can be picked.
+    const filterBatches = () => {
+      for (const o of batch.options) if (o.value) o.hidden = o.dataset.course !== course.value;
+      if (batch.selectedOptions[0]?.hidden) batch.value = '';
+    };
+    course.addEventListener('input', filterBatches);
+    filterBatches();
+    const show = () => {
+      const o = course.selectedOptions[0];
+      if (!o || !o.value) {
+        out.textContent = '';
+        return;
+      }
+      const fee = Number(o.dataset.fee);
+      const admission = Number(o.dataset.admission);
+      const months = Number(o.dataset.months);
+      const p = Number(plan.value);
+      const coursePart = Math.max(0, fee - num(discount.value) * 100);
+      const count = p > 0 ? Math.max(1, Math.ceil(months / p)) : 1;
+      const each = Math.floor(coursePart / 100 / count) * 100;
+      const last = coursePart - each * (count - 1);
+      const total = coursePart + admission;
+      out.textContent =
+        count === 1
+          ? `মোট ${tk(total)}, ভর্তির দিন একবারে।`
+          : `মোট ${tk(total)}: ${bn(count)}টি কিস্তি, প্রতিটি ${tk(each)}${last !== each ? ` (শেষেরটা ${tk(last)})` : ''}${admission ? `, প্রথম কিস্তির সাথে ভর্তি ফি ${tk(admission)}` : ''}।`;
+    };
+    course.addEventListener('input', show);
+    plan.addEventListener('input', show);
+    discount.addEventListener('input', show);
+    show();
+  });
+</script>
+
+<style>
+  .enroll {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--space-4);
+  }
+  .preview {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--mint-100);
+    font-weight: 600;
+  }
+  .preview:empty {
+    display: none;
+  }
+</style>

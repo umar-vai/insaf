@@ -1,0 +1,86 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { getSettings, parseSettingsForm, SALARY_BASES, SALARY_BASIS_BN, saveSettings } from '../../../server/settings';
+import { isOwner } from '../../../server/staff';
+import { sslConfigured } from '../../../server/sslcommerz';
+import { gatewayEnv } from '../../../server/config';
+
+const owner = isOwner(env, Astro.locals.staff!);
+if (Astro.request.method === 'POST') {
+  if (!owner) return Astro.redirect('/admin/offline/settings?error=owner', 303);
+  await saveSettings(env.DB, Astro.locals.staff!, parseSettingsForm(await Astro.request.formData()));
+  return Astro.redirect('/admin/offline/settings?saved=1', 303);
+}
+const s = await getSettings(env.DB);
+const gatewayOn = sslConfigured(await gatewayEnv(env.DB, env));
+---
+
+<Admin title="অফিসের নিয়ম">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">প্রতিষ্ঠান</p>
+      <h1>অফিসের নিয়ম ও সেটিংস</h1>
+      <p>বেতন, ছুটি, শিক্ষক প্যানেল আর অনলাইন ফির নিয়ম এখান থেকে বদলানো যায়। বদলালে পরের হিসাব থেকে নতুন নিয়ম চলবে।</p>
+    </div>
+  </header>
+  {!owner && <p class="note note--warn">শুধু মালিক এই নিয়মগুলো বদলাতে পারেন। আপনি দেখতে পারছেন।</p>}
+
+  <form method="post" class="settings">
+    <fieldset class="card form-grid" disabled={!owner}>
+      <h3><Icon name="wallet" /> বেতন, ছুটি ও খরচ</h3>
+      <label class="field"><span>মাসে কয়দিন ছুটি বেতনসহ</span><input name="paidLeaveDays" inputmode="numeric" value={s.paidLeaveDays} /></label>
+      <label class="field">
+        <span>বিনা বেতনের ছুটিতে এক দিনের বেতন কীভাবে হিসাব হবে</span>
+        <select name="salaryBasis">{SALARY_BASES.map((b) => <option value={b} selected={b === s.salaryBasis}>{SALARY_BASIS_BN[b]}</option>)}</select>
+      </label>
+      <label class="field"><span>কত টাকার বেশি খরচে মালিকের অনুমোদন লাগবে (০ হলে লাগবে না)</span><input name="expenseApprovalOver" inputmode="numeric" value={s.expenseApprovalOver} /></label>
+      <p class="wide muted"><small>উদাহরণ: মূল বেতন ১২,০০০ টাকা, মাসে ১২টি ক্লাসের দিন, ৩ দিন বিনা বেতনের ছুটি হলে কাটা যাবে ১২,০০০ ÷ ১২ × ৩ = ৩,০০০ টাকা।</small></p>
+    </fieldset>
+
+    <fieldset class="card form-grid" disabled={!owner}>
+      <h3><Icon name="briefcase" /> শিক্ষক প্যানেলে শিক্ষক যা করতে পারবেন</h3>
+      <label class="check wide"><input type="checkbox" name="teacherTakesAttendance" checked={s.teacherTakesAttendance} /> নিজের ব্যাচের হাজিরা নেওয়া</label>
+      <label class="check wide"><input type="checkbox" name="teacherCanShareMaterial" checked={s.teacherCanShareMaterial} /> নিজের ব্যাচে পড়ার উপকরণ (ফাইল বা লিংক) দেওয়া</label>
+      <label class="check wide"><input type="checkbox" name="teacherCanPostNotice" checked={s.teacherCanPostNotice} /> নিজের ব্যাচে নোটিশ দেওয়া</label>
+      <label class="check wide"><input type="checkbox" name="teacherSeesPhones" checked={s.teacherSeesPhones} /> নিজের ব্যাচের ছাত্রদের ফোন নম্বর দেখা</label>
+      <label class="check wide"><input type="checkbox" name="teacherRatings" checked={s.teacherRatings} /> ছাত্ররা মাসে একবার শিক্ষককে মূল্যায়ন করবে (ফলাফল শুধু অফিস দেখবে)</label>
+    </fieldset>
+
+    <fieldset class="card form-grid" disabled={!owner}>
+      <h3><Icon name="coins" /> ছাত্রদের ফি</h3>
+      <label class="check wide"><input type="checkbox" name="onlineFees" checked={s.onlineFees} /> ছাত্ররা নিজের প্যানেল থেকে অনলাইনে (বিকাশ, নগদ, কার্ড) বকেয়া দিতে পারবে</label>
+      {!gatewayOn && <p class="wide note note--warn">এই সাইটে SSLCommerz চালু নেই, তাই এখানে অনলাইন পেমেন্ট দেখাবে না।</p>}
+      <label class="field"><span>লেট ফি, টাকা (০ হলে লেট ফি নেই)</span><input name="lateFeeTaka" inputmode="numeric" value={s.lateFeeTaka} /></label>
+      <label class="field"><span>কিস্তির তারিখের কত দিন পর লেট ফি যোগ হবে</span><input name="lateGraceDays" inputmode="numeric" value={s.lateGraceDays} /></label>
+      <p class="wide muted"><small>প্রতিটি কিস্তিতে লেট ফি একবারই যোগ হয়, প্রতিদিন রাত ১২টার পর। উদাহরণ: ৭ দিন আর ১০০ টাকা হলে ৫ তারিখের কিস্তি ১২ তারিখের মধ্যে পুরো না দিলে ১৩ তারিখে ১০০ টাকা যোগ হবে। দরকার হলে ছাত্রের পাতা থেকে মাফ করা যায়।</small></p>
+      <label class="field wide">
+        <span>বকেয়ার মেসেজ (WhatsApp, ইমেইল, SMS)। {'{name}'} নাম, {'{course}'} কোর্স, {'{amount}'} টাকা, {'{date}'} তারিখ, {'{id}'} আইডি</span>
+        <textarea name="dueTemplate" rows="3" maxlength="1000">{s.dueTemplate}</textarea>
+      </label>
+    </fieldset>
+
+    {owner && <button class="button"><Icon name="check" /> সংরক্ষণ করুন</button>}
+  </form>
+</Admin>
+
+<style>
+  .settings {
+    display: grid;
+    gap: var(--space-4);
+    max-width: 860px;
+  }
+  fieldset {
+    margin: 0;
+    min-width: 0;
+  }
+  fieldset h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .settings > .button {
+    justify-self: start;
+  }
+</style>

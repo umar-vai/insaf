@@ -1,0 +1,527 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../layouts/Base.astro';
+import Icon from '../components/Icon.astro';
+import SectionHead from '../components/SectionHead.astro';
+import FundProgress from '../components/donate/FundProgress.astro';
+import DonateForm from '../components/donate/DonateForm.astro';
+import { listFunds } from '../server/donations';
+import { publishedPosts } from '../server/blog';
+import { LAND } from '../lib/land';
+import { FOUNDER, SITE, whatsappUrl } from '../lib/site';
+import { DEPARTMENTS, FACILITIES } from '../lib/madrasa';
+import { bnDigits, dateBn } from '../lib/format';
+
+const [funds, posts] = await Promise.all([listFunds(env.DB), publishedPosts(env.DB, { limit: 6 })]);
+const buy = funds.find((f) => f.slug === LAND.fund);
+const members = funds.find((f) => f.slug === LAND.memberFund);
+const landRaised = (buy?.raisedMinor ?? 0) + (members?.raisedMinor ?? 0);
+const landDonors = (buy?.donors ?? 0) + (members?.donors ?? 0);
+const error = Astro.url.searchParams.get('error');
+Astro.response.headers.set('Cache-Control', error ? 'no-store' : 'public, max-age=60, s-maxage=120');
+---
+
+<Base title={SITE.name}>
+  <section class="hero on-dark">
+    <div class="container hero__grid">
+      <div class="hero__copy">
+        <p class="hero__ar arabic" lang="ar">{SITE.nameAr}</p>
+        <h1>আগামী প্রজন্মের <em>ইলমিযাত্রা</em></h1>
+        <p class="hero__lead">কুরআন ও সুন্নাহভিত্তিক ইলমি মারকাজ। সহিহ আকিদা, বিশুদ্ধ ইলম ও আমলের পথে নতুন প্রজন্মকে গড়ে তোলার প্রয়াস।</p>
+        <div class="hero__cta">
+          <a class="button button--gold" href="/admission">ভর্তি তথ্য <Icon name="arrow" /></a>
+          <a class="button button--ghost" href="/land"><Icon name="heart" size={18} /> জমি প্রজেক্টে দান</a>
+        </div>
+        <ul class="hero__facts">
+          <li><Icon name="book" size={18} /> নুরানি, নাজেরা ও হিফজ, কিতাব বিভাগ</li>
+          <li><Icon name="home" size={18} /> আবাসিক ছাত্রাবাস</li>
+          <li><Icon name="star" size={18} /> মেধাবী ও এতিমদের স্কলারশিপ</li>
+        </ul>
+      </div>
+      <div class="hero__visual">
+        <div class="arch">
+          <img src="/images/students-quran-1280.webp" srcset="/images/students-quran-640.webp 640w, /images/students-quran-1280.webp 1280w" sizes="(max-width: 900px) 90vw, 520px" alt="কুরআন হাতে মাদরাসাতুল ইনসাফের শিক্ষার্থীরা" width="1280" height="853" fetchpriority="high" />
+        </div>
+        <img class="hero__emblem" src="/images/emblem.webp" alt="" width="120" height="120" />
+      </div>
+    </div>
+  </section>
+
+  {
+    posts.length > 0 && (
+      <section class="container notices" aria-label="জরুরি আপডেট">
+        <p class="notices__label"><Icon name="bell" size={18} /> জরুরি আপডেট</p>
+        <div class="notices__track">
+          <ul>
+            {posts.map((p) => (
+              <li>
+                <a href={`/blog/${p.slug}`}>
+                  <time>{dateBn(p.publishedAt)}</time> {p.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <a class="notices__all" href="/blog">সব নোটিশ</a>
+      </section>
+    )
+  }
+
+  {
+    buy && (
+      <section class="section">
+        <div class="container land" data-reveal>
+          <div class="land__copy">
+            <p class="land__eyebrow">স্থায়ী ক্যাম্পাস ও ভূমি ক্রয় প্রজেক্ট</p>
+            <h2>মাদরাসার নিজস্ব জমিতে স্থায়ী ক্যাম্পাস</h2>
+            <p>যতদিন একজন শিক্ষার্থী এই জমিতে বসে কুরআন তিলাওয়াত করবে, ততদিন আপনার সদকায়ে জারিয়ার সাওয়াব জারি থাকবে ইন শা আল্লাহ।</p>
+            <FundProgress raisedMinor={landRaised} goalMinor={buy.goalMinor ?? LAND.goalMinor} donors={landDonors} />
+            <div class="land__cta">
+              <a class="button" href="/land">প্রজেক্ট দেখুন ও দান করুন <Icon name="arrow" /></a>
+            </div>
+          </div>
+          <img class="land__img" src="/images/students-outdoor-640.webp" alt="" width="640" height="427" loading="lazy" />
+        </div>
+      </section>
+    )
+  }
+
+  <section class="section section--tint">
+    <div class="container about">
+      <div data-reveal>
+        <SectionHead align="start" eyebrow="পরিচিতি" title="কেন মাদরাসাতুল ইনসাফ?" />
+        <div class="prose">
+          <p>মাদরাসাতুল ইনসাফ একটি কুরআন ও সুন্নাহভিত্তিক ইলমি মারকাজ, যা আহলে সুন্নাত ওয়াল জামাআতের আকিদা ও উলামায়ে কেরামের বিশ্বস্ত ধারার আলোকে পরিচালিত। প্রতিষ্ঠানটি প্রতিষ্ঠা করেন {FOUNDER.name}, {FOUNDER.about.replace('।', '')}, যিনি এর নীতিগত অভিভাবক ও দিকনির্দেশক।</p>
+          <p>এখানে ইলম শিক্ষা কেবল পাঠ্যসূচির মধ্যে সীমাবদ্ধ নয়; তালিম, তারবিয়ত ও দাওয়াতের সমন্বয়ে এমন হাফেজ, আলেম ও দীনি কর্মী গড়ে তোলার প্রয়াস চলে, যারা ব্যক্তি, সমাজ ও রাষ্ট্রজীবনে ন্যায়, ইনসাফ ও নৈতিকতার প্রতিনিধিত্ব করতে সক্ষম।</p>
+          <p>মাদরাসাটি শূরাভিত্তিক পরিচালনা, সুস্পষ্ট গঠনতন্ত্র ও জবাবদিহিমূলক ব্যবস্থাপনার মাধ্যমে পরিচালিত হয়। শিক্ষা, প্রশাসন ও অর্থনীতিতে স্বচ্ছতা, আমানতদারি ও শৃঙ্খলা মৌলিক নীতি।</p>
+        </div>
+        <a class="button button--ghost" href="/about">বিস্তারিত পড়ুন <Icon name="arrow" /></a>
+      </div>
+      <div class="about__img" data-reveal>
+        <img src="/images/reception-640.webp" srcset="/images/reception-640.webp 640w, /images/reception-1280.webp 1280w" sizes="(max-width: 900px) 100vw, 40vw" alt="মাদরাসাতুল ইনসাফের অফিস" width="640" height="427" loading="lazy" />
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <SectionHead eyebrow="শিক্ষা কার্যক্রম" title="মাদরাসাতুল ইনসাফের বিভাগসমূহ" />
+      <div class="depts">
+        {
+          DEPARTMENTS.map((d, i) => (
+            <article class="dept" data-reveal>
+              <span class="dept__no">{bnDigits(String(i + 1).padStart(2, '0'))}</span>
+              <h3>{d.title}</h3>
+              <p>{d.text}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="section on-dark facilities">
+    <div class="container">
+      <SectionHead eyebrow="সুযোগ-সুবিধা" title="মাদরাসার সুযোগ-সুবিধাসমূহ" />
+      <div class="fac">
+        {
+          FACILITIES.map((f) => (
+            <article data-reveal>
+              <span class="fac__icon"><Icon name={f.icon} size={24} /></span>
+              <h3>{f.title}</h3>
+              <p>{f.text}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container give">
+      <div>
+        <SectionHead align="start" eyebrow="দান করুন" title="আপনার অনুদান প্রদান করুন" lead="প্রতিটি তহবিলের হিসাব আলাদা রাখা হয়। আপনার দান ধন্যবাদের সাথে গৃহীত হবে।" />
+        <ul class="give__funds">
+          {
+            funds.slice(0, 7).map((f) => (
+              <li>
+                <a href={f.slug === LAND.fund ? '/land' : `/donate/${f.slug}`}>
+                  <span>{f.title}</span>
+                  <Icon name="arrow" size={18} />
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+        <p class="give__zakat"><a href="/zakat"><Icon name="coins" size={18} /> যাকাত ক্যালকুলেটর দিয়ে আপনার যাকাত হিসাব করুন</a></p>
+      </div>
+      <DonateForm funds={funds} from="/" error={error} />
+    </div>
+  </section>
+
+  <section class="section section--tint">
+    <div class="container contact">
+      <SectionHead eyebrow="যোগাযোগ" title="আমাদের সাথে যোগাযোগ" />
+      <div class="contact__grid">
+        <a class="contact__card" href={`tel:${SITE.phone.tel}`} data-reveal>
+          <Icon name="phone" size={26} />
+          <strong>ফোন করুন</strong>
+          <span>{bnDigits(SITE.phone.display)}</span>
+          <small>{SITE.officeHours}</small>
+        </a>
+        <a class="contact__card" href={whatsappUrl()} rel="noopener" data-reveal>
+          <Icon name="whatsapp" size={26} />
+          <strong>WhatsApp</strong>
+          <span>{bnDigits(SITE.phone.display)}</span>
+          <small>প্রশ্ন বা ফিডব্যাক পাঠান</small>
+        </a>
+        <a class="contact__card" href={SITE.mapUrl} rel="noopener" data-reveal>
+          <Icon name="pin" size={26} />
+          <strong>আমাদের অবস্থান</strong>
+          <span>{SITE.address}</span>
+          <small>ম্যাপে দেখুন</small>
+        </a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .hero {
+    position: relative;
+    overflow: hidden;
+    padding-block: clamp(2.5rem, 2rem + 4vw, 5.5rem);
+    background-image:
+      radial-gradient(ellipse 50% 60% at 80% 30%, rgb(201 162 78 / 0.2), transparent 70%),
+      var(--pattern-dark);
+  }
+  .hero__grid {
+    display: grid;
+    gap: var(--space-10);
+    align-items: center;
+  }
+  @media (min-width: 900px) {
+    .hero__grid {
+      grid-template-columns: 1.1fr 0.9fr;
+    }
+  }
+  .hero__ar {
+    margin: 0;
+    font-size: clamp(1.6rem, 1.2rem + 1.5vw, 2.4rem);
+    color: var(--gold-300);
+  }
+  h1 {
+    font-size: var(--text-3xl);
+    line-height: 1.2;
+    margin: var(--space-2) 0 var(--space-4);
+    color: var(--white);
+  }
+  h1 em {
+    font-style: normal;
+    color: var(--gold-300);
+  }
+  .hero__lead {
+    font-size: var(--text-lg);
+    color: var(--color-on-dark);
+    max-width: 36rem;
+  }
+  .hero__cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin: var(--space-6) 0;
+  }
+  .hero__facts {
+    display: grid;
+    gap: var(--space-2);
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    color: var(--color-on-dark-muted);
+  }
+  .hero__facts li {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .hero__facts :global(svg) {
+    color: var(--gold-300);
+  }
+  .hero__visual {
+    position: relative;
+    justify-self: center;
+    width: min(100%, 520px);
+  }
+  .arch {
+    border-radius: var(--radius-arch);
+    overflow: hidden;
+    border: 6px solid rgb(255 255 255 / 0.08);
+    box-shadow: var(--shadow-lg);
+    aspect-ratio: 4 / 4.4;
+  }
+  .arch img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .hero__emblem {
+    position: absolute;
+    inset: auto auto -18px -18px;
+    width: 110px;
+    height: 110px;
+    padding: 12px;
+    border-radius: 50%;
+    background: var(--ivory);
+    box-shadow: var(--shadow-lg);
+  }
+  .notices {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: var(--space-4);
+    align-items: center;
+    margin-top: calc(-1 * var(--space-6));
+    position: relative;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+    box-shadow: var(--shadow);
+    border: 1px solid var(--color-line);
+  }
+  .notices__label {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    margin: 0;
+    font-weight: 700;
+    color: var(--bad-600);
+    white-space: nowrap;
+  }
+  .notices__track {
+    overflow: hidden;
+    mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+  }
+  .notices__track ul {
+    display: flex;
+    gap: var(--space-10);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    width: max-content;
+    animation: ticker 40s linear infinite;
+  }
+  .notices__track:hover ul {
+    animation-play-state: paused;
+  }
+  @keyframes ticker {
+    from {
+      transform: translateX(30%);
+    }
+    to {
+      transform: translateX(-100%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .notices__track ul {
+      animation: none;
+    }
+  }
+  .notices a {
+    color: var(--color-text);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .notices time {
+    color: var(--gold-500);
+    font-size: var(--text-sm);
+  }
+  .notices__all {
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  @media (max-width: 640px) {
+    .notices {
+      grid-template-columns: 1fr auto;
+    }
+    .notices__track {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
+  }
+  .land {
+    display: grid;
+    gap: var(--space-8);
+    align-items: center;
+    padding: clamp(1.5rem, 1rem + 2.5vw, 3rem);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(135deg, var(--gold-100), var(--white) 65%);
+    border: 1px solid color-mix(in srgb, var(--gold-500) 35%, transparent);
+    box-shadow: var(--shadow);
+  }
+  @media (min-width: 900px) {
+    .land {
+      grid-template-columns: 1.4fr 1fr;
+    }
+  }
+  .land__eyebrow {
+    color: var(--gold-500);
+    font-weight: 700;
+    margin: 0;
+  }
+  .land h2 {
+    margin: var(--space-2) 0;
+  }
+  .land__copy > p:not(.land__eyebrow) {
+    color: var(--color-text-muted);
+  }
+  .land__cta {
+    margin-top: var(--space-5);
+  }
+  .land__img {
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-arch);
+  }
+  .section--tint {
+    background: var(--color-tint);
+    background-image: var(--pattern-light);
+  }
+  .about {
+    display: grid;
+    gap: var(--space-8);
+    align-items: center;
+  }
+  @media (min-width: 900px) {
+    .about {
+      grid-template-columns: 1.3fr 1fr;
+    }
+  }
+  .about__img img {
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+  }
+  .depts {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+  .dept {
+    position: relative;
+    padding: var(--space-8) var(--space-6) var(--space-6);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--shadow-sm);
+  }
+  .dept__no {
+    font: 800 2.6rem / 1 var(--font-display);
+    color: var(--gold-300);
+  }
+  .dept h3 {
+    margin: var(--space-3) 0 var(--space-2);
+  }
+  .dept p {
+    margin: 0;
+    color: var(--color-text-muted);
+  }
+  .facilities {
+    background-color: var(--green-900);
+    background-image: var(--pattern-dark);
+  }
+  .fac {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+  .fac article {
+    padding: var(--space-6);
+    border-radius: var(--radius-lg);
+    background: rgb(255 255 255 / 0.05);
+    border: 1px solid rgb(255 255 255 / 0.1);
+  }
+  .fac__icon {
+    display: inline-grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: rgb(201 162 78 / 0.18);
+    color: var(--gold-300);
+  }
+  .fac h3 {
+    color: var(--white);
+    margin: var(--space-3) 0 var(--space-2);
+  }
+  .fac p {
+    margin: 0;
+    color: var(--color-on-dark-muted);
+  }
+  .give {
+    display: grid;
+    gap: var(--space-10);
+    align-items: start;
+  }
+  @media (min-width: 960px) {
+    .give {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  .give__funds {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-2);
+  }
+  .give__funds a {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    color: var(--color-text);
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .give__funds a:hover {
+    border-color: var(--green-700);
+    color: var(--green-700);
+  }
+  .give__zakat a {
+    display: inline-flex;
+    gap: var(--space-2);
+    align-items: center;
+    font-weight: 600;
+  }
+  .contact__grid {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+  .contact__card {
+    display: grid;
+    gap: var(--space-1);
+    justify-items: center;
+    text-align: center;
+    padding: var(--space-8) var(--space-5);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    color: var(--color-text);
+    text-decoration: none;
+    transition: transform 0.25s var(--ease);
+  }
+  .contact__card:hover {
+    transform: translateY(-3px);
+  }
+  .contact__card :global(svg) {
+    color: var(--green-700);
+    margin-bottom: var(--space-2);
+  }
+  .contact__card small {
+    color: var(--color-text-muted);
+  }
+</style>

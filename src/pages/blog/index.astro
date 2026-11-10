@@ -1,0 +1,113 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import PageHero from '../../components/PageHero.astro';
+import BlogCard from '../../components/BlogCard.astro';
+import Icon from '../../components/Icon.astro';
+import { blogCategories, publishedPosts } from '../../server/blog';
+import { bnDigits } from '../../lib/format';
+
+const category = Astro.url.searchParams.get('category')?.slice(0, 60) || null;
+const [posts, categories] = await Promise.all([publishedPosts(env.DB, { category }), blogCategories(env.DB)]);
+const [lead, ...rest] = posts;
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+---
+
+<Base title="নোটিশ ও খবর" description="মাদরাসাতুল ইনসাফের ঘোষণা, ভর্তি ও প্রজেক্টের খবর।">
+  <PageHero
+    eyebrow="নোটিশ বোর্ড"
+    title="নোটিশ ও খবর"
+    lead="ভর্তি, প্রজেক্ট ও মাদরাসার গুরুত্বপূর্ণ ঘোষণা।"
+    crumbs={[{ href: "/blog", label: "নোটিশ" }]}
+  />
+
+  <section class="container section blog">
+    {
+      categories.length > 1 && (
+        <nav class="cats" aria-label="বিষয়">
+          <a href="/blog" aria-current={!category ? 'page' : undefined}>সব লেখা</a>
+          {categories.map((c) => (
+            <a href={`/blog?category=${encodeURIComponent(c.name)}`} aria-current={category === c.name ? 'page' : undefined}>
+              {c.name} <span>{bnDigits(c.count)}</span>
+            </a>
+          ))}
+        </nav>
+      )
+    }
+
+    {
+      !lead ? (
+        <div class="empty">
+          <h2>{category ? 'এই বিষয়ে এখনো কোনো লেখা নেই' : 'শীঘ্রই নতুন লেখা আসছে, ইনশাআল্লাহ'}</h2>
+          <a class="button" href={category ? '/blog' : '/courses'}>
+            {category ? 'সব লেখা দেখুন' : 'কোর্স দেখুন'} <Icon name="arrow" />
+          </a>
+        </div>
+      ) : (
+        <>
+          <BlogCard post={lead} lead />
+          {rest.length > 0 && <div class="grid">{rest.map((p) => <BlogCard post={p} />)}</div>}
+        </>
+      )
+    }
+  </section>
+</Base>
+
+<style>
+  .blog {
+    display: grid;
+    gap: var(--space-8);
+  }
+  .cats {
+    display: flex;
+    gap: var(--space-2);
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: var(--space-1);
+  }
+  .cats::-webkit-scrollbar {
+    display: none;
+  }
+  .cats a {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    border-radius: 999px;
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font: 600 var(--text-sm) / 1.3 var(--font-display);
+    text-decoration: none;
+    transition: background-color 0.2s, border-color 0.2s;
+  }
+  .cats a:hover {
+    border-color: var(--color-primary);
+  }
+  .cats a span {
+    padding: 0 0.5em;
+    border-radius: 999px;
+    background: var(--mint-100);
+    font-size: var(--text-xs);
+  }
+  .cats a[aria-current] {
+    background: var(--color-primary);
+    border-color: var(--color-primary);
+    color: var(--color-primary-ink);
+  }
+  .cats a[aria-current] span {
+    background: rgb(255 255 255 / 0.2);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+    gap: var(--space-6);
+  }
+  .empty {
+    padding: var(--space-12) var(--space-6);
+    text-align: center;
+    border: 1px dashed var(--color-line);
+    border-radius: var(--radius-lg);
+  }
+</style>

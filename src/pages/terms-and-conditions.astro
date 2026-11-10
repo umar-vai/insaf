@@ -1,0 +1,6 @@
+---
+import PolicyPage from '../components/PolicyPage.astro';
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=3600');
+---
+
+<PolicyPage policy="terms" />

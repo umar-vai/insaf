@@ -1,0 +1,86 @@
+---
+import Icon from '../Icon.astro';
+import { BANK } from '../../lib/site';
+import { bnDigits } from '../../lib/format';
+
+// The madrasa's bank account, for large gifts (the old site asked for gifts
+// over 10,000 Tk to come this way) and for donors abroad.
+---
+
+<div class="bank" id="bank">
+  <p class="bank__head"><Icon name="briefcase" size={20} /> ব্যাংকের মাধ্যমে দান</p>
+  <p class="bank__lead">১০ হাজার টাকার বেশি দান করতে চাইলে মাদরাসার ব্যাংক অ্যাকাউন্টে পাঠাতে পারেন। পাঠিয়ে অফিসে ফোন বা WhatsApp করে জানালে রসিদ দেওয়া হবে।</p>
+  <dl>
+    <div><dt>অ্যাকাউন্টের নাম</dt><dd>{BANK.name}</dd></div>
+    <div><dt>অ্যাকাউন্ট নম্বর</dt><dd><span class="mono" data-copy>{BANK.account}</span></dd></div>
+    <div><dt>রাউটিং নম্বর</dt><dd><span class="mono">{BANK.routing}</span></dd></div>
+    <div><dt>ব্যাংক</dt><dd>{BANK.bank}</dd></div>
+    <div><dt>শাখা</dt><dd>{BANK.branch}</dd></div>
+  </dl>
+  <button type="button" class="button button--ghost bank__copy" data-copy-button>অ্যাকাউন্ট নম্বর কপি করুন</button>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('[data-copy-button]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      const text = b.closest('.bank')?.querySelector('[data-copy]')?.textContent ?? '';
+      try {
+        await navigator.clipboard.writeText(text);
+        b.textContent = 'কপি হয়েছে ✓';
+      } catch {
+        b.textContent = text;
+      }
+    }),
+  );
+</script>
+
+<style>
+  .bank {
+    padding: var(--space-6);
+    border-radius: var(--radius-lg);
+    background: var(--gold-100);
+    border: 1px solid color-mix(in srgb, var(--gold-500) 30%, transparent);
+  }
+  .bank__head {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    font: 700 var(--text-lg) / 1.3 var(--font-display);
+    color: var(--green-900);
+    margin: 0 0 var(--space-2);
+  }
+  .bank__lead {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    margin: 0 0 var(--space-4);
+  }
+  dl {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-4);
+  }
+  dl div {
+    display: grid;
+    grid-template-columns: 9.5rem 1fr;
+    gap: var(--space-3);
+    font-size: var(--text-sm);
+  }
+  dt {
+    color: var(--color-text-muted);
+  }
+  dd {
+    margin: 0;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+  .mono {
+    font-family: ui-monospace, 'Cascadia Mono', monospace;
+    letter-spacing: 0.03em;
+  }
+  @media (max-width: 420px) {
+    dl div {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+  }
+</style>

@@ -1,0 +1,118 @@
+---
+interface Props {
+  eyebrow?: string;
+  title: string;
+  lead?: string;
+  crumbs?: { href: string; label: string }[];
+  /** Leave room for a card that overlaps the bottom edge. */
+  overlap?: boolean;
+  /** A picture beside the title: base name in /images with -640 and -1280 widths. */
+  image?: string;
+}
+const { eyebrow, title, lead, crumbs, overlap = false, image } = Astro.props;
+---
+
+<section class:list={['page-hero', 'on-dark', overlap && 'page-hero--overlap']}>
+  <div class:list={['container', image && 'page-hero__grid']}>
+    <div>
+    {
+      crumbs && (
+        <nav class="crumbs" aria-label="আপনি এখানে আছেন">
+          <a href="/">হোম</a>
+          {crumbs.map((c) => (
+            <>
+              <span aria-hidden="true">/</span>
+              <a href={c.href}>{c.label}</a>
+            </>
+          ))}
+        </nav>
+      )
+    }
+    {eyebrow && <p class="eyebrow">{eyebrow}</p>}
+    <h1>{title}</h1>
+    {lead && <p class="lead">{lead}</p>}
+    <slot />
+    </div>
+    {
+      image && (
+        <div class="page-hero__img">
+          <img
+            src={`/images/${image}-1280.webp`}
+            srcset={`/images/${image}-640.webp 640w, /images/${image}-1280.webp 1280w`}
+            sizes="(max-width: 900px) 100vw, 45vw"
+            alt=""
+            width="1280"
+            height="720"
+          />
+        </div>
+      )
+    }
+  </div>
+</section>
+
+<style>
+  .page-hero {
+    padding-block: clamp(2.5rem, 2rem + 3vw, 4.5rem);
+    background-image:
+      radial-gradient(ellipse 50% 70% at 85% 0%, rgb(217 178 92 / 0.18), transparent 70%),
+      var(--pattern-dark);
+  }
+  .page-hero--overlap {
+    padding-bottom: calc(clamp(2.5rem, 2rem + 3vw, 4.5rem) + var(--space-16));
+  }
+  .crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-5);
+    color: var(--color-on-dark-muted);
+  }
+  .crumbs a {
+    color: var(--color-on-dark-muted) !important;
+    text-decoration: none;
+  }
+  .crumbs a:hover {
+    color: var(--white) !important;
+  }
+  .eyebrow {
+    font: 600 var(--text-sm) / 1.4 var(--font-display);
+    color: var(--gold-300);
+    margin-bottom: var(--space-3);
+  }
+  h1 {
+    color: var(--white);
+    max-width: 24ch;
+    font-size: var(--text-2xl);
+  }
+  .lead {
+    font-size: var(--text-lg);
+    color: var(--color-on-dark-muted);
+    max-width: 60ch;
+    margin: 0;
+  }
+  .page-hero__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+    gap: var(--space-10);
+    align-items: center;
+  }
+  .page-hero__img {
+    aspect-ratio: 3 / 2;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: 0 24px 60px -24px rgb(0 0 0 / 0.6);
+    border: 1px solid rgb(255 255 255 / 0.12);
+  }
+  .page-hero__img img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  @media (max-width: 900px) {
+    .page-hero__grid {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-8);
+    }
+  }
+</style>

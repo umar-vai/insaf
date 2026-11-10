@@ -1,0 +1,117 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../layouts/Admin.astro';
+import Icon from '../../components/Icon.astro';
+import { institute, saveConfig, saveLogo, savedConfig } from '../../server/config';
+
+// Owners only (middleware: adminModule returns 'owner' for this path).
+const actor = Astro.locals.staff!;
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  if (form.get('action') === 'logo') {
+    const r = await saveLogo(env.DB, env.MEDIA, actor, form.get('logo'));
+    return Astro.redirect(`/admin/system?${r.ok ? 'saved=1' : `error=${r.error}`}`, 303);
+  }
+  const r = await saveConfig(env.DB, env, actor, form);
+  return Astro.redirect(`/admin/system?${r.ok ? 'saved=1' : `error=${r.error}`}`, 303);
+}
+const [c, inst] = await Promise.all([savedConfig(env.DB, env), institute(env.DB)]);
+const fromCloudflare = { store: Boolean(env.SSLCZ_STORE_ID), password: Boolean(env.SSLCZ_STORE_PASSWORD) };
+const mode = c.sslczSandbox === '0' ? 'live' : c.sslczSandbox === '1' ? 'sandbox' : '';
+const cfMode = env.SSLCZ_SANDBOX === '0' ? 'লাইভ' : 'স্যান্ডবক্স (পরীক্ষা)';
+---
+
+<Admin title="সিস্টেম সেটিংস">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">প্রতিষ্ঠান</p>
+      <h1>সিস্টেম সেটিংস</h1>
+      <p>প্রতিষ্ঠানের নাম ও লোগো, পেমেন্ট গেটওয়ে আর SMS এর কী। শুধু মালিক দেখেন ও বদলাতে পারেন। প্রতিটি বদল "কে কী করেছে" তালিকায় থাকে, তবে কীগুলোর মান সেখানে লেখা হয় না।</p>
+    </div>
+  </header>
+  {Astro.url.searchParams.get('error') === 'no_secret' && <p class="note note--bad" role="alert">এই সাইটে SESSION_SECRET নেই, তাই গোপন কী তালা দিয়ে রাখা যাচ্ছে না।</p>}
+
+  <form method="post" class="settings">
+    <fieldset class="card form-grid">
+      <h3><Icon name="home" /> প্রতিষ্ঠানের তথ্য</h3>
+      <p class="wide muted"><small>রসিদ, পে স্লিপ আর আইডি কার্ডে এগুলো ছাপা হয়। খালি রাখলে সাইটের আগের তথ্যই থাকবে।</small></p>
+      <label class="field"><span>নাম</span><input name="instituteName" maxlength="120" value={c.instituteName} placeholder={inst.name} /></label>
+      <label class="field"><span>ফোন</span><input name="institutePhone" maxlength="40" value={c.institutePhone} placeholder={inst.phone} /></label>
+      <label class="field"><span>ইমেইল</span><input name="instituteEmail" type="email" maxlength="120" value={c.instituteEmail} placeholder={inst.email} /></label>
+      <label class="field wide"><span>ঠিকানা</span><input name="instituteAddress" maxlength="300" value={c.instituteAddress} placeholder={inst.address} /></label>
+    </fieldset>
+
+    <fieldset class="card form-grid">
+      <h3><Icon name="lock" /> পেমেন্ট গেটওয়ে (SSLCommerz)</h3>
+      <p class="wide note note--warn">সাবধান: এগুলো বদলালে সাথে সাথে আসল পেমেন্টে প্রভাব পড়ে। ভুল কী দিলে ছাত্ররা টাকা দিতে পারবে না। খালি রাখলে Cloudflare এ রাখা কী-ই চলবে।</p>
+      <label class="field"><span>Store ID</span><input name="sslczStoreId" maxlength="120" value={c.sslczStoreId} autocomplete="off" placeholder={fromCloudflare.store ? 'Cloudflare এ রাখা আছে' : 'নেই'} /></label>
+      <label class="field">
+        <span>Store Password {c.sslczStorePassword ? '(এখানে রাখা আছে)' : fromCloudflare.password ? '(Cloudflare এ রাখা আছে)' : '(নেই)'}</span>
+        <input name="sslczStorePassword" type="password" maxlength="500" autocomplete="new-password" placeholder="বদলাতে চাইলে নতুনটা লিখুন" />
+      </label>
+      {c.sslczStorePassword && <label class="check wide"><input type="checkbox" name="clear_sslczStorePassword" /> এখানে রাখা পাসওয়ার্ড মুছে Cloudflare এরটা ব্যবহার করুন</label>}
+      <label class="field">
+        <span>কোন গেটওয়ে</span>
+        <select name="sslczSandbox">
+          <option value="">Cloudflare এর সেটিং ({cfMode})</option>
+          <option value="live" selected={mode === 'live'}>লাইভ (আসল টাকা)</option>
+          <option value="sandbox" selected={mode === 'sandbox'}>স্যান্ডবক্স (পরীক্ষা)</option>
+        </select>
+      </label>
+    </fieldset>
+
+    <fieldset class="card form-grid">
+      <h3><Icon name="phone" /> SMS (BulkSMSBD)</h3>
+      <p class="wide muted"><small>bulksmsbd.net এ অ্যাকাউন্ট খুলে API Key আর অনুমোদিত Sender ID এখানে দিন। দেওয়ার পর বকেয়ার পাতায় "টিক দেওয়া সবাইকে SMS" বোতাম চালু হবে। প্রতি SMS এর খরচ ওই অ্যাকাউন্ট থেকে কাটবে।</small></p>
+      <label class="field"><span>Sender ID</span><input name="smsSenderId" maxlength="40" value={c.smsSenderId} autocomplete="off" /></label>
+      <label class="field">
+        <span>API Key {c.smsApiKey ? '(রাখা আছে)' : '(নেই)'}</span>
+        <input name="smsApiKey" type="password" maxlength="500" autocomplete="new-password" placeholder="বদলাতে চাইলে নতুনটা লিখুন" />
+      </label>
+      {c.smsApiKey && <label class="check wide"><input type="checkbox" name="clear_smsApiKey" /> SMS এর কী মুছে ফেলুন (SMS বন্ধ হবে)</label>}
+    </fieldset>
+
+    <p class="muted"><small>গোপন কী (পাসওয়ার্ড, API Key) ডাটাবেসে তালা দিয়ে (এনক্রিপ্ট করে) রাখা হয়। একবার সংরক্ষণের পর আর দেখানো হয় না। Google Drive এর দরকার নেই, কারণ ফাইল আমাদের নিজেদের স্টোরেজে থাকে।</small></p>
+    <button class="button"><Icon name="check" /> সংরক্ষণ করুন</button>
+  </form>
+
+  <form method="post" enctype="multipart/form-data" class="card form-grid logo">
+    <input type="hidden" name="action" value="logo" />
+    <h3><Icon name="star" /> লোগো</h3>
+    <img src={inst.logo} alt="এখনকার লোগো" height="48" />
+    <label class="field wide"><span>নতুন লোগো (PNG, JPG বা WebP, ২ MB পর্যন্ত)</span><input name="logo" type="file" required accept="image/png,image/jpeg,image/webp" /></label>
+    <p class="wide muted"><small>রসিদ, পে স্লিপ আর আইডি কার্ডে এই লোগো ছাপা হবে।</small></p>
+    <button class="button">লোগো বদলান</button>
+  </form>
+</Admin>
+
+<style>
+  .settings {
+    display: grid;
+    gap: var(--space-4);
+    max-width: 860px;
+  }
+  fieldset {
+    margin: 0;
+    min-width: 0;
+  }
+  fieldset h3,
+  .logo h3 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .settings > .button,
+  .logo .button {
+    justify-self: start;
+  }
+  .logo {
+    max-width: 860px;
+    margin-top: var(--space-5);
+  }
+  .logo img {
+    width: auto;
+    max-width: 200px;
+    object-fit: contain;
+  }
+</style>

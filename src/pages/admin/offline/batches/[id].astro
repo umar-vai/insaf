@@ -1,0 +1,216 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import BatchFields from '../../../../components/admin/BatchFields.astro';
+import { listOfflineCourses } from '../../../../server/offline';
+import { getBatch, listTeachers, parseBatchForm, roster, saveBatch } from '../../../../server/office';
+import { addMaterial, hideMaterial, listMaterials } from '../../../../server/panels';
+import MaterialList from '../../../../components/MaterialList.astro';
+import { DAY_BN, parseDays, studentCode, timeBn, todayDhaka } from '../../../../lib/offline';
+import { bnDigits } from '../../../../lib/format';
+import { addBatchTeacher, batchTeachers, cancelExam, createExam, examLine, listExams, parseExamForm, removeBatchTeacher } from '../../../../server/academic';
+import { dayBn } from '../../../../lib/offline';
+
+const id = Astro.params.id!;
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  if (form.get('action') === 'material') {
+    const r = await addMaterial(env.DB, env.MEDIA, Astro.locals.staff!, id, form);
+    return Astro.redirect(`/admin/offline/batches/${id}?${r.ok ? 'saved=1' : `error=${r.error}`}#materials`, 303);
+  }
+  if (form.get('action') === 'add-teacher') {
+    const ok = await addBatchTeacher(env.DB, Astro.locals.staff!, id, String(form.get('teacherId') ?? ''), String(form.get('subject') ?? ''));
+    return Astro.redirect(`/admin/offline/batches/${id}?${ok ? 'saved=1' : 'error=teacher'}#teachers`, 303);
+  }
+  if (form.get('action') === 'remove-teacher') {
+    await removeBatchTeacher(env.DB, Astro.locals.staff!, id, String(form.get('btId') ?? ''));
+    return Astro.redirect(`/admin/offline/batches/${id}?saved=1#teachers`, 303);
+  }
+  if (form.get('action') === 'exam') {
+    form.set('batchId', id);
+    const v = parseExamForm(form);
+    if (!v.ok) return Astro.redirect(`/admin/offline/batches/${id}?error=${v.error}#exams`, 303);
+    await createExam(env.DB, Astro.locals.staff!, v.value);
+    return Astro.redirect(`/admin/offline/batches/${id}?saved=1#exams`, 303);
+  }
+  if (form.get('action') === 'cancel-exam') {
+    const examId = String(form.get('examId') ?? '');
+    const mine = (await listExams(env.DB, { batchIds: [id] })).some((x) => x.id === examId);
+    if (mine) await cancelExam(env.DB, Astro.locals.staff!, examId);
+    return Astro.redirect(`/admin/offline/batches/${id}?saved=1#exams`, 303);
+  }
+  if (form.get('action') === 'hide-material') {
+    await hideMaterial(env.DB, Astro.locals.staff!, String(form.get('materialId') ?? ''), [id]);
+    return Astro.redirect(`/admin/offline/batches/${id}?saved=1#materials`, 303);
+  }
+  const v = parseBatchForm(form);
+  if (!v.ok) return Astro.redirect(`/admin/offline/batches/${id}?error=${v.error}`, 303);
+  const ok = await saveBatch(env.DB, Astro.locals.staff!, id, v.value);
+  return Astro.redirect(`/admin/offline/batches/${id}?${ok ? 'saved=1' : 'error=course'}`, 303);
+}
+const batch = await getBatch(env.DB, id);
+if (!batch) return new Response('Not found', { status: 404 });
+const today = todayDhaka();
+const [courses, teachers, students, materials, extraTeachers, exams] = await Promise.all([
+  listOfflineCourses(env.DB),
+  listTeachers(env.DB),
+  roster(env.DB, id, today),
+  listMaterials(env.DB, [id]),
+  batchTeachers(env.DB, [id]),
+  listExams(env.DB, { batchIds: [id], includeCancelled: true }),
+]);
+---
+
+<Admin title={batch.name}>
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/offline/batches">ব্যাচ ও রুটিন</a></p>
+      <h1>{batch.name} <span class={`pill pill--${batch.status}`}>{batch.status === 'active' ? 'চালু' : 'বন্ধ'}</span></h1>
+      <p>{batch.courseTitle}{batch.kind && ` · ${batch.kind}`}</p>
+    </div>
+    <div class="actions">
+      <a class="button" href={`/admin/offline/attendance?batch=${id}`}><Icon name="clipboard" /> হাজিরা নিন</a>
+      <a class="button button--ghost" href={`/admin/offline/dues?kind=all&batch=${id}`}><Icon name="alert" /> এই ব্যাচের বকেয়া</a>
+    </div>
+  </header>
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>রুটিন</h2></div>
+      <ul class="list">
+        <li><span class="muted">দিন</span><span>{parseDays(batch.days).map((d) => DAY_BN[d]).join(', ') || 'ঠিক হয়নি'}</span></li>
+        <li><span class="muted">সময়</span><span>{[timeBn(batch.startTime), timeBn(batch.endTime)].filter(Boolean).join(' থেকে ') || 'ঠিক হয়নি'}</span></li>
+        <li><span class="muted">শিক্ষক</span><span>{batch.teacherName ? <a href={`/admin/offline/teachers/${batch.teacherId}`}>{batch.teacherName}</a> : 'ঠিক হয়নি'}{batch.teacherPhone && <small><a href={`tel:${batch.teacherPhone}`}>{bnDigits(batch.teacherPhone)}</a></small>}</span></li>
+        {batch.room && <li><span class="muted">রুম</span><span>{batch.room}</span></li>}
+      </ul>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>ছাত্র ({bnDigits(students.length)} জন)</h2><a href="/admin/offline/students?new=1#new">নতুন ভর্তি</a></div>
+      {
+        students.length === 0 ? (
+          <p class="muted">এই ব্যাচে এখনো কেউ নেই। ছাত্রের প্রোফাইলে ভর্তির তথ্য থেকে ব্যাচ বাছুন।</p>
+        ) : (
+          <ul class="list">
+            {students.map((s) => (
+              <li>
+                <span>{s.roll && <span class="muted">রোল {bnDigits(s.roll)} · </span>}<a href={`/admin/offline/students/${s.studentId}`}>{s.name}</a> <span class="id">{studentCode(s.studentNo)}</span></span>
+                <a class="muted" href={`tel:${s.phone}`}>{bnDigits(s.phone)}</a>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+  </div>
+
+  <div class="cols">
+    <section class="card" id="teachers">
+      <div class="card__head"><h2>বিষয় অনুযায়ী শিক্ষক</h2></div>
+      <p class="muted"><small>প্রধান শিক্ষক উপরের রুটিনে। অন্য বিষয়ের শিক্ষকরা এখানে। তাঁরাও নিজের প্যানেলে এই ব্যাচ দেখবেন, হাজিরা নিতে আর উপকরণ দিতে পারবেন।</small></p>
+      {extraTeachers.length > 0 && (
+        <ul class="list">
+          {extraTeachers.map((t) => (
+            <li>
+              <span><strong>{t.subject || 'বিষয় লেখা নেই'}</strong> · <a href={`/admin/offline/teachers/${t.teacherId}`}>{t.teacherName}</a></span>
+              <form method="post" data-confirm={`${t.teacherName} কে এই ব্যাচ থেকে সরাবেন?`}>
+                <input type="hidden" name="action" value="remove-teacher" />
+                <input type="hidden" name="btId" value={t.id} />
+                <button class="button button--ghost button--sm">সরান</button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="add-teacher" />
+        <label class="field">
+          <span>শিক্ষক</span>
+          <select name="teacherId" required>
+            <option value="">বাছুন</option>
+            {teachers.filter((t) => t.status === 'active' && t.role === 'teacher' && t.id !== batch.teacherId).map((t) => <option value={t.id}>{t.name}{t.subject && ` (${t.subject})`}</option>)}
+          </select>
+        </label>
+        <label class="field"><span>বিষয়</span><input name="subject" required maxlength="80" placeholder="যেমন আরবি ব্যাকরণ" /></label>
+        <button class="button">যোগ করুন</button>
+      </form>
+    </section>
+
+    <section class="card" id="exams">
+      <div class="card__head"><h2>পরীক্ষা</h2></div>
+      {exams.length > 0 && (
+        <ul class="list">
+          {exams.map((x) => (
+            <li class={x.status === 'cancelled' ? 'void' : ''}>
+              <span><strong>{dayBn(x.examDate)}</strong> · {examLine(x)}{x.feeMinor > 0 && <small class="muted"> · ফি {bnDigits(x.feeMinor / 100)} টাকা</small>}{x.status === 'cancelled' && <small class="bad"> · বাতিল</small>}</span>
+              {x.status === 'scheduled' && (
+                <form method="post" data-confirm={`${x.title} বাতিল করবেন? এর ফি যাদের এখনো বসানো আছে তাদের মাফ হয়ে যাবে।`}>
+                  <input type="hidden" name="action" value="cancel-exam" />
+                  <input type="hidden" name="examId" value={x.id} />
+                  <button class="button button--ghost button--sm">বাতিল</button>
+                </form>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="exam" />
+        <label class="field"><span>পরীক্ষার নাম</span><input name="title" required minlength="2" maxlength="120" placeholder="যেমন অর্ধবার্ষিক পরীক্ষা" /></label>
+        <label class="field"><span>বিষয় (ঐচ্ছিক)</span><input name="subject" maxlength="80" /></label>
+        <label class="field"><span>তারিখ</span><input name="examDate" type="date" required min={today} /></label>
+        <label class="field"><span>শুরুর সময় (ঐচ্ছিক)</span><input name="startTime" type="time" /></label>
+        <label class="field"><span>পরীক্ষার ফি, টাকা (না থাকলে খালি)</span><input name="fee" inputmode="numeric" /></label>
+        <p class="wide muted"><small>ফি দিলে এই ব্যাচের সব চালু ছাত্রের হিসাবে পরীক্ষার দিন পর্যন্ত সময় দিয়ে ফি যোগ হবে। ছাত্র আর শিক্ষক নিজের প্যানেলে তারিখ দেখবেন।</small></p>
+        <button class="button">পরীক্ষা যোগ করুন</button>
+      </form>
+    </section>
+  </div>
+
+  <section class="card edit" id="materials">
+    <div class="card__head"><h2>পড়ার উপকরণ</h2></div>
+    <MaterialList materials={materials} canHide />
+    <details>
+      <summary>নতুন উপকরণ দিন</summary>
+      <form method="post" enctype="multipart/form-data" class="form-grid add">
+        <input type="hidden" name="action" value="material" />
+        <label class="field wide"><span>শিরোনাম</span><input name="title" required minlength="2" maxlength="160" /></label>
+        <label class="field"><span>ফাইল (PDF, Word, অডিও, ছবি; ২৫ MB পর্যন্ত)</span><input type="file" name="file" data-image-file /></label>
+        <label class="field"><span>অথবা লিংক (Google Drive, YouTube)</span><input name="url" type="url" placeholder="https://" /></label>
+        <button class="button">দিন</button>
+      </form>
+    </details>
+  </section>
+
+  <details class="card edit">
+    <summary><strong>ব্যাচের তথ্য বদলান</strong></summary>
+    <form method="post" class="form-grid">
+      <BatchFields courses={courses} teachers={teachers} batch={batch} />
+      <p class="wide muted"><small>ছাত্র আছে এমন ব্যাচ অন্য কোর্সে সরানো যায় না।</small></p>
+      <button class="button">সংরক্ষণ</button>
+    </form>
+  </details>
+</Admin>
+
+<style>
+  .cols {
+    margin-top: 0;
+    margin-bottom: var(--space-5);
+  }
+  #teachers .list,
+  #exams .list {
+    margin-bottom: var(--space-4);
+  }
+  .void > span {
+    text-decoration: line-through;
+  }
+  .list li > span:last-child {
+    text-align: right;
+  }
+  .edit {
+    margin-top: var(--space-5);
+  }
+  .edit[open] summary {
+    margin-bottom: var(--space-4);
+  }
+</style>

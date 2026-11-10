@@ -1,0 +1,65 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { listFunds, MANUAL_METHOD_BN, MANUAL_METHODS, parseManualForm, recordManualDonation } from '../../../server/donations';
+import { todayDhaka } from '../../../lib/offline';
+
+// A gift handed to the office (cash, a bank transfer, bKash to the madrasa's
+// own number). It counts at once and gets a receipt number starting MN-.
+const actor = Astro.locals.staff!;
+const today = todayDhaka();
+const ERRORS: Record<string, string> = {
+  amount: 'টাকার পরিমাণ সঠিক নয়।',
+  name: 'দাতার নাম লিখুন।',
+  method: 'মাধ্যম বাছুন।',
+  date: 'তারিখ সঠিক নয়।',
+  phone: 'মোবাইল নম্বর সঠিক নয় (খালিও রাখা যায়)।',
+  fund: 'তহবিল বাছুন।',
+};
+if (Astro.request.method === 'POST') {
+  const v = parseManualForm(await Astro.request.formData());
+  if (!v.ok) return Astro.redirect(`/admin/donations/record?error=${v.error}`, 303);
+  const r = await recordManualDonation(env.DB, actor, v.value);
+  if (!r.ok) return Astro.redirect(`/admin/donations/record?error=${r.error}`, 303);
+  return Astro.redirect(`/admin/donations/record?done=${r.reference}`, 303);
+}
+const funds = await listFunds(env.DB, { all: true });
+const error = ERRORS[Astro.url.searchParams.get('error') ?? ''];
+const done = Astro.url.searchParams.get('done');
+---
+
+<Admin title="অফিসে পাওয়া দান">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">দান CRM</p>
+      <h1>অফিসে পাওয়া দান</h1>
+      <p>নগদ, ব্যাংক বা মাদরাসার নিজের বিকাশ/নগদ নম্বরে আসা দান এখানে লিখুন। সাথে সাথে হিসাবে ধরা হবে ও রসিদ তৈরি হবে।</p>
+    </div>
+  </header>
+
+  {error && <p class="note note--bad" role="alert">{error}</p>}
+  {
+    done && (
+      <p class="note note--good" role="status">
+        সংরক্ষণ হয়েছে। রসিদ নম্বর {done}। <a href={`/donate/done?ref=${done}`} target="_blank">রসিদ খুলুন / প্রিন্ট</a>
+      </p>
+    )
+  }
+
+  <section class="card">
+    <form method="post" class="form-grid">
+      <input type="hidden" name="nonce" value={crypto.randomUUID()} />
+      <label class="field"><span>তহবিল</span><select name="fund_id" required>{funds.map((f) => <option value={f.id}>{f.title}</option>)}</select></label>
+      <label class="field"><span>টাকা</span><input name="amount" required inputmode="numeric" /></label>
+      <label class="field"><span>তারিখ</span><input name="paid_on" type="date" required value={today} max={today} /></label>
+      <label class="field"><span>মাধ্যম</span><select name="method">{MANUAL_METHODS.map((m) => <option value={m}>{MANUAL_METHOD_BN[m]}</option>)}</select></label>
+      <label class="field"><span>দাতার নাম</span><input name="name" required minlength="2" maxlength="80" /></label>
+      <label class="field"><span>মোবাইল (ঐচ্ছিক)</span><input name="phone" inputmode="tel" placeholder="01XXXXXXXXX" /></label>
+      <label class="field wide"><span>যার পক্ষ থেকে (ঐচ্ছিক)</span><input name="on_behalf" maxlength="120" /></label>
+      <label class="field wide"><span>নোট (ঐচ্ছিক)</span><input name="note" maxlength="300" placeholder="যেমন ব্যাংকের ট্রানজেকশন নম্বর" /></label>
+      <label class="check wide"><input type="checkbox" name="anonymous" value="1" /> পাবলিক তালিকায় নাম দেখাবেন না</label>
+      <button class="button"><Icon name="check" /> দান সংরক্ষণ করুন</button>
+    </form>
+  </section>
+</Admin>

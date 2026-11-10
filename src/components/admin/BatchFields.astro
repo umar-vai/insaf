@@ -1,0 +1,78 @@
+---
+// Fields for adding or editing an offline batch.
+import type { OfflineCourse } from '../../server/offline';
+import type { Batch, Teacher } from '../../server/office';
+import { DAY_BN, parseDays, WEEK } from '../../lib/offline';
+
+interface Props {
+  courses: OfflineCourse[];
+  teachers: Teacher[];
+  batch?: Batch | null;
+}
+const { courses, teachers, batch } = Astro.props;
+const days = parseDays(batch?.days ?? '');
+---
+
+<label class="field">
+  <span>কোর্স</span>
+  <select name="courseId" required>
+    {courses.filter((c) => c.status === 'active' || c.id === batch?.courseId).map((c) => <option value={c.id} selected={c.id === batch?.courseId}>{c.title}</option>)}
+  </select>
+</label>
+<label class="field"><span>ব্যাচের নাম</span><input name="name" required maxlength="80" value={batch?.name} placeholder="যেমন ব্যাচ ৩" /></label>
+<label class="field">
+  <span>ব্যাচের ধরন</span>
+  <input name="kind" maxlength="60" value={batch?.kind} list="batch-kinds" placeholder="যেমন সকাল, মহিলা, শুক্রবার" />
+  <datalist id="batch-kinds"><option value="সকাল" /><option value="বিকাল" /><option value="সন্ধ্যা" /><option value="সাপ্তাহিক" /><option value="মহিলা" /><option value="শিশু" /></datalist>
+</label>
+<label class="field">
+  <span>শিক্ষক</span>
+  <select name="teacherId">
+    <option value="">এখনো ঠিক হয়নি</option>
+    {teachers.filter((t) => t.status === 'active' || t.id === batch?.teacherId).map((t) => <option value={t.id} selected={t.id === batch?.teacherId}>{t.name}{t.subject && ` (${t.subject})`}</option>)}
+  </select>
+</label>
+<fieldset class="field wide days">
+  <span>ক্লাসের দিন</span>
+  <div>{WEEK.map((d) => <label class="day"><input type="checkbox" name="days" value={d} checked={days.includes(d)} /> {DAY_BN[d]}</label>)}</div>
+</fieldset>
+<label class="field"><span>শুরুর সময়</span><input name="startTime" type="time" value={batch?.startTime} /></label>
+<label class="field"><span>শেষের সময়</span><input name="endTime" type="time" value={batch?.endTime} /></label>
+<label class="field"><span>রুম (ঐচ্ছিক)</span><input name="room" maxlength="60" value={batch?.room} /></label>
+<label class="field"><span>ব্যাচ শুরুর তারিখ</span><input name="startDate" type="date" value={batch?.startDate} /></label>
+{
+  batch && (
+    <label class="field">
+      <span>অবস্থা</span>
+      <select name="status"><option value="active">চালু</option><option value="archived" selected={batch.status === 'archived'}>বন্ধ</option></select>
+    </label>
+  )
+}
+<label class="field wide"><span>নোট (ঐচ্ছিক)</span><input name="note" maxlength="1000" value={batch?.note} /></label>
+
+<style>
+  .days {
+    border: 0;
+    padding: 0;
+    margin: 0;
+  }
+  .days div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .day {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    background: var(--white);
+    cursor: pointer;
+  }
+  .day:has(input:checked) {
+    background: var(--mint-100);
+    border-color: var(--leaf-500);
+  }
+</style>

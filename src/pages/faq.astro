@@ -1,0 +1,135 @@
+---
+import Base from '../layouts/Base.astro';
+import PageHero from '../components/PageHero.astro';
+import FaqList from '../components/FaqList.astro';
+import Icon from '../components/Icon.astro';
+import { FAQ_GROUPS } from '../lib/faq';
+import { SITE, whatsappUrl } from '../lib/site';
+import { bnDigits } from '../lib/format';
+
+const slug = (i: number) => `group-${i + 1}`;
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=3600');
+---
+
+<Base title="প্রশ্নোত্তর" description="মাদরাসাতুল ইনসাফের ভর্তি, দান ও পোর্টাল নিয়ে সাধারণ প্রশ্নের উত্তর।">
+  <PageHero
+    crumbs={[{ href: '/faq', label: 'প্রশ্নোত্তর' }]}
+    eyebrow="প্রশ্নোত্তর"
+    title="আপনার প্রশ্ন, আমাদের উত্তর"
+    lead="ভর্তি, দান আর স্টুডেন্ট ও শিক্ষক পোর্টাল নিয়ে সাধারণ প্রশ্নগুলো।"
+  />
+
+  <section class="section container layout">
+    <nav class="toc" aria-label="বিষয়">
+      <p class="toc__head">বিষয়</p>
+      <ul>
+        {FAQ_GROUPS.map((g, i) => <li><a href={`#${slug(i)}`}>{g.title}<span>{bnDigits(g.items.length)}</span></a></li>)}
+      </ul>
+      <div class="toc__help">
+        <p>উত্তর খুঁজে পাননি?</p>
+        <a class="button button--block" href={whatsappUrl('আসসালামু আলাইকুম, একটি প্রশ্ন ছিল।')} rel="noopener">
+          <Icon name="whatsapp" /> জিজ্ঞেস করুন
+        </a>
+        <a class="toc__call" href={`tel:${SITE.phone.tel}`}><Icon name="phone" size={16} /> {bnDigits(SITE.phone.display)}</a>
+      </div>
+    </nav>
+
+    <div class="groups">
+      {
+        FAQ_GROUPS.map((g, i) => (
+          <section id={slug(i)} class="group">
+            <h2>{g.title}</h2>
+            <FaqList items={g.items} openFirst={i === 0} />
+          </section>
+        ))
+      }
+    </div>
+  </section>
+</Base>
+
+<style>
+  .layout {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    gap: var(--space-12);
+    align-items: start;
+  }
+  .toc {
+    position: sticky;
+    top: calc(var(--header-h) + var(--space-6));
+  }
+  .toc__head {
+    font: 650 var(--text-sm) / 1.4 var(--font-display);
+    color: var(--color-ornament);
+    margin-bottom: var(--space-3);
+  }
+  .toc ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 var(--space-8);
+    display: grid;
+    gap: var(--space-1);
+  }
+  .toc ul a {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+    text-decoration: none;
+    font: 550 var(--text-base) / 1.4 var(--font-display);
+  }
+  .toc ul a:hover {
+    background: var(--color-tint);
+    color: var(--color-primary);
+  }
+  .toc ul span {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+  .toc__help {
+    padding: var(--space-5);
+    border-radius: var(--radius-lg);
+    background: var(--color-tint) var(--pattern-light);
+    border: 1px solid var(--leaf-200);
+    display: grid;
+    gap: var(--space-3);
+  }
+  .toc__help p {
+    margin: 0;
+    font: 650 var(--text-base) / 1.4 var(--font-display);
+  }
+  .toc__call {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .group {
+    scroll-margin-top: calc(var(--header-h) + 24px);
+  }
+  .group + .group {
+    margin-top: var(--space-12);
+  }
+  .group h2 {
+    font-size: var(--text-xl);
+    margin-bottom: var(--space-5);
+  }
+  @media (max-width: 860px) {
+    .layout {
+      grid-template-columns: 1fr;
+      gap: var(--space-8);
+    }
+    .toc {
+      position: static;
+    }
+    .toc ul {
+      margin-bottom: var(--space-4);
+    }
+    .toc__help {
+      display: none;
+    }
+  }
+</style>

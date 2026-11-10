@@ -1,0 +1,64 @@
+---
+interface Props {
+  eyebrow?: string;
+  title: string;
+  lead?: string;
+  align?: 'start' | 'center';
+  id?: string;
+}
+const { eyebrow, title, lead, align = 'center', id } = Astro.props;
+---
+
+<div class:list={['head', `head--${align}`]} data-reveal>
+  {eyebrow && <p class="eyebrow">{eyebrow}</p>}
+  <h2 id={id}>{title}</h2>
+  {lead && <p class="lead">{lead}</p>}
+  <slot />
+</div>
+
+<style>
+  .head {
+    max-width: 680px;
+    margin-bottom: var(--space-6);
+  }
+  .head--center {
+    margin-inline: auto;
+    text-align: center;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font: 600 var(--text-sm) / 1.4 var(--font-display);
+    color: var(--color-ornament);
+    margin-bottom: var(--space-3);
+  }
+  /* A small eight point star before the eyebrow. */
+  .eyebrow::before {
+    content: '';
+    width: 14px;
+    height: 14px;
+    background: currentColor;
+    clip-path: polygon(50% 0, 62% 30%, 93% 21%, 77% 50%, 93% 79%, 62% 70%, 50% 100%, 38% 70%, 7% 79%, 23% 50%, 7% 21%, 38% 30%);
+    animation: turn 14s linear infinite;
+  }
+  @keyframes turn {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  :global(.on-dark) .eyebrow {
+    color: var(--gold-300);
+  }
+  h2 {
+    margin-bottom: var(--space-3);
+  }
+  .lead {
+    font-size: var(--text-lg);
+    color: var(--color-text-muted);
+    margin: 0;
+  }
+  :global(.on-dark) .lead {
+    color: var(--color-on-dark-muted);
+  }
+</style>

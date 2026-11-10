@@ -1,0 +1,81 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { donorHistory, MANUAL_METHOD_BN } from '../../../server/donations';
+import { waNumber } from '../../../lib/offline';
+import { bnDigits, dateBn, taka } from '../../../lib/format';
+
+let key = '';
+try {
+  key = decodeURIComponent(Astro.params.key ?? '').slice(0, 120);
+} catch {}
+const history = key ? await donorHistory(env.DB, key) : [];
+if (!history.length) return Astro.redirect('/admin/donors', 302);
+const counted = history.filter((d) => d.status === 'paid' && !d.voidedAt);
+const total = counted.reduce((s, d) => s + d.amountMinor, 0);
+const first = history[0]!;
+const byFund = new Map<string, number>();
+for (const d of counted) byFund.set(d.fundTitle, (byFund.get(d.fundTitle) ?? 0) + d.amountMinor);
+const phone = history.find((d) => d.donorPhone)?.donorPhone ?? '';
+const email = history.find((d) => d.donorEmail)?.donorEmail ?? '';
+const wa = phone ? waNumber(phone) : null;
+const STATUS_BN: Record<string, string> = { paid: 'পরিশোধিত', review: 'যাচাই বাকি', pending: 'অসম্পূর্ণ', failed: 'ব্যর্থ', cancelled: 'বাতিল' };
+---
+
+<Admin title={first.donorName}>
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/donors">দাতাগণ</a></p>
+      <h1>{first.donorName}</h1>
+      <p>{[phone, email].filter(Boolean).join(' · ')}</p>
+    </div>
+    <div class="actions">
+      {phone && <a class="button button--ghost" href={`tel:${phone}`}><Icon name="phone" /> ফোন</a>}
+      {wa && <a class="button button--wa" href={`https://wa.me/${wa}?text=${encodeURIComponent('আসসালামু আলাইকুম। মাদরাসাতুল ইনসাফে আপনার দানের জন্য জাযাকাল্লাহু খাইরান।')}`} rel="noopener"><Icon name="whatsapp" /> ধন্যবাদ জানান</a>}
+    </div>
+  </header>
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__label">মোট দান</span><strong class="kpi__value">{taka(total)}</strong></div>
+    <div class="kpi"><span class="kpi__label">কতবার</span><strong class="kpi__value">{bnDigits(counted.length)}</strong></div>
+    <div class="kpi"><span class="kpi__label">প্রথম দান</span><strong class="kpi__value">{dateBn(counted.at(-1)?.paidAt)}</strong></div>
+    <div class="kpi"><span class="kpi__label">শেষ দান</span><strong class="kpi__value">{dateBn(counted[0]?.paidAt)}</strong></div>
+  </div>
+
+  <div class="cols cols--wide">
+    <section class="card">
+      <div class="card__head"><h2>দানের ইতিহাস</h2></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>তারিখ</th><th>তহবিল</th><th class="num">টাকা</th><th>মাধ্যম</th><th>অবস্থা</th></tr></thead>
+          <tbody>
+            {history.map((d) => (
+              <tr>
+                <td>{dateBn(d.paidAt ?? d.createdAt, true)}<small class="muted"><br />{d.reference}</small></td>
+                <td>{d.fundTitle}{d.onBehalf && <small class="muted"><br />পক্ষে: {d.onBehalf}</small>}</td>
+                <td class="num">{taka(d.amountMinor)}</td>
+                <td>{d.gateway === 'manual' ? `অফিস: ${MANUAL_METHOD_BN[d.method] ?? d.method}` : 'অনলাইন'}</td>
+                <td>{d.voidedAt ? <span class="pill pill--cancelled">বাতিল</span> : <span class={`pill pill--${d.status}`}>{STATUS_BN[d.status]}</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>তহবিল অনুযায়ী</h2></div>
+      <ul class="bars">
+        {
+          [...byFund.entries()].map(([fund, minor]) => (
+            <li>
+              <span class="bars__label">{fund}</span>
+              <span class="bars__val">{taka(minor)}</span>
+              <span class="bars__track"><span style={`width:${Math.max(3, (minor / Math.max(1, total)) * 100)}%`}></span></span>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+  </div>
+</Admin>

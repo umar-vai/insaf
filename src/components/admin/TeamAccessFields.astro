@@ -1,0 +1,100 @@
+---
+// The access part of the team form: role, part (online, offline or both),
+// and the level for each module. Picking a role or a part fills the levels;
+// each level can still be changed by hand and the role stays as picked.
+import { LEVEL_BN, LEVELS, MODULE_BN, MODULES, ROLE_BN, ROLES, roleGrants, type AreaChoice, type Grants, type Role } from '../../server/staff';
+
+interface Props {
+  role?: Role;
+  area?: AreaChoice;
+  grants?: Grants;
+  name?: string;
+}
+const { role = 'office', area = 'offline', grants = roleGrants('office', 'offline'), name = '' } = Astro.props;
+const presets = Object.fromEntries(ROLES.map((r) => [r, { online: roleGrants(r, 'online'), offline: roleGrants(r, 'offline'), both: roleGrants(r, 'both') }]));
+const AREA_BN = { online: 'শুধু দান ও ওয়েবসাইট', offline: 'শুধু মাদরাসা অফিস', both: 'অনলাইন ও অফলাইন দুটোই' } as const;
+const PART_BN = { online: 'দান ও ওয়েবসাইট', offline: 'মাদরাসা অফিস', both: 'দুই অংশ' } as const;
+---
+
+<div class="access" data-access data-presets={JSON.stringify(presets)}>
+  <label class="field"><span>নাম</span><input name="name" maxlength="120" value={name} /></label>
+  <label class="field">
+    <span>পদ</span>
+    <select name="role" data-role>{ROLES.map((r) => <option value={r} selected={r === role}>{ROLE_BN[r].label}</option>)}</select>
+  </label>
+  <label class="field">
+    <span>কোন অংশের জন্য</span>
+    <select name="area" data-area>{(['online', 'offline', 'both'] as const).map((a) => <option value={a} selected={a === area}>{AREA_BN[a]}</option>)}</select>
+  </label>
+  <label class="field" data-phone hidden={role !== 'teacher'}><span>ফোন (শিক্ষকের তালিকার জন্য)</span><input name="phone" type="tel" maxlength="30" /></label>
+  <p class="wide muted" data-hint><small>{ROLE_BN[role].hint}</small></p>
+  <div class="wide table-wrap">
+    <table class="levels">
+      <thead><tr><th>অংশ</th><th>ক্ষমতা</th></tr></thead>
+      <tbody>
+        {MODULES.map((m) => (
+          <tr>
+            <td><strong>{MODULE_BN[m].label}</strong> <small class="muted">({PART_BN[MODULE_BN[m].area]})</small><br /><small class="muted">{MODULE_BN[m].hint}</small></td>
+            <td>
+              <select name={`level_${m}`} data-level={m} aria-label={`${MODULE_BN[m].label} এর ক্ষমতা`}>
+                <option value="">{LEVEL_BN.none}</option>
+                {LEVELS.map((l) => <option value={l} selected={grants[m] === l}>{LEVEL_BN[l]}</option>)}
+              </select>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+  <p class="wide muted"><small>শুধু দেখতে পারবে: পাতা খুলবে, কিছু বদলাতে পারবে না। দেখা ও কাজ করা: রোজকার কাজ (ফি নেওয়া, খরচ লেখা, হাজিরা)। সম্পূর্ণ: এর সাথে অনুমোদন, রসিদ বা খরচ বাতিল, বেতন পরিশোধ। টিম, সিস্টেম সেটিংস আর "কে কী করেছে" সবসময় শুধু মালিকের।</small></p>
+</div>
+
+<script>
+  const HINTS: Record<string, string> = {
+    admin: 'বাছাই করা অংশে সব ক্ষমতা, অনুমোদন ও বাতিলসহ',
+    manager: 'সব কাজ করতে পারবে, অনুমোদন ও বাতিল ছাড়া',
+    accountant: 'হিসাব ও বেতনে সম্পূর্ণ, বাকিগুলো শুধু দেখা',
+    office: 'ভর্তি, ফি আদায়, বকেয়া, হাজিরা, নোটিশ',
+    content: 'অনলাইন কোর্স, লেসন, ব্লগ, নোটিশ',
+    teacher: 'শিক্ষক প্যানেল পাবেন, অ্যাডমিনে ব্যাচ ও রুটিন শুধু দেখা',
+    viewer: 'বাছাই করা অংশ দেখতে পারবে, কিছু বদলাতে পারবে না',
+    custom: 'প্রতিটি অংশের ক্ষমতা নিচে হাতে বাছুন',
+  };
+  document.querySelectorAll<HTMLElement>('[data-access]').forEach((box) => {
+    const presets = JSON.parse(box.dataset.presets!) as Record<string, Record<string, Record<string, string>>>;
+    const role = box.querySelector('[data-role]') as unknown as HTMLSelectElement;
+    const area = box.querySelector('[data-area]') as unknown as HTMLSelectElement;
+    const levels = [...box.querySelectorAll('[data-level]')] as unknown as HTMLSelectElement[];
+    const phone = box.querySelector<HTMLElement>('[data-phone]')!;
+    const hint = box.querySelector<HTMLElement>('[data-hint] small')!;
+    const fill = () => {
+      phone.hidden = role.value !== 'teacher';
+      hint.textContent = HINTS[role.value] ?? '';
+      if (role.value === 'custom') return;
+      const g = presets[role.value]?.[area.value] ?? {};
+      for (const s of levels) s.value = g[s.dataset.level!] ?? '';
+    };
+    role.addEventListener('change', fill);
+    area.addEventListener('change', fill);
+  });
+</script>
+
+<style>
+  .access {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+    gap: var(--space-3);
+  }
+  .access .wide {
+    grid-column: 1 / -1;
+  }
+  .access p {
+    margin: 0;
+  }
+  .levels td:last-child {
+    width: 15rem;
+  }
+  .levels select {
+    width: 100%;
+  }
+</style>

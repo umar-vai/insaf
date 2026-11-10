@@ -1,0 +1,158 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../components/AccountShell.astro';
+import Icon from '../../components/Icon.astro';
+import { currentStudent } from '../../server/students';
+import { profileFor } from '../../server/account';
+import { dateBn } from '../../lib/format';
+import { whatsappUrl } from '../../lib/site';
+import { isPhoneEmail, loginLabel } from '../../server/password';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Fprofile', 303);
+const profile = (await profileFor(env.DB, me.id))!;
+
+const saved = Astro.url.searchParams.get('saved') === '1';
+const ERRORS: Record<string, string> = {
+  name: 'পুরো নাম লিখুন (কমপক্ষে ২ অক্ষর)।',
+  phone: 'মোবাইল নম্বরটি সঠিক নয়। ০১ দিয়ে শুরু ১১ সংখ্যার নম্বর লিখুন।',
+};
+const error = ERRORS[Astro.url.searchParams.get('error') ?? ''];
+const PW: Record<string, [string, string]> = {
+  ok: ['good', 'পাসওয়ার্ড বদলানো হয়েছে।'],
+  wrong: ['bad', 'বর্তমান পাসওয়ার্ড মেলেনি।'],
+  weak: ['bad', 'নতুন পাসওয়ার্ড কমপক্ষে ৬ অক্ষরের হতে হবে।'],
+  mismatch: ['bad', 'নতুন পাসওয়ার্ড দুইবার একই লিখুন।'],
+};
+const pw = PW[Astro.url.searchParams.get('pw') ?? ''];
+const phoneLogin = isPhoneEmail(profile.email);
+---
+
+<AccountShell me={me} active="profile" title="প্রোফাইল">
+  {saved && <p class="note note--good" role="status">প্রোফাইল সংরক্ষণ হয়েছে।</p>}
+  {error && <p class="note note--bad" role="alert">{error}</p>}
+  {pw && <p class={`note note--${pw[0]}`} role="status">{pw[1]}</p>}
+
+  <section class="panel">
+    <div class="panel__head">
+      <h2>ব্যক্তিগত তথ্য</h2>
+    </div>
+    <form method="post" action="/api/account/profile" class="pf">
+      <label for="name">পুরো নাম</label>
+      <input id="name" name="name" autocomplete="name" required minlength="2" maxlength="80" value={profile.name} />
+
+      <label for="phone">মোবাইল নম্বর</label>
+      <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="01XXXXXXXXX" value={profile.phone ?? ''} />
+
+      <label for="email">{phoneLogin ? 'লগইন নম্বর' : 'ইমেইল'}</label>
+      <input id="email" value={loginLabel(profile.email)} readonly aria-describedby="email-hint" />
+      <p class="hint" id="email-hint">
+        {phoneLogin ? 'এই নম্বর দিয়েই লগইন করেন।' : 'এই ইমেইল দিয়েই লগইন করেন।'} বদলাতে চাইলে <a href={whatsappUrl(`আসসালামু আলাইকুম, আমার পোর্টালের লগইন বদলাতে চাই। বর্তমান লগইন: ${loginLabel(profile.email)}`)} rel="noopener">WhatsApp এ জানান</a>।
+      </p>
+
+      <button class="button" type="submit"><Icon name="check" /> সংরক্ষণ করুন</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel__head">
+      <h2>অ্যাকাউন্টের তথ্য</h2>
+    </div>
+    <dl class="facts">
+      {profile.createdAt && <div><dt>অ্যাকাউন্ট খোলা হয়েছে</dt><dd>{dateBn(profile.createdAt)}</dd></div>}
+      {profile.lastLoginAt && <div><dt>শেষ লগইন</dt><dd>{dateBn(profile.lastLoginAt, true)}</dd></div>}
+      <div><dt>লগইনের উপায়</dt><dd>{[profile.hasPassword && 'পাসওয়ার্ড', profile.google && 'Google'].filter(Boolean).join(', ') || 'Google'}</dd></div>
+    </dl>
+  </section>
+
+  <section class="panel" id="password">
+    <div class="panel__head">
+      <h2>{profile.hasPassword ? 'পাসওয়ার্ড বদলান' : 'পাসওয়ার্ড দিন'}</h2>
+    </div>
+    <form method="post" action="/api/account/password" class="pf">
+      {profile.hasPassword && (
+        <>
+          <label for="current">বর্তমান পাসওয়ার্ড</label>
+          <input id="current" name="current" type="password" autocomplete="current-password" required />
+        </>
+      )}
+      <label for="new">নতুন পাসওয়ার্ড</label>
+      <input id="new" name="new" type="password" autocomplete="new-password" required minlength="6" />
+      <label for="again">নতুন পাসওয়ার্ড আবার</label>
+      <input id="again" name="again" type="password" autocomplete="new-password" required minlength="6" />
+      <button class="button" type="submit"><Icon name="lock" /> পাসওয়ার্ড সংরক্ষণ</button>
+    </form>
+  </section>
+
+  <form method="post" action="/api/auth/logout" class="out">
+    <button class="button button--ghost" type="submit"><Icon name="logout" /> লগআউট</button>
+  </form>
+</AccountShell>
+
+<style>
+  .pf {
+    display: grid;
+    gap: var(--space-2);
+    max-width: 520px;
+  }
+  .pf label {
+    margin-top: var(--space-3);
+    font: 600 var(--text-sm) / 1.4 var(--font-display);
+  }
+  .pf label:first-child {
+    margin-top: 0;
+  }
+  .pf input {
+    min-height: 50px;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-line);
+    background: var(--color-bg);
+    font: inherit;
+    color: var(--color-text);
+  }
+  .pf input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgb(201 162 78 / 0.2);
+  }
+  .pf input[readonly] {
+    background: var(--mint-50);
+    color: var(--color-text-muted);
+  }
+  .hint {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+  }
+  .pf .button {
+    justify-self: start;
+    margin-top: var(--space-4);
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    gap: var(--space-4) var(--space-6);
+    margin: 0;
+  }
+  .facts dt {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+  }
+  .facts dd {
+    margin: 0;
+    font-weight: 600;
+  }
+  .out {
+    display: none;
+  }
+  @media (max-width: 960px) {
+    .out {
+      display: block;
+    }
+    .out .button {
+      width: 100%;
+    }
+  }
+</style>

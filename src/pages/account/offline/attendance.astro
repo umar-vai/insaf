@@ -1,0 +1,49 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotOffline from '../../../components/NotOffline.astro';
+import Icon from '../../../components/Icon.astro';
+import { currentStudent } from '../../../server/students';
+import { offlineIdsForEmail } from '../../../server/panels';
+import { studentAttendance } from '../../../server/office';
+import { ATTENDANCE_BN, DAY_SHORT_BN, dayBn, weekday } from '../../../lib/offline';
+import { bnDigits } from '../../../lib/format';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline%2Fattendance', 303);
+const ids = await offlineIdsForEmail(env.DB, me.email);
+const days = (await Promise.all(ids.map((id) => studentAttendance(env.DB, id, 120)))).flat().sort((a, b) => b.day.localeCompare(a.day));
+const count = (s: string) => days.filter((d) => d.status === s).length;
+const rate = days.length ? Math.round(((count('present') + count('late')) / days.length) * 100) : null;
+---
+
+{
+  ids.length === 0 ? (
+    <NotOffline me={me} />
+  ) : (
+    <AccountShell me={me} active="offline-attendance" title="আমার হাজিরা">
+      <div class="ui">
+        <header class="page-head"><div><h1>আমার হাজিরা</h1><p>শেষ {bnDigits(days.length)} দিনের হাজিরা।</p></div></header>
+        <div class="kpis">
+          <div class="kpi kpi--info"><span class="kpi__icon"><Icon name="chart" /></span><span class="kpi__label">উপস্থিতির হার</span><strong class="kpi__value">{rate === null ? 'নেই' : `${bnDigits(rate)}%`}</strong></div>
+          <div class="kpi"><span class="kpi__icon"><Icon name="check" /></span><span class="kpi__label">উপস্থিত</span><strong class="kpi__value">{bnDigits(count('present'))}</strong><span class="kpi__hint">দেরিতে {bnDigits(count('late'))}</span></div>
+          <div class="kpi kpi--bad"><span class="kpi__icon"><Icon name="close" /></span><span class="kpi__label">অনুপস্থিত</span><strong class="kpi__value">{bnDigits(count('absent'))}</strong><span class="kpi__hint">ছুটি {bnDigits(count('leave'))}</span></div>
+        </div>
+        <section class="card block">
+          {days.length === 0 ? <p class="muted">এখনো হাজিরা নেওয়া হয়নি।</p> : (
+            <ul class="list">
+              {days.map((d) => <li><span>{DAY_SHORT_BN[weekday(d.day)]}, {dayBn(d.day)} <small>{d.batchName}</small></span><span class={`pill pill--${d.status}`}>{ATTENDANCE_BN[d.status]}</span></li>)}
+            </ul>
+          )}
+        </section>
+      </div>
+    </AccountShell>
+  )
+}
+
+<style>
+  .block {
+    margin-top: var(--space-5);
+  }
+</style>

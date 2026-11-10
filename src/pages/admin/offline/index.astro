@@ -1,0 +1,183 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import BarChart from '../../../components/admin/BarChart.astro';
+import { offlineOverview } from '../../../server/offline';
+import { classesOn, monthlyFigures, recentPayments, todayMoney } from '../../../server/office';
+import { feePaymentsToReview } from '../../../server/fee-pay';
+import { openTicketCount } from '../../../server/tickets';
+import { addMonths, DAY_BN, dayBn, METHOD_BN, monthBn, studentCode, timeBn, todayDhaka, weekday, type PayMethod } from '../../../lib/offline';
+import { bnDigits, taka } from '../../../lib/format';
+
+const today = todayDhaka();
+const month = today.slice(0, 7);
+const [o, money, classes, months, recent] = await Promise.all([
+  offlineOverview(env.DB, today),
+  todayMoney(env.DB, today),
+  classesOn(env.DB, today),
+  monthlyFigures(env.DB, addMonths(`${month}-01`, -5).slice(0, 7), month, { online: false, offline: true }),
+  recentPayments(env.DB, 6),
+]);
+const [reviews, pendingLeave, pendingSpend, openTickets] = await Promise.all([
+  feePaymentsToReview(env.DB),
+  env.DB.prepare(`SELECT count(*) AS n FROM leave_requests WHERE status = 'pending'`).first<{ n: number }>(),
+  env.DB.prepare(`SELECT count(*) AS n FROM expenses WHERE status = 'pending' AND voided_at IS NULL`).first<{ n: number }>(),
+  openTicketCount(env.DB),
+]);
+const net = o.collectedThisMonthMinor - money.spentMonth;
+---
+
+<Admin title="অফিস ড্যাশবোর্ড">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">{DAY_BN[weekday(today)]}, {dayBn(today)}</p>
+      <h1>মাদরাসা ড্যাশবোর্ড</h1>
+      <p>আজকের ক্লাস, টাকার হিসাব আর যাদের বকেয়া আছে, সব এক জায়গায়।</p>
+    </div>
+    <div class="actions">
+      <a class="button" href="/admin/offline/students?new=1"><Icon name="plus" /> নতুন ভর্তি</a>
+      <a class="button button--leaf" href="/admin/offline/collect"><Icon name="coins" /> ফি নিন</a>
+      <a class="button button--ghost" href="/admin/offline/expenses?new=1"><Icon name="wallet" /> খরচ লিখুন</a>
+      <a class="button button--ghost" href="/admin/offline/attendance"><Icon name="clipboard" /> হাজিরা</a>
+    </div>
+  </header>
+
+  {
+    (reviews.length > 0 || (pendingLeave?.n ?? 0) > 0 || (pendingSpend?.n ?? 0) > 0 || openTickets > 0) && (
+      <div class="alerts">
+        {openTickets > 0 && <a class="note note--warn" href="/admin/offline/tickets?status=open"><Icon name="mail" /> ছাত্র বা শিক্ষকের {bnDigits(openTickets)}টি টিকেট উত্তরের অপেক্ষায়।</a>}
+        {reviews.length > 0 && <a class="note note--bad" href="/admin/offline/online-payments"><Icon name="alert" /> অনলাইনে আসা {bnDigits(reviews.length)}টি ফি যাচাই করা দরকার।</a>}
+        {(pendingSpend?.n ?? 0) > 0 && <a class="note note--warn" href="/admin/offline/expenses"><Icon name="wallet" /> {bnDigits(pendingSpend!.n)}টি বড় খরচ অনুমোদনের অপেক্ষায়।</a>}
+        {(pendingLeave?.n ?? 0) > 0 && <a class="note note--warn" href="/admin/offline/leave"><Icon name="calendar" /> {bnDigits(pendingLeave!.n)}টি ছুটির আবেদন অনুমোদনের অপেক্ষায়।</a>}
+      </div>
+    )
+  }
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__icon"><Icon name="coins" /></span><span class="kpi__label">আজকের আদায়</span><strong class="kpi__value">{taka(money.collected)}</strong><span class="kpi__hint">{bnDigits(money.payments)}টি রসিদ</span></div>
+    <div class="kpi kpi--warn"><span class="kpi__icon"><Icon name="wallet" /></span><span class="kpi__label">আজকের খরচ</span><strong class="kpi__value">{taka(money.spent)}</strong><span class="kpi__hint">এই মাসে {taka(money.spentMonth)}</span></div>
+    <a class="kpi" href="/admin/offline/reports"><span class="kpi__icon"><Icon name="chart" /></span><span class="kpi__label">এই মাসে আদায়</span><strong class="kpi__value">{taka(o.collectedThisMonthMinor)}</strong><span class="kpi__hint">খরচ বাদে {net < 0 ? 'ঘাটতি' : 'থাকে'} {taka(Math.abs(net))}</span></a>
+    <a class={`kpi ${o.totalOverdueMinor ? 'kpi--bad' : ''}`} href="/admin/offline/dues"><span class="kpi__icon"><Icon name="alert" /></span><span class="kpi__label">তারিখ পার হওয়া বকেয়া</span><strong class="kpi__value">{taka(o.totalOverdueMinor)}</strong><span class="kpi__hint">{bnDigits(o.overdue.length)} জন · মোট বাকি {taka(o.totalDueMinor)}</span></a>
+    <a class="kpi kpi--info" href="/admin/offline/students"><span class="kpi__icon"><Icon name="users" /></span><span class="kpi__label">চলমান ছাত্র</span><strong class="kpi__value">{bnDigits(o.activeStudents)}</strong><span class="kpi__hint">{bnDigits(o.activeCourses)}টি কোর্স · {bnDigits(money.teachers)} জন শিক্ষক</span></a>
+  </div>
+
+  <div class="cols cols--wide">
+    <section class="card">
+      <div class="card__head"><h2>শেষ ৬ মাস: আদায় ও খরচ</h2><a href="/admin/offline/reports">পুরো রিপোর্ট</a></div>
+      <BarChart
+        caption="শেষ ছয় মাসের ফি আদায় ও খরচ"
+        series={[{ label: 'আদায়', color: 'var(--chart-income)' }, { label: 'খরচ', color: 'var(--chart-expense)' }]}
+        rows={months.map((m) => ({ label: monthBn(m.month), values: [m.offlineMinor, m.expenseMinor] }))}
+      />
+    </section>
+
+    <section class="card">
+      <div class="card__head"><h2>আজকের ক্লাস</h2><a href="/admin/offline/batches?view=routine">সাপ্তাহিক রুটিন</a></div>
+      {
+        classes.length === 0 ? (
+          <div class="empty"><Icon name="calendar" size={28} /><p>আজ কোনো ব্যাচের ক্লাস নেই।</p><a href="/admin/offline/batches">ব্যাচ ও রুটিন সাজান</a></div>
+        ) : (
+          <ul class="list">
+            {classes.map((b) => (
+              <li>
+                <div>
+                  <strong>{b.name}</strong> <span class="muted">· {b.courseTitle}</span>
+                  <small>{[timeBn(b.startTime), b.teacherName, b.room].filter(Boolean).join(' · ') || 'সময় দেওয়া নেই'}</small>
+                </div>
+                {b.marked > 0 ? (
+                  <span class="pill pill--present">হাজিরা নেওয়া হয়েছে</span>
+                ) : (
+                  <a class="button button--sm button--ghost" href={`/admin/offline/attendance?batch=${b.id}&day=${today}`}>হাজিরা নিন</a>
+                )}
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+  </div>
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>তারিখ পার হয়ে গেছে</h2><a href="/admin/offline/dues">সবাইকে রিমাইন্ডার দিন</a></div>
+      {
+        o.overdue.length === 0 ? (
+          <div class="empty"><Icon name="check" size={28} /><p>কারও কিস্তির তারিখ পার হয়নি। আলহামদুলিল্লাহ।</p></div>
+        ) : (
+          <ul class="list">
+            {o.overdue.slice(0, 7).map((e) => (
+              <li>
+                <div>
+                  <a href={`/admin/offline/students/${e.studentId}`}><strong>{e.studentName}</strong></a> <span class="id">{studentCode(e.studentNo)}</span>
+                  <small>{e.courseTitle}{e.batch && ` · ${e.batch}`} · {dayBn(e.ledger.next?.dueDate)} থেকে</small>
+                </div>
+                <strong class="bad num">{taka(e.ledger.overdueMinor)}</strong>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    <section class="card">
+      <div class="card__head"><h2>এই মাসে কিস্তি আসবে</h2><span class="muted">{monthBn(month, true)}</span></div>
+      {
+        o.dueSoon.length === 0 ? (
+          <div class="empty"><Icon name="calendar" size={28} /><p>এই মাসে আর কারও কিস্তি নেই।</p></div>
+        ) : (
+          <ul class="list">
+            {o.dueSoon.slice(0, 7).map((e) => (
+              <li>
+                <div>
+                  <a href={`/admin/offline/students/${e.studentId}`}><strong>{e.studentName}</strong></a>
+                  <small>{dayBn(e.ledger.next!.dueDate)} · {e.courseTitle}</small>
+                </div>
+                <span class="num">{taka(e.ledger.next!.amountMinor)}</span>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    <section class="card">
+      <div class="card__head"><h2>সর্বশেষ জমা</h2><a href="/admin/offline/reports">সব পেমেন্ট</a></div>
+      {
+        recent.length === 0 ? (
+          <div class="empty"><Icon name="receipt" size={28} /><p>এখনো কোনো টাকা জমা হয়নি।</p></div>
+        ) : (
+          <ul class="list">
+            {recent.map((p) => (
+              <li>
+                <div>
+                  <a href={`/admin/offline/students/${p.studentId}`}><strong>{p.studentName}</strong></a>
+                  <small>
+                    <a href={`/admin/offline/receipt/${p.id}`} target="_blank">রসিদ #{bnDigits(p.receiptNo)}</a> · {dayBn(p.paidOn)} · {METHOD_BN[p.method as PayMethod] ?? p.method}
+                  </small>
+                </div>
+                <strong class="good num">{taka(p.amountMinor)}</strong>
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+  </div>
+</Admin>
+
+<style>
+  .alerts {
+    display: grid;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+  }
+  .alerts a {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0;
+    font-weight: 600;
+    text-decoration: none;
+  }
+</style>

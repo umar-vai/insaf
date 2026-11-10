@@ -1,0 +1,281 @@
+---
+import Icon from '../Icon.astro';
+import { bnDigits } from '../../lib/format';
+import { MIN_TAKA, MAX_TAKA, presets, type Fund } from '../../server/donations';
+
+// The donation form. The donor picks a fund (or the page fixes one), an
+// amount, and gives a name and a phone number or email. The server checks
+// everything again; the amount is what SSLCommerz must confirm later.
+// Where the visitor came from (utm_source, utm_campaign of the ad) is kept
+// from the first page they opened and sent along, to see which ads work.
+interface Props {
+  funds: Pick<Fund, 'slug' | 'title' | 'presetAmounts'>[];
+  /** Fix the fund (fund pages, the land page). */
+  fund?: string;
+  /** Pre-filled amount in taka (the zakat calculator). */
+  amount?: number;
+  title?: string;
+  /** Where to come back to when something is wrong. */
+  from: string;
+  error?: string | null;
+  compact?: boolean;
+}
+const { funds, fund, amount, title = 'আপনার দান পাঠান', from, error, compact = false } = Astro.props;
+const fixed = fund ? funds.find((f) => f.slug === fund) : undefined;
+const amounts = presets(fixed ?? funds[0] ?? { presetAmounts: '500,1000,2000,5000,10000' });
+const ERRORS: Record<string, string> = {
+  fund: 'তহবিল বেছে নিন।',
+  amount: `দানের পরিমাণ ${bnDigits(MIN_TAKA)} থেকে ${bnDigits(MAX_TAKA.toLocaleString('en-IN'))} টাকার মধ্যে লিখুন। এর বেশি হলে নিচের ব্যাংক অ্যাকাউন্টে পাঠান।`,
+  name: 'আপনার নাম লিখুন।',
+  contact: 'সঠিক মোবাইল নম্বর বা ইমেইল লিখুন, রসিদ পাঠাতে লাগবে।',
+  off: 'অনলাইন পেমেন্ট এই মুহূর্তে চালু নেই। দয়া করে ব্যাংকে বা অফিসে দান করুন, অথবা ফোন করুন।',
+  gateway: 'পেমেন্ট পেজ খোলা যায়নি। একটু পরে আবার চেষ্টা করুন।',
+  too_many: 'অল্প সময়ে অনেকবার চেষ্টা হয়েছে। এক মিনিট পরে আবার চেষ্টা করুন।',
+};
+const preset = amount ?? amounts[1] ?? amounts[0];
+const custom = amount !== undefined && !amounts.includes(amount);
+---
+
+<form class:list={['df', compact && 'df--compact']} method="post" action="/api/donate" id="donate-form" data-donate-form>
+  <h2 class="df__title"><Icon name="heart" size={22} /> {title}</h2>
+  {error && ERRORS[error] && <p class="df__error" role="alert">{ERRORS[error]}</p>}
+  <input type="hidden" name="from" value={from} />
+  <input type="hidden" name="utm_source" value="" data-utm="utm_source" />
+  <input type="hidden" name="utm_campaign" value="" data-utm="utm_campaign" />
+
+  {
+    fixed ? (
+      <input type="hidden" name="fund" value={fixed.slug} />
+    ) : (
+      <label class="df__field">
+        <span>তহবিল *</span>
+        <select name="fund" required>
+          {funds.map((f) => (
+            <option value={f.slug}>{f.title}</option>
+          ))}
+        </select>
+      </label>
+    )
+  }
+
+  <fieldset class="df__amounts">
+    <legend>পরিমাণ (টাকা) *</legend>
+    <div class="df__chips">
+      {
+        amounts.map((a) => (
+          <label class="df__chip">
+            <input type="radio" name="amount" value={a} checked={!custom && a === preset} />
+            <span>৳{bnDigits(a.toLocaleString('en-IN'))}</span>
+          </label>
+        ))
+      }
+    </div>
+    <label class="df__other">
+      <span>অন্য পরিমাণ</span>
+      <input type="text" inputmode="numeric" name="amount_other" placeholder="যেকোনো পরিমাণ লিখুন" value={custom ? String(amount) : ''} autocomplete="off" />
+    </label>
+  </fieldset>
+
+  <div class="df__row">
+    <label class="df__field">
+      <span>আপনার নাম *</span>
+      <input name="name" required minlength="2" maxlength="80" autocomplete="name" />
+    </label>
+    <label class="df__field">
+      <span>মোবাইল বা ইমেইল *</span>
+      <input name="contact" required maxlength="120" inputmode="tel" autocomplete="tel" placeholder="০১XXXXXXXXX" />
+    </label>
+  </div>
+  <label class="df__field">
+    <span>অন্য কারো পক্ষ থেকে দান (ঐচ্ছিক)</span>
+    <input name="on_behalf" maxlength="120" placeholder="যেমন: মরহুম বাবা, মা বা প্রিয়জনের নাম" />
+  </label>
+  <label class="df__check">
+    <input type="checkbox" name="anonymous" value="1" />
+    <span>দাতাদের তালিকায় আমার নাম দেখাবেন না</span>
+  </label>
+
+  <button class="button button--gold button--block df__submit" type="submit">
+    <Icon name="lock" size={18} /> <span data-donate-label>দান করুন</span>
+  </button>
+  <p class="df__note">বিকাশ, নগদ, রকেট, কার্ড বা নেট ব্যাংকিংয়ে SSLCommerz এর নিরাপদ পেজে পেমেন্ট হবে। পেমেন্ট নিশ্চিত হলেই রসিদ পাবেন।</p>
+</form>
+
+<script>
+  // Remember the ad a visitor arrived from, then fill it into every donation form.
+  const KEY = 'insaf.utm';
+  const params = new URLSearchParams(location.search);
+  let saved: Record<string, string> = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(KEY) ?? '{}');
+  } catch {}
+  const src = params.get('utm_source') ?? (params.has('fbclid') ? 'facebook' : null);
+  if (src) {
+    saved = { utm_source: src.slice(0, 60), utm_campaign: (params.get('utm_campaign') ?? '').slice(0, 100) };
+    try {
+      localStorage.setItem(KEY, JSON.stringify(saved));
+    } catch {}
+  }
+  document.querySelectorAll<HTMLInputElement>('[data-utm]').forEach((i) => (i.value = saved[i.dataset.utm!] ?? ''));
+
+  // The button says how much will be given.
+  const BN = '০১২৩৪৫৬৭৮৯';
+  const bn = (s: string) => s.replace(/\d/g, (d) => BN[+d]!);
+  const toAscii = (s: string) => s.replace(/[০-৯]/g, (d) => String(BN.indexOf(d)));
+  document.querySelectorAll<HTMLFormElement>('[data-donate-form]').forEach((form) => {
+    const label = form.querySelector<HTMLElement>('[data-donate-label]')!;
+    const other = form.querySelector<HTMLInputElement>('[name=amount_other]')!;
+    const update = () => {
+      const typed = Number(toAscii(other.value).replace(/[^\d]/g, ''));
+      const picked = form.querySelector<HTMLInputElement>('[name=amount]:checked');
+      const n = typed || Number(picked?.value ?? 0);
+      label.textContent = n ? `৳${bn(n.toLocaleString('en-IN'))} দান করুন` : 'দান করুন';
+    };
+    other.addEventListener('input', () => {
+      if (other.value) form.querySelectorAll<HTMLInputElement>('[name=amount]').forEach((r) => (r.checked = false));
+      update();
+    });
+    form.querySelectorAll<HTMLInputElement>('[name=amount]').forEach((r) =>
+      r.addEventListener('change', () => {
+        other.value = '';
+        update();
+      }),
+    );
+    update();
+    form.addEventListener('submit', () => {
+      const btn = form.querySelector<HTMLButtonElement>('button[type=submit]')!;
+      setTimeout(() => (btn.disabled = true), 0);
+      label.textContent = 'পেমেন্ট পেজ খোলা হচ্ছে…';
+      (window as unknown as { fbq?: (...a: unknown[]) => void }).fbq?.('track', 'InitiateCheckout');
+    });
+  });
+</script>
+
+<style>
+  .df {
+    display: grid;
+    gap: var(--space-4);
+    padding: clamp(1.25rem, 1rem + 1.5vw, 2rem);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    color: var(--color-text);
+  }
+  .df__title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-xl);
+    margin: 0;
+    color: var(--color-primary-strong);
+  }
+  .df__title :global(svg) {
+    color: var(--gold-500);
+  }
+  .df__error {
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    background: var(--bad-100);
+    color: var(--bad-700);
+    font-size: var(--text-sm);
+  }
+  .df__field,
+  .df__other {
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+  .df input:not([type='radio'], [type='checkbox']),
+  .df select {
+    width: 100%;
+    min-height: 48px;
+    padding: var(--space-2) var(--space-3);
+    border: 1.5px solid var(--color-line);
+    border-radius: var(--radius-sm);
+    background: var(--ivory);
+    font: 500 var(--text-base) / 1.4 var(--font-body);
+    color: var(--color-text);
+  }
+  .df input:focus-visible,
+  .df select:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--color-focus) 40%, transparent);
+    border-color: var(--color-primary);
+  }
+  .df__amounts {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .df__amounts legend {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    margin-bottom: var(--space-2);
+  }
+  .df__chips {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: var(--space-2);
+  }
+  .df__chip input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .df__chip span {
+    display: grid;
+    place-items: center;
+    min-height: 48px;
+    border: 1.5px solid var(--color-line);
+    border-radius: var(--radius-sm);
+    font: 650 var(--text-base) / 1 var(--font-display);
+    cursor: pointer;
+    background: var(--ivory);
+    transition:
+      background 0.2s,
+      border-color 0.2s,
+      color 0.2s;
+  }
+  .df__chip input:checked + span {
+    background: var(--green-700);
+    border-color: var(--green-700);
+    color: var(--white);
+  }
+  .df__chip input:focus-visible + span {
+    outline: 3px solid var(--gold-300);
+  }
+  .df__row {
+    display: grid;
+    gap: var(--space-4);
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+  .df__check {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+  .df__check input {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--green-700);
+  }
+  .df__submit {
+    min-height: 54px;
+    font-size: var(--text-lg);
+  }
+  .df__note {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    text-align: center;
+  }
+  .df--compact {
+    gap: var(--space-3);
+  }
+</style>

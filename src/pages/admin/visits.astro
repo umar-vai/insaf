@@ -1,0 +1,269 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../layouts/Admin.astro';
+import Icon from '../../components/Icon.astro';
+import { dayReport, KIND_BN, pageLabel, studentDay, type ActivityRow } from '../../server/activity';
+import { todayDhaka } from '../../lib/offline';
+import { bnDigits, dateBn } from '../../lib/format';
+
+// Owners and the admin role only (middleware: needsFull). Who came to the
+// site today (Dhaka), and what each signed in student did. Earlier days are
+// deleted every night.
+const day = todayDhaka();
+const studentId = Astro.url.searchParams.get('student') ?? '';
+const focus = studentId ? await studentDay(env.DB, day, studentId) : null;
+const report = focus ? null : await dayReport(env.DB, day);
+
+const time = (iso: string) =>
+  new Intl.DateTimeFormat('bn-BD', { hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Dhaka' }).format(new Date(iso));
+const n = (v: number | null | undefined) => bnDigits(v ?? 0);
+const DEVICE_BN: Record<string, string> = { mobile: 'মোবাইল', desktop: 'কম্পিউটার', tablet: 'ট্যাবলেট' };
+
+/** What a row says in plain words. */
+function what(r: ActivityRow): string {
+  if (r.kind === 'page') return pageLabel(r.path, r.path.startsWith('/courses/') ? r.courseTitle : null);
+  if (r.kind === 'login') return r.detail === 'google' ? 'Google দিয়ে' : r.detail === 'email' ? 'ইমেইল কোড দিয়ে' : '';
+  if (r.kind === 'file') return r.detail;
+  return r.lessonTitle ?? r.courseTitle ?? '';
+}
+const hourBn = (h: number) => `${bnDigits(h % 12 === 0 ? 12 : h % 12)} ${h < 12 ? 'AM' : 'PM'}`;
+const peak = report ? Math.max(1, ...report.hours.map((h) => h.visitors)) : 1;
+const s = report?.summary;
+---
+
+<Admin title="আজকের ভিজিট">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">অনলাইন</p>
+      <h1>আজকের ভিজিট</h1>
+      <p>কতজন ওয়েবসাইটে এসেছেন, কোন স্টুডেন্ট লগইন করেছেন, কে কোন কোর্স আর লেসন দেখেছেন, কুইজ দিয়েছেন বা ফাইল নামিয়েছেন। শুধু আজকের ({dateBn(day)}) হিসাব রাখা হয়; প্রতি রাত ১২টার পর আগের দিনের তথ্য নিজে থেকে মুছে যায়।</p>
+    </div>
+  </header>
+
+  {
+    focus && (
+      <section class="card">
+        <div class="card__head">
+          <h2>{focus.student ? focus.student.name || focus.student.email : 'স্টুডেন্ট'}: আজ যা করেছেন</h2>
+          <a href="/admin/visits">সবার তালিকায় ফিরুন</a>
+        </div>
+        {focus.student && (
+          <p class="muted">
+            {focus.student.email} · <a href={`/admin/students/${focus.student.id}`}>প্রোফাইল দেখুন</a>
+          </p>
+        )}
+        {focus.rows.length === 0 ? (
+          <p class="muted">আজ এই স্টুডেন্টের কোনো কাজ পাওয়া যায়নি।</p>
+        ) : (
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>সময়</th><th>কী করেছেন</th><th>কোথায়</th><th>কোর্স</th><th>ফল বা তথ্য</th></tr></thead>
+              <tbody>
+                {focus.rows.map((r) => (
+                  <tr>
+                    <td><small>{time(r.createdAt)}</small></td>
+                    <td><span class={`pill pill--${r.kind === 'page' ? 'draft' : 'info'}`}>{KIND_BN[r.kind] ?? r.kind}</span></td>
+                    <td>{what(r)}</td>
+                    <td><small class="muted">{r.kind === 'page' ? '' : r.courseTitle ?? ''}</small></td>
+                    <td><small>{r.kind === 'quiz' || r.kind === 'checkout' || r.kind === 'certificate' ? r.detail : r.kind === 'lesson' ? r.detail : ''}</small></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    )
+  }
+
+  {
+    report && s && (
+      <>
+        <div class="kpis">
+          <div class="kpi"><span class="kpi__icon"><Icon name="globe" /></span><span class="kpi__label">মোট ভিজিটর</span><strong class="kpi__value">{n(s.visitors)}</strong><span class="kpi__hint">{n(s.pageViews)}টি পেজ দেখা হয়েছে</span></div>
+          <div class="kpi kpi--info"><span class="kpi__icon"><Icon name="users" /></span><span class="kpi__label">সক্রিয় স্টুডেন্ট</span><strong class="kpi__value">{n(s.students)}</strong><span class="kpi__hint">নতুন লগইন {n(s.logins)} বার</span></div>
+          <div class="kpi"><span class="kpi__icon"><Icon name="play" /></span><span class="kpi__label">লেসন খোলা</span><strong class="kpi__value">{n(s.lessons)}</strong><span class="kpi__hint">শেষ করেছেন {n(s.lessonsDone)}টি</span></div>
+          <div class="kpi"><span class="kpi__icon"><Icon name="quiz" /></span><span class="kpi__label">কুইজ ও অ্যাসাইনমেন্ট</span><strong class="kpi__value">{n(s.quizzes + s.assignments)}</strong><span class="kpi__hint">কুইজ {n(s.quizzes)} · অ্যাসাইনমেন্ট {n(s.assignments)}</span></div>
+          <div class="kpi"><span class="kpi__icon"><Icon name="download" /></span><span class="kpi__label">ফাইল ডাউনলোড</span><strong class="kpi__value">{n(s.files)}</strong><span class="kpi__hint">ফ্রি ভর্তি {n(s.enrolls)} · পেমেন্ট শুরু {n(s.checkouts)}</span></div>
+          <div class="kpi"><span class="kpi__icon"><Icon name="phone" /></span><span class="kpi__label">কী দিয়ে এসেছেন</span><strong class="kpi__value">{n(s.mobile)} মোবাইল</strong><span class="kpi__hint">কম্পিউটার {n(s.desktop)} · ট্যাবলেট {n(s.tablet)}</span></div>
+        </div>
+
+        <section class="card block">
+          <div class="card__head"><h2>কোন স্টুডেন্ট কী করেছেন</h2><span class="muted"><small>{n(report.students.length)} জন</small></span></div>
+          {report.students.length === 0 ? (
+            <p class="muted">আজ এখনো কোনো স্টুডেন্ট লগইন করে কিছু করেননি।</p>
+          ) : (
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>স্টুডেন্ট</th><th>প্রথম ও শেষ</th><th>কোর্স</th><th class="num">লেসন খোলা</th><th class="num">লেসন শেষ</th><th class="num">কুইজ</th><th class="num">অ্যাসাইনমেন্ট</th><th class="num">ফাইল</th><th class="num">পেজ</th></tr>
+                </thead>
+                <tbody>
+                  {report.students.map((st) => (
+                    <tr>
+                      <td>
+                        <a href={`?student=${encodeURIComponent(st.id)}`}>{st.name || st.email || st.id}</a>
+                        {st.name && <><br /><small class="muted">{st.email}</small></>}
+                      </td>
+                      <td><small>{time(st.firstAt)} থেকে {time(st.lastAt)}</small></td>
+                      <td><small>{st.courses.length ? st.courses.join(' · ') : <span class="muted">কোনো কোর্স নয়</span>}</small></td>
+                      <td class="num">{n(st.lessons)}</td>
+                      <td class="num">{n(st.lessonsDone)}</td>
+                      <td class="num">{n(st.quizzes)}</td>
+                      <td class="num">{n(st.assignments)}</td>
+                      <td class="num">{n(st.files)}</td>
+                      <td class="num">{n(st.pages)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <p class="muted"><small>নামে চাপ দিলে সেই স্টুডেন্টের আজকের সব কাজ সময় ধরে দেখা যাবে।</small></p>
+        </section>
+
+        <div class="cols">
+          <section class="card">
+            <div class="card__head"><h2>কোন কোর্সে পড়া হয়েছে</h2></div>
+            {report.courses.length === 0 ? (
+              <p class="muted">আজ এখনো কোনো কোর্সে পড়া হয়নি।</p>
+            ) : (
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>কোর্স</th><th class="num">স্টুডেন্ট</th><th class="num">লেসন খোলা</th><th class="num">শেষ</th><th class="num">কুইজ</th></tr></thead>
+                  <tbody>
+                    {report.courses.map((c) => (
+                      <tr><td><a href={`/courses/${c.slug}`} target="_blank" rel="noopener">{c.title}</a></td><td class="num">{n(c.students)}</td><td class="num">{n(c.lessons)}</td><td class="num">{n(c.lessonsDone)}</td><td class="num">{n(c.quizzes)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <section class="card">
+            <div class="card__head"><h2>কোন সময়ে বেশি এসেছেন</h2></div>
+            {report.hours.length === 0 ? (
+              <p class="muted">আজ এখনো কেউ আসেননি।</p>
+            ) : (
+              <ul class="hours">
+                {report.hours.map((h) => (
+                  <li>
+                    <span class="hours__at">{hourBn(h.hour)}</span>
+                    <span class="hours__bar"><i style={`width:${Math.max(2, Math.round((h.visitors / peak) * 100))}%`}></i></span>
+                    <span class="hours__n">{n(h.visitors)} জন</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        <div class="cols">
+          <section class="card">
+            <div class="card__head"><h2>সবচেয়ে বেশি দেখা পেজ</h2></div>
+            {report.pages.length === 0 ? (
+              <p class="muted">কোনো পেজ দেখা হয়নি।</p>
+            ) : (
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>পেজ</th><th class="num">দেখা</th><th class="num">ভিজিটর</th></tr></thead>
+                  <tbody>
+                    {report.pages.map((p) => (
+                      <tr><td><a href={p.path} target="_blank" rel="noopener">{pageLabel(p.path, p.title)}</a></td><td class="num">{n(p.views)}</td><td class="num">{n(p.visitors)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <section class="card">
+            <div class="card__head"><h2>কোথা থেকে এসেছেন</h2></div>
+            {report.sources.length === 0 ? (
+              <p class="muted">অন্য সাইট থেকে কেউ আসেননি, অথবা সরাসরি ঠিকানা লিখে এসেছেন।</p>
+            ) : (
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>সাইট</th><th class="num">ভিজিটর</th></tr></thead>
+                  <tbody>{report.sources.map((r) => <tr><td>{r.source}</td><td class="num">{n(r.visitors)}</td></tr>)}</tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <section class="card block">
+          <div class="card__head"><h2>সর্বশেষ কাজ</h2><span class="muted"><small>স্টুডেন্টদের শেষ ১০০টি কাজ</small></span></div>
+          {report.recent.length === 0 ? (
+            <p class="muted">এখনো কিছু নেই।</p>
+          ) : (
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>সময়</th><th>স্টুডেন্ট</th><th>কী করেছেন</th><th>কোথায়</th><th>ফল</th><th>ডিভাইস</th></tr></thead>
+                <tbody>
+                  {report.recent.map((r) => (
+                    <tr>
+                      <td><small>{time(r.createdAt)}</small></td>
+                      <td><a href={`?student=${encodeURIComponent(r.studentId ?? '')}`}>{r.studentName || r.studentEmail || 'স্টুডেন্ট'}</a></td>
+                      <td><span class={`pill pill--${r.kind === 'page' ? 'draft' : 'info'}`}>{KIND_BN[r.kind] ?? r.kind}</span></td>
+                      <td><small>{what(r)}</small></td>
+                      <td><small>{r.kind === 'quiz' ? r.detail : ''}</small></td>
+                      <td><small class="muted">{DEVICE_BN[r.device] ?? ''}</small></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <p class="muted">
+          <small>
+            ভিজিটর গোনা হয় দিনে একবার করে, ঠিকানা আর ব্রাউজার মিলিয়ে; কারো IP ঠিকানা রাখা হয় না। সার্চ ইঞ্জিনের রোবট আর অ্যাডমিন প্যানেলের পেজ গোনা হয় না। এই সুবিধা চালু হওয়ার দিন থেকে তথ্য জমা শুরু হয়েছে।
+          </small>
+        </p>
+      </>
+    )
+  }
+</Admin>
+
+<style>
+  .block {
+    margin-top: var(--space-5);
+  }
+  td small {
+    word-break: break-word;
+  }
+  .hours {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-2);
+  }
+  .hours li {
+    display: grid;
+    grid-template-columns: 4.5em 1fr 4.5em;
+    gap: var(--space-3);
+    align-items: center;
+    font-size: var(--text-sm);
+  }
+  .hours__bar {
+    height: 10px;
+    border-radius: 99px;
+    background: var(--color-tint);
+    overflow: hidden;
+  }
+  .hours__bar i {
+    display: block;
+    height: 100%;
+    border-radius: 99px;
+    background: var(--color-primary);
+  }
+  .hours__n {
+    text-align: right;
+    color: var(--color-text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+</style>

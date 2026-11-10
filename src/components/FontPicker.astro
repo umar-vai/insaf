@@ -1,0 +1,145 @@
+---
+// The Aa button: anyone can pick a Bangla font for the site and for Admin.
+// The pick is kept in this browser only. The default font is set in tokens.css.
+interface Props {
+  /** Admin has no WhatsApp button, so the picker sits in the corner. */
+  corner?: boolean;
+}
+const { corner = false } = Astro.props;
+---
+
+<div class:list={['tf', corner && 'tf--corner']} data-tf hidden>
+  <button class="tf__fab" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="ফন্ট বদলান" data-tf-toggle>Aa</button>
+  <div class="tf__panel" role="listbox" aria-label="ফন্ট বেছে নিন" data-tf-panel hidden>
+    <p class="tf__title">ফন্ট বেছে নিন</p>
+      <button type="button" role="option" data-font="anek" style="font-family: 'Anek Bangla', 'Hind Siliguri', sans-serif">আনেক বাংলা (শুরুর ফন্ট)</button>
+      <button type="button" role="option" data-font="solaiman" style="font-family: 'SolaimanLipi', 'Hind Siliguri', sans-serif">সোলায়মান লিপি</button>
+      <button type="button" role="option" data-font="li-ador" style="font-family: 'Li Ador Noirrit', 'Hind Siliguri', sans-serif">লি আদর নিরিত</button>
+      <button type="button" role="option" data-font="kalpurush" style="font-family: 'Kalpurush', 'Hind Siliguri', sans-serif">কালপুরুষ</button>
+      <button type="button" role="option" data-font="hind" style="font-family: 'Hind Siliguri', 'Hind Siliguri', sans-serif">হিন্দ শিলিগুড়ি</button>
+      <button type="button" role="option" data-font="noto-sans" style="font-family: 'Noto Sans Bengali', 'Hind Siliguri', sans-serif">নোটো সান্স বাংলা</button>
+      <button type="button" role="option" data-font="noto-serif" style="font-family: 'Noto Serif Bengali', 'Hind Siliguri', sans-serif">নোটো সেরিফ বাংলা</button>
+      <button type="button" role="option" data-font="baloo" style="font-family: 'Baloo Da 2', 'Hind Siliguri', sans-serif">বালু দা ২</button>
+      <button type="button" role="option" data-font="mina" style="font-family: 'Mina', 'Hind Siliguri', sans-serif">মীনা</button>
+      <button type="button" role="option" data-font="atma" style="font-family: 'Atma', 'Hind Siliguri', sans-serif">আত্মা</button>
+      <button type="button" role="option" data-font="tiro" style="font-family: 'Tiro Bangla', 'Hind Siliguri', sans-serif">তিরো বাংলা</button>
+      <button type="button" role="option" data-font="galada" style="font-family: 'Galada', 'Hind Siliguri', sans-serif">গালাদা</button>
+  </div>
+</div>
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-tf]');
+  if (root) {
+    root.hidden = false;
+    const toggle = root.querySelector<HTMLButtonElement>('[data-tf-toggle]')!;
+    const panel = root.querySelector<HTMLElement>('[data-tf-panel]')!;
+    const opts = Array.from(panel.querySelectorAll<HTMLButtonElement>('[data-font]'));
+    let loaded = false;
+    const load = () => {
+      if (loaded) return;
+      loaded = true;
+      const l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = '/fonts/extra/extra.css';
+      document.head.appendChild(l);
+    };
+    const apply = (key: string) => {
+      if (key !== 'anek') load();
+      if (key === 'anek') delete document.documentElement.dataset.fontPick;
+      else document.documentElement.dataset.fontPick = key;
+      opts.forEach((o) => o.setAttribute('aria-selected', String(o.dataset.font === key)));
+    };
+    let saved = 'anek';
+    try { saved = localStorage.getItem('font-pick') || 'anek'; } catch {}
+    if (!opts.some((o) => o.dataset.font === saved)) saved = 'anek';
+    apply(saved);
+    const setOpen = (on: boolean) => {
+      if (on) load();
+      panel.hidden = !on;
+      toggle.setAttribute('aria-expanded', String(on));
+    };
+    toggle.addEventListener('click', () => setOpen(panel.hidden));
+    opts.forEach((o) =>
+      o.addEventListener('click', () => {
+        apply(o.dataset.font!);
+        try { localStorage.setItem('font-pick', o.dataset.font!); } catch {}
+      }),
+    );
+    document.addEventListener('keydown', (e) => e.key === 'Escape' && setOpen(false));
+    document.addEventListener('click', (e) => !root.contains(e.target as Node) && setOpen(false));
+  }
+</script>
+
+<style>
+  .tf {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: calc(max(16px, env(safe-area-inset-bottom)) + 70px);
+    z-index: 40;
+  }
+  .tf.tf--corner {
+    bottom: max(16px, env(safe-area-inset-bottom));
+  }
+  .tf__fab {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
+    color: var(--color-primary);
+    font: 700 var(--text-base) / 1 Georgia, serif;
+    cursor: pointer;
+    box-shadow: var(--shadow);
+  }
+  .tf__panel {
+    position: absolute;
+    right: 0;
+    bottom: 56px;
+    width: 230px;
+    max-height: 60vh;
+    overflow: auto;
+    display: grid;
+    gap: 2px;
+    padding: var(--space-2);
+    border-radius: var(--radius);
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-lg);
+  }
+  .tf__title {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+  .tf__panel button {
+    padding: var(--space-2) var(--space-3);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--color-text);
+    text-align: left;
+    font-size: var(--text-base);
+    cursor: pointer;
+  }
+  .tf__panel button:hover {
+    background: var(--color-tint);
+  }
+  .tf__panel button[aria-selected='true'] {
+    background: var(--color-primary);
+    color: var(--color-primary-ink);
+  }
+  :global(body[data-has-buybar]) .tf {
+    bottom: calc(154px + env(safe-area-inset-bottom));
+  }
+  @media (max-width: 960px) {
+    :global(body:has(> .bnav)) .tf {
+      bottom: calc(var(--bnav-h) + 76px);
+    }
+    :global(body:has(> .bnav)[data-has-buybar]) .tf {
+      bottom: calc(var(--bnav-h) + 146px);
+    }
+  }
+</style>

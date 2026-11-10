@@ -1,0 +1,147 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { getOfflineStudent, listOfflineStudents } from '../../../server/offline';
+import { recentPayments } from '../../../server/office';
+import { dayBn, METHOD_BN, PAY_METHODS, studentCode, todayDhaka, type PayMethod } from '../../../lib/offline';
+import { bnDigits, taka } from '../../../lib/format';
+
+// The fee counter: find a student by ID, phone or name, take the money,
+// print the receipt. Saving goes through the student's own page.
+const today = todayDhaka();
+const q = (Astro.url.searchParams.get('q') ?? '').trim();
+const found = q ? (await listOfflineStudents(env.DB, q, today)).slice(0, 8) : [];
+const details = await Promise.all(found.map((s) => getOfflineStudent(env.DB, s.id, today)));
+const recent = await recentPayments(env.DB, 8);
+---
+
+<Admin title="ফি আদায়">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">ছাত্র ও ফি</p>
+      <h1>ফি আদায়</h1>
+      <p>ছাত্রের আইডি (যেমন MI-0012), ফোন নম্বর বা নাম লিখে খুঁজুন, টাকা জমা নিন, রসিদ প্রিন্ট করুন।</p>
+    </div>
+  </header>
+
+  <form class="card search" method="get">
+    <Icon name="search" size={22} />
+    <input name="q" value={q} placeholder="আইডি, ফোন বা নাম" aria-label="ছাত্র খুঁজুন" autofocus />
+    <button class="button">খুঁজুন</button>
+  </form>
+
+  {q && found.length === 0 && <div class="card empty"><Icon name="users" size={28} /><p>"{q}" দিয়ে কাউকে পাওয়া যায়নি।</p><a href="/admin/offline/students?new=1">নতুন ভর্তি করুন</a></div>}
+
+  {
+    details.map((d) =>
+      d ? (
+        <section class="card who">
+          <div class="card__head">
+            <div>
+              <h2><a href={`/admin/offline/students/${d.student.id}`}>{d.student.name}</a> <span class="id">{studentCode(d.student.studentNo)}</span></h2>
+              <small class="muted">{bnDigits(d.student.phone)}</small>
+            </div>
+          </div>
+          {d.enrollments.filter((e) => e.status !== 'dropped').length === 0 && <p class="muted">কোনো চলমান ভর্তি নেই।</p>}
+          {d.enrollments
+            .filter((e) => e.status !== 'dropped')
+            .map((e) => (
+              <div class="row">
+                <div class="row__info">
+                  <strong>{e.courseTitle}</strong>
+                  <small class="muted">{e.batch && `${e.batch} · `}বাকি {taka(e.ledger.dueMinor)}{e.ledger.overdueMinor > 0 && ` · তারিখ পার ${taka(e.ledger.overdueMinor)}`}</small>
+                  {e.ledger.next && <small class="muted">পরের কিস্তি {dayBn(e.ledger.next.dueDate)}: {taka(e.ledger.next.amountMinor)}</small>}
+                </div>
+                {e.ledger.dueMinor > 0 ? (
+                  <form method="post" action={`/admin/offline/students/${d.student.id}`} class="pay">
+                    <input type="hidden" name="action" value="pay" />
+                    <input type="hidden" name="enrollmentId" value={e.id} />
+                    <input type="hidden" name="nonce" value={crypto.randomUUID()} />
+                    <input type="hidden" name="paidOn" value={today} />
+                    <label class="field"><span>টাকা</span><input name="amount" inputmode="numeric" required value={Math.round((e.ledger.overdueMinor || e.ledger.next?.amountMinor || e.ledger.dueMinor) / 100)} /></label>
+                    <label class="field"><span>মাধ্যম</span><select name="method">{PAY_METHODS.map((m) => <option value={m}>{METHOD_BN[m]}</option>)}</select></label>
+                    <label class="field"><span>ট্রানজেকশন আইডি</span><input name="reference" maxlength="80" /></label>
+                    <button class="button button--leaf"><Icon name="check" /> জমা</button>
+                  </form>
+                ) : (
+                  <span class="pill pill--paid">পুরো টাকা পরিশোধিত</span>
+                )}
+              </div>
+            ))}
+        </section>
+      ) : null,
+    )
+  }
+
+  <section class="card recent">
+    <div class="card__head"><h2>সর্বশেষ জমা</h2><a href="/admin/offline/reports">সব পেমেন্ট</a></div>
+    {
+      recent.length === 0 ? (
+        <p class="muted">এখনো কোনো টাকা জমা হয়নি।</p>
+      ) : (
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>রসিদ</th><th>তারিখ</th><th>ছাত্র</th><th>কোর্স</th><th>মাধ্যম</th><th class="num">টাকা</th></tr></thead>
+            <tbody>
+              {recent.map((p) => (
+                <tr>
+                  <td><a href={`/admin/offline/receipt/${p.id}`} target="_blank">#{bnDigits(p.receiptNo)}</a></td>
+                  <td>{dayBn(p.paidOn)}</td>
+                  <td><a href={`/admin/offline/students/${p.studentId}`}>{p.studentName}</a></td>
+                  <td>{p.courseTitle}</td>
+                  <td>{METHOD_BN[p.method as PayMethod] ?? p.method}</td>
+                  <td class="num">{taka(p.amountMinor)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+  </section>
+</Admin>
+
+<style>
+  .search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin-bottom: var(--space-5);
+    color: var(--color-text-muted);
+  }
+  .search input {
+    font-size: var(--text-base);
+  }
+  .who {
+    margin-bottom: var(--space-4);
+  }
+  .who h2 {
+    margin: 0;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr);
+    gap: var(--space-4);
+    align-items: center;
+    padding: var(--space-3) 0;
+    border-top: 1px solid var(--color-line);
+  }
+  .row__info {
+    display: grid;
+  }
+  .pay {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: var(--space-2);
+    align-items: end;
+  }
+  .recent {
+    margin-top: var(--space-5);
+  }
+  @media (max-width: 720px) {
+    .row {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>

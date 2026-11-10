@@ -1,0 +1,189 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import PageHero from '../../components/PageHero.astro';
+import Icon from '../../components/Icon.astro';
+import DonateForm from '../../components/donate/DonateForm.astro';
+import FundProgress from '../../components/donate/FundProgress.astro';
+import BankCard from '../../components/donate/BankCard.astro';
+import BarChart from '../../components/admin/BarChart.astro';
+import { fundBySlug, fundUpdates, listFunds, monthlyTotals, recentGifts, storyHtml } from '../../server/donations';
+import { LAND } from '../../lib/land';
+import { dateBn, mediaUrl, taka } from '../../lib/format';
+import { monthBn } from '../../lib/offline';
+
+const slug = Astro.params.slug ?? '';
+if (slug === LAND.fund) return Astro.redirect(`/land${Astro.url.search}`, 302);
+const fund = await fundBySlug(env.DB, slug);
+if (!fund || fund.status !== 'active') return new Response(null, { status: 404 });
+const [funds, months, recent, updates] = await Promise.all([listFunds(env.DB), monthlyTotals(env.DB, fund.id, 9), recentGifts(env.DB, fund.id, 10), fundUpdates(env.DB, fund.id)]);
+const error = Astro.url.searchParams.get('error');
+const amount = Number(Astro.url.searchParams.get('amount')) || undefined;
+Astro.response.headers.set('Cache-Control', error || amount ? 'no-store' : 'public, max-age=30, s-maxage=60');
+const hasMoney = months.some((m) => m.minor > 0);
+---
+
+<Base title={fund.title} description={fund.summary || `${fund.title}: মাদরাসাতুল ইনসাফে দান করুন।`}>
+  <PageHero eyebrow="তহবিল" title={fund.title} lead={fund.summary} crumbs={[{ href: '/donate', label: 'দান' }, { href: `/donate/${fund.slug}`, label: fund.title }]}>
+    <div class="hero-progress">
+      <FundProgress raisedMinor={fund.raisedMinor} goalMinor={fund.goalMinor} donors={fund.donors} gifts={fund.gifts} memberGoal={fund.memberGoal} onDark />
+    </div>
+  </PageHero>
+
+  <section class="section">
+    <div class="container layout">
+      <div class="main">
+        {fund.coverKey && <img class="cover" src={mediaUrl(fund.coverKey)} alt="" />}
+        {fund.storyText && <div class="prose" set:html={storyHtml(fund)} />}
+
+        {
+          hasMoney && (
+            <div class="card">
+              <h2 class="card__title"><Icon name="chart" size={22} /> মাসভিত্তিক সংগ্রহ</h2>
+              <BarChart caption={`${fund.title}: প্রতি মাসে সংগ্রহ`} series={[{ label: 'সংগ্রহ', color: 'var(--green-700)' }]} rows={months.map((m) => ({ label: monthBn(m.month), values: [m.minor] }))} />
+            </div>
+          )
+        }
+
+        {
+          updates.length > 0 && (
+            <div class="card">
+              <h2 class="card__title"><Icon name="book" size={22} /> তহবিলের গল্প ও অগ্রগতি</h2>
+              <ol class="timeline">
+                {updates.map((u) => (
+                  <li>
+                    <time>{dateBn(u.happenedOn)}</time>
+                    <h3>{u.title}</h3>
+                    {u.body && <p>{u.body}</p>}
+                    {u.imageKey && <img src={mediaUrl(u.imageKey)} alt="" loading="lazy" />}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )
+        }
+
+        {
+          recent.length > 0 && (
+            <div class="card">
+              <h2 class="card__title"><Icon name="users" size={22} /> সাম্প্রতিক দাতাগণ</h2>
+              <ul class="donors">
+                {recent.map((g) => (
+                  <li>
+                    <span>
+                      <strong>{g.name || 'আল্লাহর এক বান্দা'}</strong>
+                      {g.onBehalf && <small> ({g.onBehalf} এর পক্ষ থেকে)</small>}
+                    </span>
+                    <span class="amt">{taka(g.amountMinor)}</span>
+                    <small>{dateBn(g.paidAt)}</small>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        }
+      </div>
+      <aside class="side">
+        <DonateForm funds={funds} fund={fund.slug} amount={amount} title={`${fund.title} এ দান`} from={`/donate/${fund.slug}`} error={error} />
+        <BankCard />
+      </aside>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .hero-progress {
+    margin-top: var(--space-6);
+    max-width: 560px;
+    padding: var(--space-5);
+    border-radius: var(--radius-lg);
+    background: rgb(255 255 255 / 0.06);
+  }
+  .layout {
+    display: grid;
+    gap: var(--space-10);
+    align-items: start;
+  }
+  @media (min-width: 1000px) {
+    .layout {
+      grid-template-columns: 1.25fr 1fr;
+    }
+    .side {
+      position: sticky;
+      top: calc(var(--header-h) + var(--space-4));
+    }
+  }
+  .main,
+  .side {
+    display: grid;
+    gap: var(--space-6);
+    min-width: 0;
+  }
+  .cover {
+    width: 100%;
+    border-radius: var(--radius-lg);
+  }
+  .card {
+    padding: var(--space-6);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    min-width: 0;
+  }
+  .card__title {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    font-size: var(--text-lg);
+    margin: 0 0 var(--space-4);
+  }
+  .card__title :global(svg) {
+    color: var(--gold-500);
+  }
+  .timeline {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 var(--space-5);
+    border-inline-start: 2px solid var(--leaf-200);
+    display: grid;
+    gap: var(--space-6);
+  }
+  .timeline time {
+    color: var(--gold-500);
+    font-size: var(--text-sm);
+  }
+  .timeline h3 {
+    margin: 0;
+    font-size: var(--text-base);
+  }
+  .timeline p {
+    margin: var(--space-1) 0 0;
+    color: var(--color-text-muted);
+  }
+  .timeline img {
+    max-width: 100%;
+    border-radius: var(--radius);
+    margin-top: var(--space-2);
+  }
+  .donors {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .donors li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0 var(--space-3);
+    padding-bottom: var(--space-3);
+    border-bottom: 1px dashed var(--color-line);
+  }
+  .donors small {
+    color: var(--color-text-muted);
+  }
+  .amt {
+    font-weight: 700;
+    color: var(--green-700);
+  }
+</style>

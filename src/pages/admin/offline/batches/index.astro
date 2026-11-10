@@ -1,0 +1,195 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import BatchFields from '../../../../components/admin/BatchFields.astro';
+import { listOfflineCourses } from '../../../../server/offline';
+import { listBatches, listTeachers, parseBatchForm, saveBatch } from '../../../../server/office';
+import { DAY_BN, DAY_SHORT_BN, parseDays, timeBn, todayDhaka, WEEK, weekday } from '../../../../lib/offline';
+import { bnDigits, dateBn } from '../../../../lib/format';
+import { examLine, listExams, masterRoutine, setMasterRoutine } from '../../../../server/academic';
+import { dayBn } from '../../../../lib/offline';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  if (form.get('action') === 'routine') {
+    const r = await setMasterRoutine(env.DB, env.MEDIA, Astro.locals.staff!, form.get('file'));
+    return Astro.redirect(`/admin/offline/batches?${r.ok ? 'saved=1' : `error=${r.error}`}#routine-file`, 303);
+  }
+  const v = parseBatchForm(form);
+  if (!v.ok) return Astro.redirect(`/admin/offline/batches?new=1&error=${v.error}`, 303);
+  const id = await saveBatch(env.DB, Astro.locals.staff!, null, v.value);
+  if (!id) return Astro.redirect('/admin/offline/batches?new=1&error=course', 303);
+  return Astro.redirect('/admin/offline/batches?saved=1', 303);
+}
+
+const view = Astro.url.searchParams.get('view') === 'routine' ? 'routine' : 'list';
+const [batches, courses, teachers, exams, routineFile] = await Promise.all([
+  listBatches(env.DB),
+  listOfflineCourses(env.DB),
+  listTeachers(env.DB),
+  listExams(env.DB, { from: todayDhaka(), limit: 30 }),
+  masterRoutine(env.DB),
+]);
+const active = batches.filter((b) => b.status === 'active');
+const today = weekday(todayDhaka());
+const byDay = WEEK.map((d) => ({ day: d, items: active.filter((b) => parseDays(b.days).includes(d)).sort((a, b) => a.startTime.localeCompare(b.startTime)) }));
+const time = (b: { startTime: string; endTime: string }) => [timeBn(b.startTime), timeBn(b.endTime)].filter(Boolean).join(' থেকে ');
+---
+
+<Admin title="ব্যাচ ও রুটিন">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">একাডেমিক</p>
+      <h1>ব্যাচ ও রুটিন</h1>
+      <p>প্রতিটি ব্যাচের দিন, সময়, শিক্ষক আর রুম। এখান থেকেই সাপ্তাহিক রুটিন তৈরি হয়।</p>
+    </div>
+    <div class="actions"><a class="button" href="?new=1#new"><Icon name="plus" /> নতুন ব্যাচ</a></div>
+  </header>
+
+  <div class="cols top">
+    <section class="card" id="routine-file">
+      <div class="card__head"><h2>মাস্টার রুটিন ফাইল</h2></div>
+      {routineFile ? (
+        <p><a href="/api/routine" target="_blank"><strong>{routineFile.fileName}</strong></a> <small class="muted">· আপলোড {dateBn(routineFile.uploadedAt)}</small></p>
+      ) : (
+        <p class="muted">এখনো আপলোড হয়নি।</p>
+      )}
+      <form method="post" enctype="multipart/form-data" class="form-grid">
+        <input type="hidden" name="action" value="routine" />
+        <label class="field wide"><span>PDF, Word, Excel বা ছবি (১৫ MB পর্যন্ত)</span><input name="file" type="file" required accept=".pdf,.doc,.docx,.xls,.xlsx,image/*" /></label>
+        <p class="wide muted"><small>নতুন ফাইল দিলে আগেরটা সরে যাবে। সব শিক্ষক আর চালু ছাত্র নিজের প্যানেল থেকে নামাতে পারবেন।</small></p>
+        <button class="button"><Icon name="plus" /> আপলোড করুন</button>
+      </form>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>সামনের পরীক্ষা</h2></div>
+      {exams.length === 0 ? (
+        <p class="muted">কোনো পরীক্ষা ঠিক করা নেই। ব্যাচের পাতা থেকে পরীক্ষা যোগ করুন।</p>
+      ) : (
+        <ul class="list">
+          {exams.map((x) => (
+            <li><span><strong>{dayBn(x.examDate)}</strong> · {examLine(x)}</span><a href={`/admin/offline/batches/${x.batchId}#exams`}>{x.batchName}</a></li>
+          ))}
+        </ul>
+      )}
+    </section>
+  </div>
+
+  <details class="card new" id="new" open={Astro.url.searchParams.has('new') || batches.length === 0}>
+    <summary><strong>নতুন ব্যাচ তৈরি করুন</strong></summary>
+    {
+      courses.length === 0 ? (
+        <p class="muted">আগে একটি <a href="/admin/offline/courses">বিভাগ</a> যোগ করুন।</p>
+      ) : (
+        <form method="post" class="form-grid">
+          <BatchFields courses={courses} teachers={teachers} />
+          <button class="button">ব্যাচ সংরক্ষণ করুন</button>
+        </form>
+      )
+    }
+  </details>
+
+  <nav class="tabs" aria-label="দেখার ধরন">
+    <a href="?view=list" aria-current={view === 'list' ? 'page' : undefined}>ব্যাচের তালিকা</a>
+    <a href="?view=routine" aria-current={view === 'routine' ? 'page' : undefined}>সাপ্তাহিক রুটিন</a>
+  </nav>
+
+  {
+    view === 'routine' ? (
+      <div class="week">
+        {byDay.map((d) => (
+          <section class={`card day ${d.day === today ? 'is-today' : ''}`}>
+            <h2>{DAY_BN[d.day]}{d.day === today && <span class="pill pill--info">আজ</span>}</h2>
+            {d.items.length === 0 ? (
+              <p class="muted"><small>ক্লাস নেই</small></p>
+            ) : (
+              d.items.map((b) => (
+                <a class="slot" href={`/admin/offline/batches/${b.id}`}>
+                  <strong>{time(b) || 'সময় দেওয়া নেই'}</strong>
+                  <span>{b.name} · {b.courseTitle}</span>
+                  <small class="muted">{[b.teacherName, b.room].filter(Boolean).join(' · ')}</small>
+                </a>
+              ))
+            )}
+          </section>
+        ))}
+      </div>
+    ) : batches.length === 0 ? (
+      <div class="card empty"><Icon name="calendar" size={28} /><p>এখনো কোনো ব্যাচ নেই। উপরের ফর্ম থেকে প্রথম ব্যাচ তৈরি করুন।</p></div>
+    ) : (
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>ব্যাচ</th><th>কোর্স</th><th>দিন ও সময়</th><th>শিক্ষক</th><th class="num">ছাত্র</th><th>অবস্থা</th><th></th></tr></thead>
+          <tbody>
+            {batches.map((b) => (
+              <tr>
+                <td><a href={`/admin/offline/batches/${b.id}`}><strong>{b.name}</strong></a>{b.kind && <small class="muted"><br />{b.kind}</small>}</td>
+                <td>{b.courseTitle}</td>
+                <td>{parseDays(b.days).map((d) => DAY_SHORT_BN[d]).join(', ') || <span class="muted">দিন ঠিক হয়নি</span>}<small class="muted"><br />{time(b)}</small></td>
+                <td>{b.teacherName ?? <span class="muted">ঠিক হয়নি</span>}</td>
+                <td class="num">{bnDigits(b.students)}</td>
+                <td><span class={`pill pill--${b.status}`}>{b.status === 'active' ? 'চালু' : 'বন্ধ'}</span></td>
+                <td><a class="button button--sm button--ghost" href={`/admin/offline/attendance?batch=${b.id}`}>হাজিরা</a></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+</Admin>
+
+<style>
+  .top {
+    margin-bottom: var(--space-5);
+  }
+  .top .list {
+    margin: 0;
+  }
+  .new {
+    margin-bottom: var(--space-5);
+  }
+  .new[open] summary {
+    margin-bottom: var(--space-4);
+  }
+  .week {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
+    gap: var(--space-3);
+  }
+  .day {
+    display: grid;
+    align-content: start;
+    gap: var(--space-2);
+    padding: var(--space-4);
+  }
+  .day.is-today {
+    border-color: var(--leaf-500);
+    box-shadow: 0 0 0 1px var(--leaf-500);
+  }
+  .day h2 {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0 0 var(--space-1);
+    font-size: var(--text-base);
+  }
+  .slot {
+    display: grid;
+    gap: 1px;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: var(--mint-50);
+    border-left: 3px solid var(--green-700);
+    color: inherit;
+    text-decoration: none;
+  }
+  .slot:hover {
+    background: var(--mint-100);
+  }
+  .slot strong {
+    font-size: var(--text-xs);
+    color: var(--green-700);
+  }
+</style>

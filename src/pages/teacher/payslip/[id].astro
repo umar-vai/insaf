@@ -1,0 +1,15 @@
+---
+import { env } from 'cloudflare:workers';
+import PaySlip from '../../../components/PaySlip.astro';
+import { getPayroll } from '../../../server/hr';
+import { teacherSession } from '../../../server/panels';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const { me, teacher } = await teacherSession(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Fteacher%2Fsalary', 303);
+const p = await getPayroll(env.DB, Astro.params.id!);
+// Only the teacher's own, and only once the office has finished it.
+if (!teacher || !p || p.teacherId !== teacher.id || p.status === 'draft') return new Response('Not found', { status: 404 });
+---
+
+<PaySlip p={p} />

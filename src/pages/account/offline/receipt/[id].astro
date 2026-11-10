@@ -1,0 +1,17 @@
+---
+import { env } from 'cloudflare:workers';
+import MoneyReceipt from '../../../../components/MoneyReceipt.astro';
+import { currentStudent } from '../../../../server/students';
+import { getReceipt } from '../../../../server/offline';
+import { offlineIdsForEmail } from '../../../../server/panels';
+import { todayDhaka } from '../../../../lib/offline';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline%2Ffees', 303);
+const r = await getReceipt(env.DB, Astro.params.id!, todayDhaka());
+// Only receipts of the offline students linked to this account.
+if (!r || !(await offlineIdsForEmail(env.DB, me.email)).includes(r.enrollment.studentId) || r.payment.voidedAt) return new Response('Not found', { status: 404 });
+---
+
+<MoneyReceipt r={r} />

@@ -1,0 +1,157 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { decideLeave, listLeave, parseLeaveForm, requestLeave, datesBetween } from '../../../server/hr';
+import { listTeachers } from '../../../server/office';
+import { localsMayDo } from '../../../server/staff';
+import { dayBn } from '../../../lib/offline';
+import { bnDigits, dateBn } from '../../../lib/format';
+
+const actor = Astro.locals.staff!;
+// Owners, and team members with full power in this part, approve and void.
+const owner = localsMayDo(Astro.locals, 'hr', 'full');
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+  if (action === 'add') {
+    const v = parseLeaveForm(form);
+    const teacherId = String(form.get('teacherId') ?? '');
+    const teacher = (await listTeachers(env.DB)).find((t) => t.id === teacherId);
+    if (!v.ok || !teacher) return Astro.redirect(`/admin/offline/leave?error=${v.ok ? 'teacher' : v.error}`, 303);
+    await requestLeave(env.DB, actor, teacherId, v.value);
+  } else if ((action === 'approve' || action === 'reject') && owner) {
+    const ok = await decideLeave(env.DB, actor, String(form.get('id') ?? ''), action === 'approve' ? 'approved' : 'rejected', form.get('kind') === 'unpaid' ? 'unpaid' : 'normal', String(form.get('note') ?? ''));
+    if (!ok) return Astro.redirect('/admin/offline/leave?error=leave', 303);
+  } else {
+    return Astro.redirect('/admin/offline/leave?error=owner', 303);
+  }
+  return Astro.redirect('/admin/offline/leave?saved=1', 303);
+}
+const [leaves, teachers] = await Promise.all([listLeave(env.DB), listTeachers(env.DB, true)]);
+const pending = leaves.filter((l) => l.status === 'pending');
+const done = leaves.filter((l) => l.status !== 'pending');
+const STATUS = { pending: 'অপেক্ষায়', approved: 'অনুমোদিত', rejected: 'নামঞ্জুর', cancelled: 'ফিরিয়ে নিয়েছেন' } as const;
+const PILL = { pending: 'pending', approved: 'present', rejected: 'absent', cancelled: 'archived' } as const;
+const span = (l: { fromDay: string; toDay: string }) => (l.fromDay === l.toDay ? dayBn(l.fromDay) : `${dayBn(l.fromDay)} থেকে ${dayBn(l.toDay)}`);
+---
+
+<Admin title="ছুটির আবেদন">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">শিক্ষক ও বেতন</p>
+      <h1>ছুটির আবেদন</h1>
+      <p>শিক্ষকরা নিজের প্যানেল থেকে আবেদন করেন, অফিসও এখান থেকে লিখতে পারে। মালিক অনুমোদন দিলে বেতন শিটে নিজে হিসাব হয়।</p>
+    </div>
+    <div class="actions"><a class="button button--ghost" href="/admin/offline/settings"><Icon name="layers" /> ছুটির নিয়ম</a></div>
+  </header>
+
+  <div class="cols cols--wide top">
+    <section class="card">
+      <div class="card__head"><h2>অনুমোদনের অপেক্ষায় ({bnDigits(pending.length)})</h2></div>
+      {
+        pending.length === 0 ? (
+          <div class="empty"><Icon name="check" size={28} /><p>কোনো আবেদন অপেক্ষায় নেই।</p></div>
+        ) : (
+          <ul class="leaves">
+            {pending.map((l) => (
+              <li>
+                <div>
+                  <strong>{l.teacherName}</strong> <span class="muted">· {span(l)} · {bnDigits(datesBetween(l.fromDay, l.toDay).length)} দিন</span>
+                  <p>{l.reason}</p>
+                  <small class="muted">আবেদন {dateBn(l.createdAt, true)}{l.createdBy !== l.teacherName && ` · ${l.createdBy}`}</small>
+                </div>
+                {owner ? (
+                  <form method="post" class="decide">
+                    <input type="hidden" name="id" value={l.id} />
+                    <select name="kind" aria-label="ছুটির ধরন">
+                      <option value="normal">মাসের বেতনসহ ছুটির ভেতরে হলে বেতনসহ</option>
+                      <option value="unpaid">পুরোটা বিনা বেতনে</option>
+                    </select>
+                    <input name="note" placeholder="মন্তব্য (ঐচ্ছিক)" maxlength="500" />
+                    <button class="button button--sm" name="action" value="approve"><Icon name="check" /> অনুমোদন</button>
+                    <button class="button button--sm button--danger" name="action" value="reject">নামঞ্জুর</button>
+                  </form>
+                ) : (
+                  <small class="muted">মালিক অনুমোদন দেবেন</small>
+                )}
+              </li>
+            ))}
+          </ul>
+        )
+      }
+    </section>
+
+    <section class="card">
+      <div class="card__head"><h2>শিক্ষকের পক্ষে ছুটি লিখুন</h2></div>
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="add" />
+        <label class="field wide">
+          <span>শিক্ষক</span>
+          <select name="teacherId" required>{teachers.map((t) => <option value={t.id}>{t.name}</option>)}</select>
+        </label>
+        <label class="field"><span>থেকে</span><input type="date" name="fromDay" required /></label>
+        <label class="field"><span>পর্যন্ত</span><input type="date" name="toDay" /></label>
+        <label class="field wide"><span>কারণ</span><input name="reason" required minlength="2" maxlength="1000" /></label>
+        <button class="button">আবেদন হিসেবে রাখুন</button>
+      </form>
+    </section>
+  </div>
+
+  <h2>আগের ছুটি</h2>
+  {
+    done.length === 0 ? (
+      <p class="muted">এখনো কিছু নেই।</p>
+    ) : (
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>শিক্ষক</th><th>তারিখ</th><th>কারণ</th><th>অবস্থা</th><th>সিদ্ধান্ত</th></tr></thead>
+          <tbody>
+            {done.map((l) => (
+              <tr>
+                <td>{l.teacherName}</td>
+                <td>{span(l)}</td>
+                <td>{l.reason}</td>
+                <td><span class={`pill pill--${PILL[l.status]}`}>{STATUS[l.status]}</span>{l.status === 'approved' && l.kind === 'unpaid' && <small class="muted"><br />বিনা বেতনে</small>}</td>
+                <td><small class="muted">{l.decidedBy}{l.decisionNote && `: ${l.decisionNote}`}</small></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+</Admin>
+
+<style>
+  .top {
+    margin-top: 0;
+  }
+  .leaves {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .leaves li {
+    display: grid;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border: 1px solid var(--color-line);
+    border-left: 3px solid var(--warn-700);
+    border-radius: var(--radius-sm);
+  }
+  .leaves p {
+    margin: var(--space-1) 0;
+  }
+  .decide {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .decide select,
+  .decide input {
+    flex: 1 1 180px;
+  }
+</style>

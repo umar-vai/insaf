@@ -1,0 +1,179 @@
+---
+// Monthly columns for one or two series (income, expense), drawn as SVG.
+// Hovering or focusing a month shows its numbers; the same numbers are in a
+// table under the chart, so nothing depends on colour or on a mouse.
+import { bnDigits, taka } from '../../lib/format';
+
+interface Props {
+  series: { label: string; color: string }[];
+  rows: { label: string; values: number[] }[];
+  caption: string;
+}
+const { series, rows, caption } = Astro.props;
+
+const W = 720;
+const H = 240;
+const pad = { top: 12, right: 8, bottom: 30, left: 56 };
+const plotW = W - pad.left - pad.right;
+const plotH = H - pad.top - pad.bottom;
+// At least 4 taka tall, so an empty chart has whole number ticks.
+const peak = Math.max(400, ...rows.flatMap((r) => r.values)) / 100;
+// A round top for the axis: 1, 2, 2.5 or 5 times a power of ten.
+const step = (() => {
+  const raw = peak / 4;
+  const p = 10 ** Math.floor(Math.log10(raw || 1));
+  return [1, 2, 2.5, 5, 10].map((m) => m * p).find((m) => m >= raw) ?? raw;
+})();
+const top = step * 4;
+const ticks = [0, 1, 2, 3, 4].map((i) => i * step);
+const y = (taka: number) => pad.top + plotH - (taka / top) * plotH;
+const band = plotW / Math.max(1, rows.length);
+const barW = Math.min(24, (band * 0.7 - 2 * (series.length - 1)) / series.length);
+const short = (n: number) => (n >= 100000 ? `${bnDigits(+(n / 100000).toFixed(1))} লাখ` : n >= 1000 ? `${bnDigits(+(n / 1000).toFixed(1))} হা.` : bnDigits(n));
+// Rounded at the data end, square at the baseline.
+const bar = (x: number, h: number, w: number) => {
+  const base = pad.top + plotH;
+  if (h <= 0) return '';
+  const r = Math.min(4, h, w / 2);
+  return `M${x},${base}V${base - h + r}Q${x},${base - h} ${x + r},${base - h}H${x + w - r}Q${x + w},${base - h} ${x + w},${base - h + r}V${base}Z`;
+};
+---
+
+<figure class="chart" data-chart>
+  {
+    series.length > 1 && (
+      <div class="chart__legend" aria-hidden="true">
+        {series.map((s) => <span><i style={`background:${s.color}`}></i>{s.label}</span>)}
+      </div>
+    )
+  }
+  <div class="chart__plot">
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={caption}>
+      {
+        ticks.map((t) => (
+          <g>
+            <line x1={pad.left} x2={W - pad.right} y1={y(t)} y2={y(t)} stroke="var(--chart-grid)" stroke-width="1" />
+            <text x={pad.left - 8} y={y(t) + 4} text-anchor="end" class="chart__tick">{short(t)}</text>
+          </g>
+        ))
+      }
+      {
+        rows.map((r, i) => {
+          const group = barW * series.length + 2 * (series.length - 1);
+          const x0 = pad.left + band * i + (band - group) / 2;
+          return (
+            <g class="chart__col" tabindex="0" data-tip={`${r.label}\n${series.map((s, k) => `${s.label}: ${taka(r.values[k] ?? 0)}`).join('\n')}`}>
+              <rect x={pad.left + band * i} y={pad.top} width={band} height={plotH} fill="transparent" />
+              {series.map((s, k) => (
+                <path d={bar(x0 + k * (barW + 2), ((r.values[k] ?? 0) / 100 / top) * plotH, barW)} fill={s.color} />
+              ))}
+              <text x={pad.left + band * i + band / 2} y={H - 10} text-anchor="middle" class="chart__tick">{r.label}</text>
+            </g>
+          );
+        })
+      }
+    </svg>
+    <div class="chart__tip" role="status" hidden></div>
+  </div>
+  <details class="chart__table">
+    <summary>সংখ্যাগুলো টেবিলে দেখুন</summary>
+    <table>
+      <thead><tr><th>মাস</th>{series.map((s) => <th class="num">{s.label}</th>)}</tr></thead>
+      <tbody>{rows.map((r) => <tr><td>{r.label}</td>{r.values.map((v) => <td class="num">{taka(v)}</td>)}</tr>)}</tbody>
+    </table>
+  </details>
+</figure>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-chart]').forEach((fig) => {
+    const plot = fig.querySelector<HTMLElement>('.chart__plot')!;
+    const tip = fig.querySelector<HTMLElement>('.chart__tip')!;
+    const show = (col: SVGGElement) => {
+      const [head, ...lines] = (col.dataset.tip ?? '').split('\n');
+      tip.replaceChildren(Object.assign(document.createElement('strong'), { textContent: head }), ...lines.map((l) => Object.assign(document.createElement('span'), { textContent: l })));
+      const box = col.getBoundingClientRect();
+      const outer = plot.getBoundingClientRect();
+      tip.hidden = false;
+      const left = Math.min(Math.max(0, box.left - outer.left + box.width / 2 - tip.offsetWidth / 2), outer.width - tip.offsetWidth);
+      tip.style.left = `${left}px`;
+      fig.querySelectorAll('.chart__col').forEach((c) => c.classList.toggle('is-dim', c !== col));
+    };
+    const hide = () => {
+      tip.hidden = true;
+      fig.querySelectorAll('.chart__col').forEach((c) => c.classList.remove('is-dim'));
+    };
+    fig.querySelectorAll<SVGGElement>('.chart__col').forEach((col) => {
+      col.addEventListener('mouseenter', () => show(col));
+      col.addEventListener('focus', () => show(col));
+      col.addEventListener('mouseleave', hide);
+      col.addEventListener('blur', hide);
+    });
+  });
+</script>
+
+<style>
+  .chart {
+    margin: 0;
+  }
+  .chart__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    margin-bottom: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+  .chart__legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+  .chart__legend i {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+  .chart__plot {
+    position: relative;
+  }
+  svg {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .chart__tick {
+    font-size: 11px;
+    fill: var(--color-text-muted);
+  }
+  .chart__col {
+    outline: none;
+    cursor: default;
+  }
+  .chart__col path {
+    transition: opacity 0.15s;
+  }
+  .chart__col.is-dim path {
+    opacity: 0.35;
+  }
+  .chart__tip {
+    position: absolute;
+    top: 0;
+    display: grid;
+    gap: 2px;
+    padding: var(--space-2) var(--space-3);
+    background: var(--green-950);
+    color: var(--white);
+    border-radius: 8px;
+    font-size: var(--text-xs);
+    pointer-events: none;
+    white-space: nowrap;
+    box-shadow: var(--shadow);
+  }
+  .chart__table {
+    margin-top: var(--space-2);
+    font-size: var(--text-xs);
+  }
+  .chart__table table {
+    margin-top: var(--space-2);
+  }
+</style>

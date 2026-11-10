@@ -1,0 +1,24 @@
+---
+import { env } from 'cloudflare:workers';
+
+// Before launch, every page says what kind of site this is.
+const text =
+  env.ENVIRONMENT === 'staging'
+    ? 'এটি মাদরাসাতুল ইনসাফের <strong>টেস্ট সাইট</strong>। এখানে আসল দান বা ছাত্রের তথ্য নেই।'
+    : env.ENVIRONMENT === 'preview'
+      ? 'এটি মাদরাসাতুল ইনসাফের <strong>নতুন ওয়েবসাইটের প্রিভিউ</strong>।'
+      : null;
+---
+
+{text && <p class="env" role="note" set:html={text} />}
+
+<style>
+  .env {
+    margin: 0;
+    padding: var(--space-2) var(--gutter);
+    background: #ffe9a8;
+    color: #5c3d00;
+    text-align: center;
+    font-size: var(--text-sm);
+  }
+</style>

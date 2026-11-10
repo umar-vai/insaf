@@ -1,0 +1,115 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import BarChart from '../../../components/admin/BarChart.astro';
+import { monthReport } from '../../../server/offline';
+import { expensesBetween, monthlyFigures } from '../../../server/office';
+import { addMonths, dayBn, METHOD_BN, monthBn, todayDhaka, type PayMethod } from '../../../lib/offline';
+import { bnDigits, taka } from '../../../lib/format';
+
+const thisMonth = todayDhaka().slice(0, 7);
+const asked = Astro.url.searchParams.get('m') ?? '';
+const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(asked) ? asked : thisMonth;
+const [r, spent, year] = await Promise.all([
+  monthReport(env.DB, month),
+  expensesBetween(env.DB, `${month}-01`, `${month}-31`),
+  monthlyFigures(env.DB, addMonths(`${month}-01`, -11).slice(0, 7), month, { online: false, offline: true }),
+]);
+const net = r.totalMinor - spent.totalMinor;
+const label = new Intl.DateTimeFormat('bn-BD', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${month}-01T00:00:00Z`));
+const prev = addMonths(`${month}-01`, -1).slice(0, 7);
+const next = addMonths(`${month}-01`, 1).slice(0, 7);
+---
+
+<Admin title="আয় ব্যয় রিপোর্ট">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">হিসাব</p>
+      <h1>আয় ব্যয় রিপোর্ট</h1>
+      <p>মাসে ফি হিসেবে কত টাকা এসেছে, কত খরচ হয়েছে, কত থাকল।</p>
+    </div>
+    <div class="actions" data-noprint>
+      <a class="button button--ghost" href={`/admin/offline/export/pnl.csv?m=${month}`}><Icon name="download" /> এই মাসের আয় ব্যয় (Excel)</a>
+      <button type="button" class="button button--ghost" data-print><Icon name="printer" /> PDF বা প্রিন্ট</button>
+    </div>
+  </header>
+
+  <form class="toolbar" method="get" data-noprint>
+    <a class="button button--ghost" href={`?m=${prev}`} aria-label="আগের মাস">‹</a>
+    <input type="month" name="m" value={month} aria-label="মাস বাছুন" />
+    <button class="button button--ghost">দেখুন</button>
+    {month < thisMonth && <a class="button button--ghost" href={`?m=${next}`} aria-label="পরের মাস">›</a>}
+  </form>
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__icon"><Icon name="coins" /></span><span class="kpi__label">{label} মাসে আদায়</span><strong class="kpi__value">{taka(r.totalMinor)}</strong><span class="kpi__hint">{bnDigits(r.payments.filter((p) => !p.voidedAt).length)}টি পেমেন্ট</span></div>
+    <a class="kpi kpi--warn" href={`/admin/offline/expenses?m=${month}`}><span class="kpi__icon"><Icon name="wallet" /></span><span class="kpi__label">খরচ</span><strong class="kpi__value">{taka(spent.totalMinor)}</strong><span class="kpi__hint">{bnDigits(spent.expenses.filter((e) => !e.voidedAt && e.status === 'approved').length)}টি খরচ</span></a>
+    <div class={`kpi ${net < 0 ? 'kpi--bad' : 'kpi--info'}`}><span class="kpi__icon"><Icon name="chart" /></span><span class="kpi__label">{net < 0 ? 'ঘাটতি' : 'লাভ'}</span><strong class="kpi__value">{taka(Math.abs(net))}</strong><span class="kpi__hint">আদায় থেকে খরচ বাদে</span></div>
+  </div>
+
+  <section class="card chart-card">
+    <div class="card__head"><h2>শেষ ১২ মাস</h2></div>
+    <BarChart
+      caption="শেষ বারো মাসের ফি আদায় ও খরচ"
+      series={[{ label: 'আদায়', color: 'var(--chart-income)' }, { label: 'খরচ', color: 'var(--chart-expense)' }]}
+      rows={year.map((m) => ({ label: monthBn(m.month), values: [m.offlineMinor, m.expenseMinor] }))}
+    />
+  </section>
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>কোর্স অনুযায়ী আদায়</h2></div>
+      {r.byCourse.length === 0 ? <p class="muted">এই মাসে কিছু জমা হয়নি।</p> : (
+        <ul class="list">{r.byCourse.map((g) => <li><span>{g.label} <small>{bnDigits(g.count)}টি পেমেন্ট</small></span><strong class="num">{taka(g.totalMinor)}</strong></li>)}</ul>
+      )}
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>মাধ্যম অনুযায়ী</h2></div>
+      {r.byMethod.length === 0 ? <p class="muted">এই মাসে কিছু জমা হয়নি।</p> : (
+        <ul class="list">{r.byMethod.map((g) => <li><span>{METHOD_BN[g.label as PayMethod] ?? g.label} <small>{bnDigits(g.count)}টি</small></span><strong class="num">{taka(g.totalMinor)}</strong></li>)}</ul>
+      )}
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>খাত অনুযায়ী খরচ</h2><a href={`/admin/offline/expenses?m=${month}`}>সব খরচ</a></div>
+      {spent.byCategory.length === 0 ? <p class="muted">এই মাসে খরচ লেখা হয়নি।</p> : (
+        <ul class="list">{spent.byCategory.map((g) => <li><span>{g.label}</span><strong class="num">{taka(g.totalMinor)}</strong></li>)}</ul>
+      )}
+    </section>
+  </div>
+
+  <h2>এই মাসের সব পেমেন্ট</h2>
+  <p class="muted">
+    <a href={`/admin/offline/export/payments.csv?m=${month}`}>এই মাসের পেমেন্ট Excel ফাইলে নামান</a> ·
+    <a href="/admin/offline/export/payments.csv">সব মাসের পেমেন্ট</a> ·
+    <a href="/admin/offline/export/students.csv">সব ছাত্র ও বাকি টাকা</a>
+  </p>
+  {
+    r.payments.length > 0 && (
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>রসিদ</th><th>তারিখ</th><th>ছাত্র</th><th>কোর্স</th><th>টাকা</th><th>মাধ্যম</th><th>নিয়েছেন</th></tr></thead>
+          <tbody>
+            {r.payments.map((p) => (
+              <tr class={p.voidedAt ? 'void' : ''}>
+                <td><a href={`/admin/offline/receipt/${p.id}`} target="_blank">#{bnDigits(p.receiptNo)}</a></td>
+                <td>{dayBn(p.paidOn)}</td>
+                <td><a href={`/admin/offline/students/${p.studentId}`}>{p.studentName}</a></td>
+                <td>{p.courseTitle}</td>
+                <td>{taka(p.amountMinor)}{p.voidedAt && <small> (বাতিল)</small>}</td>
+                <td>{METHOD_BN[p.method]}</td>
+                <td><small>{p.recordedBy}</small></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+</Admin>
+
+<style>
+  .chart-card {
+    margin-top: var(--space-5);
+  }
+</style>

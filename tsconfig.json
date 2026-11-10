@@ -1,0 +1,9 @@
+{
+  "extends": "astro/tsconfigs/strict",
+  "compilerOptions": {
+    "types": ["node", "@cloudflare/vitest-pool-workers/types"],
+    "noUncheckedIndexedAccess": true
+  },
+  "include": [".astro/types.d.ts", "src", "test", "worker-configuration.d.ts"],
+  "exclude": ["dist", "node_modules"]
+}

@@ -1,0 +1,38 @@
+---
+// The privacy, terms and refund pages, at the same addresses as on the old site.
+import Base from '../layouts/Base.astro';
+import PageHero from './PageHero.astro';
+import { POLICIES, type PolicyKey } from '../lib/policies';
+import { dateBn } from '../lib/format';
+
+interface Props {
+  policy: PolicyKey;
+}
+const p = POLICIES[Astro.props.policy];
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, s-maxage=3600');
+---
+
+<Base title={p.title} description={`${p.title} | মাদরাসাতুল ইনসাফ`}>
+  <PageHero eyebrow="নীতিমালা" title={p.title} crumbs={[{ href: Astro.url.pathname, label: p.title }]} />
+  <section class="container section">
+    <article class="prose policy" set:html={p.html} />
+    <p class="muted updated">সর্বশেষ হালনাগাদ: {dateBn(p.updated)}</p>
+  </section>
+</Base>
+
+<style>
+  .policy {
+    max-width: 780px;
+    margin-inline: auto;
+  }
+  .policy :global(h2) {
+    margin-top: var(--space-8);
+    font-size: var(--text-xl);
+    color: var(--color-primary-strong);
+  }
+  .updated {
+    max-width: 780px;
+    margin: var(--space-8) auto 0;
+    font-size: var(--text-sm);
+  }
+</style>

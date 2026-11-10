@@ -1,0 +1,11 @@
+---
+import { env } from 'cloudflare:workers';
+import IdCards from '../../../../components/IdCards.astro';
+import { getOfflineStudent } from '../../../../server/offline';
+import { todayDhaka } from '../../../../lib/offline';
+
+const p = await getOfflineStudent(env.DB, Astro.params.id!, todayDhaka());
+if (!p) return new Response('Not found', { status: 404 });
+---
+
+<IdCards people={[p]} />

@@ -1,0 +1,135 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import Icon from '../../components/Icon.astro';
+import { readCookie } from '../../server/session';
+import { isTestSite } from '../../lib/envs';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const cookies = Astro.request.headers.get('Cookie');
+const [email] = decodeURIComponent(readCookie(cookies, 'tm_login') ?? '').split('|');
+if (!email) return Astro.redirect('/account?error=expired', 303);
+// Show only enough of the address to recognise it.
+const [user = '', domain = ''] = email.split('@');
+const masked = `${user.slice(0, 2)}${'•'.repeat(Math.max(1, user.length - 2))}@${domain}`;
+// Only sites without real students show the code (never preview or the real site).
+// Email codes are only for test sites; the real site uses Google.
+if (!isTestSite(env)) return Astro.redirect('/account', 303);
+const devCode = isTestSite(env) && env.DEV_SHOW_LOGIN_CODE === '1' ? readCookie(cookies, 'tm_dev_code') : undefined;
+
+const ERRORS: Record<string, string> = {
+  invalid: 'কোডটি মেলেনি। ইমেইলে আসা ৬ সংখ্যার কোডটি আবার দেখে লিখুন।',
+  expired: 'কোডের মেয়াদ শেষ। নতুন কোড নিন।',
+  locked: 'অনেকবার ভুল কোড দেওয়া হয়েছে। নতুন কোড নিন।',
+};
+const error = ERRORS[Astro.url.searchParams.get('error') ?? ''];
+---
+
+<Base title="কোড দিন" description="ইমেইলে আসা লগইন কোড দিন।">
+  <meta slot="head" name="robots" content="noindex" />
+  <section class="auth">
+    <div class="auth__card">
+      <span class="auth__icon"><Icon name="mail" size={28} /></span>
+      <h1>ইমেইল দেখুন</h1>
+      <p class="muted"><strong>{masked}</strong> ঠিকানায় ৬ সংখ্যার একটি কোড পাঠানো হয়েছে। কোডটি ১০ মিনিট কাজ করবে।</p>
+      {error && <p class="auth__error" role="alert">{error}</p>}
+      {
+        devCode && (
+          <p class="dev">
+            শুধু টেস্টের জন্য (আসল সাইটে দেখাবে না), কোড: <strong>{devCode}</strong>
+          </p>
+        )
+      }
+      <form method="post" action="/api/auth/verify" class="form">
+        <label for="code">লগইন কোড</label>
+        <input
+          id="code"
+          name="code"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          pattern="[0-9০-৯ ]{6,8}"
+          maxlength="8"
+          required
+          autofocus
+          placeholder="••••••"
+        />
+        <button class="button button--block" type="submit">লগইন করুন <Icon name="arrow" /></button>
+      </form>
+      <p class="auth__help muted">
+        কোড আসেনি? স্প্যাম ফোল্ডার দেখুন, অথবা <a href="/account">আবার ইমেইল দিন</a>।
+      </p>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .auth {
+    min-height: calc(100vh - var(--header-h));
+    display: grid;
+    place-items: center;
+    padding: var(--space-12) var(--gutter);
+    background: var(--mint-50) var(--pattern-light);
+  }
+  .auth__card {
+    width: min(100%, 440px);
+    padding: clamp(1.5rem, 1rem + 3vw, 2.75rem);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--shadow-lg);
+  }
+  .auth__icon {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+    margin-bottom: var(--space-4);
+    background: var(--color-tint);
+    color: var(--color-primary);
+  }
+  .auth h1 {
+    font-size: var(--text-2xl);
+  }
+  .auth__error {
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    background: #fdecea;
+    color: #8a1c12;
+    font-size: var(--text-sm);
+  }
+  .dev {
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    background: #fff6e0;
+    border: 1px dashed var(--gold-500);
+    font-size: var(--text-sm);
+  }
+  .form {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .form label {
+    font: 600 var(--text-sm) / 1.4 var(--font-display);
+  }
+  .form input {
+    min-height: 60px;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-line);
+    background: var(--color-bg);
+    font: 700 1.6rem / 1 var(--font-display);
+    letter-spacing: 0.4em;
+    text-align: center;
+    color: var(--color-text);
+  }
+  .form input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgb(201 162 78 / 0.2);
+  }
+  .auth__help {
+    margin: var(--space-5) 0 0;
+    font-size: var(--text-sm);
+  }
+</style>

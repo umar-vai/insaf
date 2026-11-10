@@ -1,0 +1,506 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import PortalLogin from '../../../../components/admin/PortalLogin.astro';
+import Icon from '../../../../components/Icon.astro';
+import EnrollFields from '../../../../components/admin/OfflineEnrollFields.astro';
+import {
+  addOtherCharge,
+  chargesOfStudent,
+  enrollOffline,
+  parseChargeForm,
+  setStudentBlocked,
+  voidCharge,
+  getOfflineStudent,
+  listOfflineCourses,
+  parseEnrollForm,
+  parseEnrollmentEdit,
+  parseOfflineStudentForm,
+  parsePaymentForm,
+  recordPayment,
+  updateEnrollment,
+  updateOfflineStudent,
+  voidPayment,
+} from '../../../../server/offline';
+import { localsMayDo } from '../../../../server/staff';
+import { listBatches, studentAttendance } from '../../../../server/office';
+import { ATTENDANCE_BN, ITEM_KIND_BN, dayBn, durationBn, METHOD_BN, OFFLINE_ENROLL_STATUS_BN, PAY_METHODS, PLAN_MONTHS, planBn, studentCode, todayDhaka, waNumber } from '../../../../lib/offline';
+import { bnDigits, dateBn, taka } from '../../../../lib/format';
+
+const id = Astro.params.id!;
+const actor = Astro.locals.staff!;
+// Owners, and team members with full power in this part, approve and void.
+const owner = localsMayDo(Astro.locals, 'office', 'full');
+const today = todayDhaka();
+const here = `/admin/offline/students/${id}`;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+  const current = await getOfflineStudent(env.DB, id, today);
+  if (!current) return new Response('Not found', { status: 404 });
+  const enrollmentId = String(form.get('enrollmentId') ?? '');
+  const mine = current.enrollments.some((e) => e.id === enrollmentId);
+  const fail = (e: string) => Astro.redirect(`${here}?error=${e}`, 303);
+
+  if (action === 'profile') {
+    const v = parseOfflineStudentForm(form);
+    if (!v.ok) return fail(v.error);
+    await updateOfflineStudent(env.DB, actor, id, v.value);
+  } else if (action === 'enroll') {
+    const v = parseEnrollForm(form);
+    if (!v.ok || !(await enrollOffline(env.DB, actor, id, v.value))) return fail(v.ok ? 'course' : v.error);
+  } else if (action === 'pay' && mine) {
+    const v = parsePaymentForm(form, today);
+    if (!v.ok) return fail(v.error);
+    const r = await recordPayment(env.DB, actor, enrollmentId, v.value, today);
+    if (!r.ok) return fail(r.error);
+    return Astro.redirect(`${here}?paid=${r.id}#e-${enrollmentId}`, 303);
+  } else if (action === 'edit' && mine) {
+    const v = parseEnrollmentEdit(form);
+    if (!v.ok) return fail(v.error);
+    if (!(await updateEnrollment(env.DB, actor, enrollmentId, v.value))) return fail('batch');
+  } else if (action === 'charge' && mine) {
+    const v = parseChargeForm(form, today);
+    if (!v.ok) return fail(v.error);
+    await addOtherCharge(env.DB, actor, enrollmentId, v.value);
+    return Astro.redirect(`${here}?saved=1#e-${enrollmentId}`, 303);
+  } else if (action === 'waive' && owner) {
+    const chargeId = String(form.get('chargeId') ?? '');
+    const charges = await chargesOfStudent(env.DB, id);
+    if (!charges.some((c) => c.id === chargeId)) return fail('charge');
+    if (!(await voidCharge(env.DB, actor, chargeId, String(form.get('reason') ?? '')))) return fail('reason');
+  } else if (action === 'block' || action === 'unblock') {
+    if (!(await setStudentBlocked(env.DB, actor, id, action === 'block', String(form.get('reason') ?? '')))) return fail('reason');
+  } else if (action === 'void' && owner) {
+    const paymentId = String(form.get('paymentId') ?? '');
+    if (!current.payments.some((p) => p.id === paymentId)) return fail('payment');
+    if (!(await voidPayment(env.DB, actor, paymentId, String(form.get('reason') ?? '')))) return fail('reason');
+  } else {
+    return fail('action');
+  }
+  return Astro.redirect(`${here}?saved=1`, 303);
+}
+
+const data = await getOfflineStudent(env.DB, id, today);
+if (!data) return new Response('Not found', { status: 404 });
+const { student, enrollments, payments } = data;
+const hasPassword = student.email ? Boolean(await env.DB.prepare('SELECT 1 AS x FROM students WHERE lower(email) = lower(?) AND password_hash IS NOT NULL').bind(student.email).first()) : false;
+const [courses, batches, attendance, charges] = await Promise.all([
+  listOfflineCourses(env.DB, false),
+  listBatches(env.DB),
+  studentAttendance(env.DB, id, 40),
+  chargesOfStudent(env.DB, id),
+]);
+const wa = waNumber(student.phone);
+const totals = enrollments.reduce(
+  (a, e) => ({ total: a.total + e.ledger.totalMinor, paid: a.paid + e.ledger.paidMinor, due: a.due + e.ledger.dueMinor, overdue: a.overdue + e.ledger.overdueMinor }),
+  { total: 0, paid: 0, due: 0, overdue: 0 },
+);
+const present = attendance.filter((a) => a.status === 'present' || a.status === 'late').length;
+const paidId = Astro.url.searchParams.get('paid');
+const justPaid = paidId ? payments.find((p) => p.id === paidId) : null;
+const tooMuch = Astro.url.searchParams.get('error') === 'too_much';
+const STATE_BN = { paid: 'পরিশোধিত', partial: 'কিছু দেওয়া হয়েছে', overdue: 'তারিখ পার', upcoming: 'সামনে' } as const;
+const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcoming: 'draft' } as const;
+---
+
+<Admin title={student.name}>
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/offline/students">ছাত্র ও ভর্তি</a></p>
+      <h1>{student.name} <span class="id">{studentCode(student.studentNo)}</span></h1>
+      <p>যোগ করা হয়েছে {dateBn(student.createdAt)}</p>
+    </div>
+    <div class="actions">
+      <a class="button button--ghost" href={`tel:${student.phone}`}><Icon name="phone" /> কল</a>
+      {wa && <a class="button button--wa" href={`https://wa.me/${wa}`} target="_blank" rel="noopener"><Icon name="whatsapp" /> WhatsApp</a>}
+      <a class="button button--ghost" href={`/admin/offline/id-card/${student.id}`} target="_blank"><Icon name="printer" /> আইডি কার্ড</a>
+      <a class="button" href="#enroll"><Icon name="plus" /> নতুন কোর্সে ভর্তি</a>
+    </div>
+  </header>
+
+  {
+    justPaid && (
+      <p class="note note--good paid-note" role="status">
+        <span>{taka(justPaid.amountMinor)} জমা হয়েছে। রসিদ নম্বর {bnDigits(justPaid.receiptNo)}।</span>
+        <a class="button button--sm" href={`/admin/offline/receipt/${justPaid.id}`} target="_blank"><Icon name="printer" /> রসিদ প্রিন্ট করুন</a>
+      </p>
+    )
+  }
+  {
+    student.status === 'blocked' && (
+      <p class="note note--bad" role="status">এই ছাত্রের অ্যাকাউন্ট বন্ধ করা আছে, ছাত্র প্যানেলে ঢুকতে পারবে না। কারণ: {student.blockedReason}</p>
+    )
+  }
+  {tooMuch && <p class="note note--bad" role="alert">যত টাকা বাকি আছে তার চেয়ে বেশি লেখা হয়েছে। টাকার অঙ্ক আবার দেখুন।</p>}
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__icon"><Icon name="receipt" /></span><span class="kpi__label">মোট দেবে</span><strong class="kpi__value">{taka(totals.total)}</strong><span class="kpi__hint">{bnDigits(enrollments.length)}টি ভর্তি</span></div>
+    <div class="kpi"><span class="kpi__icon"><Icon name="coins" /></span><span class="kpi__label">দিয়েছে</span><strong class="kpi__value">{taka(totals.paid)}</strong></div>
+    <div class={`kpi ${totals.overdue ? 'kpi--bad' : 'kpi--warn'}`}><span class="kpi__icon"><Icon name="alert" /></span><span class="kpi__label">বাকি</span><strong class="kpi__value">{taka(totals.due)}</strong><span class="kpi__hint">তারিখ পার {taka(totals.overdue)}</span></div>
+    <div class="kpi kpi--info"><span class="kpi__icon"><Icon name="clipboard" /></span><span class="kpi__label">উপস্থিতি</span><strong class="kpi__value">{attendance.length ? `${bnDigits(Math.round((present / attendance.length) * 100))}%` : 'নেই'}</strong><span class="kpi__hint">শেষ {bnDigits(attendance.length)} দিনের হিসাবে</span></div>
+  </div>
+
+  <div class="cols">
+    <section class="card who">
+      <div class="card__head"><h2>যোগাযোগ</h2></div>
+      <ul class="list">
+        <li><span class="muted">ফোন</span><a href={`tel:${student.phone}`}>{bnDigits(student.phone)}</a></li>
+        {student.guardianPhone && <li><span class="muted">অভিভাবক</span><a href={`tel:${student.guardianPhone}`}>{bnDigits(student.guardianPhone)}</a></li>}
+        
+        {student.address && <li><span class="muted">ঠিকানা</span><span>{student.address}</span></li>}
+      </ul>
+      {student.note && <p class="muted">{student.note}</p>}
+      <PortalLogin kind="student" id={student.id} email={student.email} hasPassword={hasPassword} />
+      <details>
+        <summary>তথ্য বদলান</summary>
+        <form method="post" class="form-grid edit">
+          <input type="hidden" name="action" value="profile" />
+          <label class="field"><span>নাম</span><input name="name" required value={student.name} /></label>
+          <label class="field"><span>ফোন</span><input name="phone" type="tel" required value={student.phone} /></label>
+          <label class="field"><span>অভিভাবকের ফোন</span><input name="guardianPhone" type="tel" value={student.guardianPhone} /></label>
+          <label class="field"><span>Gmail</span><input name="email" type="email" value={student.email} /></label>
+          <label class="field wide"><span>ঠিকানা</span><textarea name="address">{student.address}</textarea></label>
+          <label class="field wide"><span>নোট</span><input name="note" value={student.note} /></label>
+          <button class="button">সংরক্ষণ</button>
+        </form>
+      </details>
+      <details>
+        <summary>{student.status === 'blocked' ? 'অ্যাকাউন্ট আবার চালু করুন' : 'অ্যাকাউন্ট বন্ধ করুন'}</summary>
+        {
+          student.status === 'blocked' ? (
+            <form method="post" class="form-grid edit">
+              <input type="hidden" name="action" value="unblock" />
+              <p class="wide muted"><small>চালু করলে ছাত্র আবার নিজের প্যানেলে ঢুকতে পারবে।</small></p>
+              <button class="button">আবার চালু করুন</button>
+            </form>
+          ) : (
+            <form method="post" class="form-grid edit" data-confirm="এই ছাত্রের অ্যাকাউন্ট বন্ধ করবেন?">
+              <input type="hidden" name="action" value="block" />
+              <label class="field wide"><span>কেন বন্ধ করছেন</span><input name="reason" required minlength="2" maxlength="300" /></label>
+              <p class="wide muted"><small>বন্ধ করলে ছাত্র প্যানেলে ঢুকতে পারবে না। ভর্তি, ফি আর রসিদের হিসাব যেমন আছে তেমনই থাকবে।</small></p>
+              <button class="button button--danger">বন্ধ করুন</button>
+            </form>
+          )
+        }
+      </details>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>সাম্প্রতিক হাজিরা</h2></div>
+      {
+        attendance.length === 0 ? (
+          <div class="empty"><Icon name="clipboard" size={28} /><p>এখনো হাজিরা নেওয়া হয়নি।</p></div>
+        ) : (
+          <div class="days">
+            {attendance.slice(0, 30).map((a) => (
+              <span class={`pill pill--${a.status}`} title={`${dayBn(a.day)} · ${a.batchName}`}>{dayBn(a.day).split(' ').slice(0, 2).join(' ')}: {ATTENDANCE_BN[a.status]}</span>
+            ))}
+          </div>
+        )
+      }
+    </section>
+  </div>
+
+  {enrollments.length === 0 && <p class="panel muted">এখনো কোনো কোর্সে ভর্তি হননি। নিচে থেকে ভর্তি করুন।</p>}
+
+  {
+    enrollments.map((e) => {
+      const L = e.ledger;
+      const suggested = L.next ? Math.round(L.next.amountMinor / 100) : '';
+      return (
+        <section class="enrollment card" id={`e-${e.id}`}>
+          <header>
+            <div>
+              <h2>{e.courseTitle}</h2>
+              <p class="muted">
+                {e.batch && <>{e.batch} · </>}{e.roll && <>রোল {bnDigits(e.roll)} · </>}শুরু {dayBn(e.startDate)} · {durationBn(e.durationMonths)} · {planBn(e.planMonths)}
+              </p>
+            </div>
+            <span class={`pill pill--${e.status === 'active' ? 'active' : e.status === 'completed' ? 'published' : 'cancelled'}`}>{OFFLINE_ENROLL_STATUS_BN[e.status]}</span>
+          </header>
+
+          <div class="sums">
+            <div><span class="muted">মোট দেবে</span><strong>{taka(L.totalMinor)}</strong>
+              <small class="muted">ফি {taka(e.feeMinor)}{e.admissionFeeMinor ? ` + ভর্তি ${taka(e.admissionFeeMinor)}` : ''}{e.discountMinor ? `, ছাড় ${taka(e.discountMinor)}` : ''}</small>
+            </div>
+            <div><span class="muted">দিয়েছে</span><strong class="good">{taka(L.paidMinor)}</strong></div>
+            <div><span class="muted">বাকি</span><strong>{taka(L.dueMinor)}</strong></div>
+            <div><span class="muted">তারিখ পার</span><strong class={L.overdueMinor ? 'bad' : ''}>{taka(L.overdueMinor)}</strong></div>
+            <div><span class="muted">পরের কিস্তি</span><strong>{L.next ? dayBn(L.next.dueDate) : 'নেই'}</strong>{L.next && <small class="muted">{taka(L.next.amountMinor)}</small>}</div>
+          </div>
+          {
+            (L.byKind.exam.totalMinor > 0 || L.byKind.late.totalMinor > 0 || L.byKind.other.totalMinor > 0) && (
+              <p class="muted breakdown">
+                {(['fee', 'exam', 'late', 'other'] as const).filter((k) => L.byKind[k].totalMinor > 0).map((k) => (
+                  <span>{ITEM_KIND_BN[k]}: {taka(L.byKind[k].totalMinor)} (বাকি {taka(L.byKind[k].dueMinor)})</span>
+                ))}
+              </p>
+            )
+          }
+
+          <details open={L.installments.length <= 12}>
+            <summary>কিস্তির তালিকা ({bnDigits(L.installments.length)}টি)</summary>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>কী</th><th>তারিখ</th><th>টাকা</th><th>দেওয়া হয়েছে</th><th>অবস্থা</th></tr></thead>
+                <tbody>
+                  {L.installments.map((i) => (
+                    <tr>
+                      <td>{i.label}</td>
+                      <td>{dayBn(i.dueDate)}</td>
+                      <td>{taka(i.amountMinor)}</td>
+                      <td>{i.paidMinor ? taka(i.paidMinor) : ''}</td>
+                      <td><span class={`pill pill--${STATE_PILL[i.state]}`}>{STATE_BN[i.state]}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+
+          {
+            L.dueMinor > 0 && e.status !== 'dropped' && (
+              <form method="post" class="pay">
+                <h3>টাকা জমা নিন</h3>
+                <input type="hidden" name="action" value="pay" />
+                <input type="hidden" name="enrollmentId" value={e.id} />
+                <input type="hidden" name="nonce" value={crypto.randomUUID()} />
+                <label class="field"><span>টাকা</span><input name="amount" inputmode="numeric" required value={suggested} /></label>
+                <label class="field"><span>তারিখ</span><input name="paidOn" type="date" required value={today} max={today} /></label>
+                <label class="field">
+                  <span>কীভাবে</span>
+                  <select name="method">{PAY_METHODS.map((m) => <option value={m}>{METHOD_BN[m]}</option>)}</select>
+                </label>
+                <label class="field"><span>ট্রানজেকশন আইডি (ঐচ্ছিক)</span><input name="reference" maxlength="80" /></label>
+                <label class="field"><span>নোট (ঐচ্ছিক)</span><input name="note" maxlength="500" /></label>
+                <button class="button button--leaf"><Icon name="check" /> জমা করুন</button>
+              </form>
+            )
+          }
+
+          <details>
+            <summary>পরীক্ষার ফি, লেট ফি ও অন্যান্য ফি ({bnDigits(charges.filter((c) => c.enrollmentId === e.id).length)}টি)</summary>
+            {charges.filter((c) => c.enrollmentId === e.id).length > 0 && (
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>কী</th><th>ধরন</th><th>তারিখ</th><th>টাকা</th><th></th></tr></thead>
+                  <tbody>
+                    {charges.filter((c) => c.enrollmentId === e.id).map((c) => (
+                      <tr class={c.voidedAt ? 'void' : ''}>
+                        <td>{c.label}</td>
+                        <td>{ITEM_KIND_BN[c.kind]}</td>
+                        <td>{dayBn(c.dueDate)}</td>
+                        <td>{taka(c.amountMinor)}</td>
+                        <td>
+                          {c.voidedAt ? (
+                            <small class="muted">মাফ: {c.voidReason}<br />{c.voidedBy}</small>
+                          ) : owner && (
+                            <form method="post" class="void-form" data-confirm={`${c.label} মাফ করবেন?`}>
+                              <input type="hidden" name="action" value="waive" />
+                              <input type="hidden" name="chargeId" value={c.id} />
+                              <input name="reason" required minlength="2" placeholder="কেন মাফ" aria-label="মাফের কারণ" />
+                              <button class="button button--ghost">মাফ করুন</button>
+                            </form>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {e.status !== 'dropped' && (
+              <form method="post" class="form-grid edit">
+                <input type="hidden" name="action" value="charge" />
+                <input type="hidden" name="enrollmentId" value={e.id} />
+                <label class="field"><span>কীসের টাকা (যেমন বই, ইউনিফর্ম)</span><input name="label" required minlength="2" maxlength="120" /></label>
+                <label class="field"><span>টাকা</span><input name="amount" inputmode="numeric" required /></label>
+                <label class="field"><span>দেওয়ার শেষ তারিখ</span><input name="dueDate" type="date" required value={today} /></label>
+                <p class="wide muted"><small>পরীক্ষার ফি পরীক্ষা যোগ করলে নিজে থেকে বসে। লেট ফি বসে অফিসের নিয়মে দেওয়া দিন পার হলে।</small></p>
+                <button class="button">অন্য ফি যোগ করুন</button>
+              </form>
+            )}
+          </details>
+
+          <details>
+            <summary>ভর্তির তথ্য বদলান (পেমেন্ট প্ল্যান, ছাড়, অবস্থা)</summary>
+            <form method="post" class="form-grid edit">
+              <input type="hidden" name="action" value="edit" />
+              <input type="hidden" name="enrollmentId" value={e.id} />
+              <label class="field">
+                <span>অবস্থা</span>
+                <select name="status">
+                  {(['active', 'completed', 'dropped'] as const).map((s) => <option value={s} selected={s === e.status}>{OFFLINE_ENROLL_STATUS_BN[s]}</option>)}
+                </select>
+              </label>
+              <label class="field">
+                <span>কীভাবে টাকা দেবে</span>
+                <select name="plan">{PLAN_MONTHS.map((m) => <option value={m} selected={m === e.planMonths}>{planBn(m)}</option>)}</select>
+              </label>
+              <label class="field"><span>ছাড় (টাকা)</span><input name="discount" inputmode="numeric" value={e.discountMinor ? e.discountMinor / 100 : ''} /></label>
+              <label class="field"><span>শুরুর তারিখ</span><input name="startDate" type="date" required value={e.startDate} /></label>
+              <label class="field">
+                <span>ব্যাচ</span>
+                <select name="batchId">
+                  <option value="">ব্যাচ ঠিক হয়নি{!e.batchId && e.batch ? ` (আগের লেখা: ${e.batch})` : ''}</option>
+                  {batches.filter((b) => b.courseId === e.courseId && (b.status === 'active' || b.id === e.batchId)).map((b) => <option value={b.id} selected={b.id === e.batchId}>{b.name}</option>)}
+                </select>
+              </label>
+              <label class="field"><span>রোল</span><input name="roll" value={e.roll} maxlength="20" /></label>
+              <label class="field"><span>নোট</span><input name="note" value={e.note} /></label>
+              <p class="wide muted"><small>"ছেড়ে দিয়েছে" দিলে বাকি টাকার তালিকায় আর আসবে না। আগের জমা টাকার হিসাব থেকে যাবে।</small></p>
+              <button class="button">সংরক্ষণ</button>
+            </form>
+          </details>
+        </section>
+      );
+    })
+  }
+
+  <h2>সব পেমেন্ট</h2>
+  {
+    payments.length === 0 ? (
+      <p class="panel muted">এখনো কোনো টাকা জমা হয়নি।</p>
+    ) : (
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>রসিদ</th><th>তারিখ</th><th>কোর্স</th><th>টাকা</th><th>কীভাবে</th><th>নিয়েছেন</th><th></th></tr></thead>
+          <tbody>
+            {payments.map((p) => (
+              <tr class={p.voidedAt ? 'void' : ''}>
+                <td><a href={`/admin/offline/receipt/${p.id}`} target="_blank">#{bnDigits(p.receiptNo)}</a></td>
+                <td>{dayBn(p.paidOn)}</td>
+                <td>{enrollments.find((e) => e.id === p.enrollmentId)?.courseTitle}</td>
+                <td>{taka(p.amountMinor)}</td>
+                <td>{METHOD_BN[p.method]}{p.reference && <small class="muted"><br />{p.reference}</small>}</td>
+                <td><small>{p.recordedBy}</small></td>
+                <td>
+                  {p.voidedAt ? (
+                    <small class="bad">বাতিল: {p.voidReason}<br />{p.voidedBy}</small>
+                  ) : (
+                    owner && (
+                      <form method="post" class="void-form" data-confirm={`রসিদ #${p.receiptNo} বাতিল করবেন? টাকাটা আর জমা হিসেবে ধরা হবে না।`}>
+                        <input type="hidden" name="action" value="void" />
+                        <input type="hidden" name="paymentId" value={p.id} />
+                        <input name="reason" required minlength="2" placeholder="কেন বাতিল" aria-label="বাতিলের কারণ" />
+                        <button class="button button--danger">বাতিল</button>
+                      </form>
+                    )
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+  {!owner && <p class="muted"><small>ভুল এন্ট্রি বাতিল করতে পারেন মালিক বা সম্পূর্ণ ক্ষমতার সদস্য। ভুল হলে মালিককে জানান।</small></p>}
+
+  <h2 id="enroll">নতুন কোর্সে ভর্তি</h2>
+  {
+    courses.length === 0 ? (
+      <p class="panel muted">কোনো চালু বিভাগ নেই। <a href="/admin/offline/courses">কোর্স যোগ করুন</a>।</p>
+    ) : (
+      <form method="post" class="card form-grid">
+        <input type="hidden" name="action" value="enroll" />
+        <EnrollFields courses={courses} batches={batches} today={today} />
+        <button class="button">ভর্তি করুন</button>
+      </form>
+    )
+  }
+</Admin>
+
+<style>
+  .cols {
+    margin-bottom: var(--space-5);
+  }
+  .who .list li > :last-child {
+    text-align: right;
+  }
+  .edit {
+    margin-top: var(--space-3);
+  }
+  .days {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+  .enrollment {
+    margin-top: var(--space-5);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+  .enrollment header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+  .enrollment h2 {
+    margin: 0;
+  }
+  .enrollment header p {
+    margin: var(--space-1) 0 0;
+  }
+  .sums {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: var(--space-2);
+  }
+  .sums div {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+    padding: var(--space-3);
+    background: #f8faf6;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+  }
+  .sums strong {
+    font: 700 var(--text-lg) / 1.2 var(--font-display);
+  }
+  .pay {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: var(--space-3);
+    padding: var(--space-4);
+    background: var(--mint-50);
+    border: 1px solid var(--leaf-200);
+    border-radius: var(--radius-sm);
+  }
+  .pay h3 {
+    grid-column: 1 / -1;
+    margin: 0;
+    font-size: var(--text-base);
+  }
+  .pay .button {
+    justify-self: start;
+    align-self: end;
+  }
+  .paid-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+  .void td:last-child {
+    text-decoration: none;
+  }
+  .void-form {
+    display: flex;
+    gap: var(--space-1);
+  }
+  .breakdown {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    margin: 0;
+  }
+  .void-form input {
+    min-width: 110px;
+  }
+</style>

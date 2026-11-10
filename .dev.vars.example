@@ -1,0 +1,19 @@
+# Copy to .dev.vars for local development. Never commit .dev.vars.
+# Random string, 32+ characters. Generate:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+SESSION_SECRET=
+# Local only: shows the email sign-in code on the page, since no email is sent.
+DEV_SHOW_LOGIN_CODE=1
+# Optional: Google sign-in (Google Cloud console, OAuth client for a web app).
+# Redirect URI: http://localhost:4321/api/auth/google/callback
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+# SSLCommerz. Get a free sandbox store at https://developer.sslcommerz.com/registration/
+# Leave SSLCZ_SANDBOX=1 locally. Live keys only ever go into Cloudflare secrets.
+SSLCZ_STORE_ID=
+SSLCZ_STORE_PASSWORD=
+SSLCZ_SANDBOX=1
+# Local only: open /admin on localhost without Cloudflare Access.
+ADMIN_DEV_BYPASS=1
+# Owners' emails (comma separated) who may use /admin. Empty is fine locally.
+ADMIN_EMAILS=

@@ -1,0 +1,210 @@
+---
+// Student ID cards, credit card size (85.6 x 54 mm), front and back, as a
+// whole page to print or save as PDF. Used by the office and the student.
+import type { getOfflineStudent } from '../server/offline';
+import { addMonths, dayBn, studentCode } from '../lib/offline';
+import { bnDigits } from '../lib/format';
+import { env } from 'cloudflare:workers';
+import { institute } from '../server/config';
+
+type Person = NonNullable<Awaited<ReturnType<typeof getOfflineStudent>>>;
+interface Props {
+  people: Person[];
+}
+// Name, address, phone and logo as the owner set them on the system page.
+const inst = await institute(env.DB);
+const { people } = Astro.props;
+const cards = people.map((p) => {
+  const active = p.enrollments.filter((e) => e.status === 'active');
+  const ends = active.map((e) => addMonths(e.startDate, e.durationMonths)).sort();
+  return { p, active, validTill: ends[ends.length - 1] ?? null };
+});
+---
+
+<!doctype html>
+<html lang="bn">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>আইডি কার্ড | {inst.name}</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        margin: 0;
+        background: #eef4ef;
+        font-family: 'Hind Siliguri', 'Nirmala UI', system-ui, sans-serif;
+        color: #10261b;
+      }
+      .tools {
+        text-align: center;
+        margin: 16px;
+      }
+      .tools button {
+        font: inherit;
+        padding: 10px 20px;
+        border-radius: 8px;
+        border: 0;
+        background: #0b3d2a;
+        color: #fff;
+        cursor: pointer;
+      }
+      .pair {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 16px;
+        margin: 16px;
+      }
+      .card {
+        width: 85.6mm;
+        height: 54mm;
+        box-sizing: border-box;
+        border-radius: 3.2mm;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 2px 10px rgb(0 0 0 / 0.12);
+        position: relative;
+        font-size: 2.6mm;
+        break-inside: avoid;
+      }
+      .front header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 2.2mm 3mm;
+        background: #073d26;
+        color: #e3c27a;
+      }
+      .front header img {
+        height: 6.5mm;
+        background: #fff;
+        border-radius: 1.2mm;
+        padding: 0.6mm 1mm;
+      }
+      .front header span {
+        font-weight: 700;
+        font-size: 2.6mm;
+      }
+      .body {
+        display: grid;
+        grid-template-columns: 15mm 1fr;
+        gap: 3mm;
+        padding: 3mm;
+      }
+      .avatar {
+        width: 15mm;
+        height: 18mm;
+        border-radius: 2mm;
+        display: grid;
+        place-items: center;
+        background: #e8f4e1;
+        color: #0f6b3e;
+        font-weight: 800;
+        font-size: 8mm;
+      }
+      h2 {
+        margin: 0 0 0.6mm;
+        font-size: 3.6mm;
+        line-height: 1.2;
+      }
+      .id {
+        display: inline-block;
+        font: 700 2.8mm/1.4 ui-monospace, monospace;
+        color: #0f6b3e;
+        background: #e8f4e1;
+        border-radius: 1mm;
+        padding: 0 1mm;
+        margin-bottom: 1mm;
+      }
+      p {
+        margin: 0.3mm 0;
+      }
+      .muted {
+        color: #4b6357;
+      }
+      .front footer {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        padding: 1.2mm 3mm;
+        background: #c9a24e;
+        color: #04261a;
+        font-weight: 700;
+        font-size: 2.3mm;
+        display: flex;
+        justify-content: space-between;
+      }
+      .back {
+        padding: 4mm;
+        display: grid;
+        gap: 1.5mm;
+        align-content: start;
+        background: #fbf9f3;
+      }
+      .back h3 {
+        margin: 0;
+        font-size: 3mm;
+        color: #073d26;
+      }
+      .back .sign {
+        position: absolute;
+        right: 4mm;
+        bottom: 5mm;
+        border-top: 0.2mm solid #10261b;
+        padding-top: 0.6mm;
+        min-width: 26mm;
+        text-align: center;
+        font-size: 2.2mm;
+      }
+      @media print {
+        body {
+          background: #fff;
+        }
+        .tools {
+          display: none;
+        }
+        .card {
+          box-shadow: none;
+          border: 0.2mm solid #cfd8d2;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tools"><button type="button" onclick="print()">প্রিন্ট বা PDF</button></div>
+    {cards.length === 0 && <p style="text-align:center">কোনো কার্ড নেই।</p>}
+    {
+      cards.map(({ p, active, validTill }) => (
+        <div class="pair">
+          <section class="card front" aria-label="আইডি কার্ডের সামনের দিক">
+            <header><img src={inst.logo} alt={inst.name} /><span>ছাত্র পরিচয়পত্র</span></header>
+            <div class="body">
+              <div class="avatar" aria-hidden="true">{p.student.name.trim().charAt(0)}</div>
+              <div>
+                <h2>{p.student.name}</h2>
+                <span class="id">{studentCode(p.student.studentNo)}</span>
+                {active.slice(0, 2).map((e) => (
+                  <p>{e.courseTitle}{e.batch && <span class="muted"> · {e.batch}</span>}{e.roll && <span class="muted"> · রোল {bnDigits(e.roll)}</span>}</p>
+                ))}
+                <p class="muted">ফোন {bnDigits(p.student.phone)}</p>
+              </div>
+            </div>
+            <footer><span>{inst.name}</span><span>{validTill ? `মেয়াদ ${dayBn(validTill)}` : ''}</span></footer>
+          </section>
+          <section class="card back" aria-label="আইডি কার্ডের পেছনের দিক">
+            <h3>এই কার্ডটি পাওয়া গেলে অনুগ্রহ করে ফেরত দিন</h3>
+            <p>{inst.name}</p>
+            <p class="muted">{inst.address}</p>
+            <p>ফোন {bnDigits(inst.phone)}</p>
+            {p.student.guardianPhone && <p>অভিভাবক {bnDigits(p.student.guardianPhone)}</p>}
+            <span class="sign">কর্তৃপক্ষের স্বাক্ষর</span>
+          </section>
+        </div>
+      ))
+    }
+  </body>
+</html>

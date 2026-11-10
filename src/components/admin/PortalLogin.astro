@@ -1,0 +1,58 @@
+---
+// "Portal login" box on a student's or teacher's admin page.
+import { isPhoneEmail, loginLabel } from '../../server/password';
+import { bnDigits } from '../../lib/format';
+
+interface Props {
+  kind: 'student' | 'teacher';
+  id: string;
+  email: string;
+  /** Whether an account with a password exists for this email. */
+  hasPassword: boolean;
+}
+const { kind, id, email, hasPassword } = Astro.props;
+const label = email ? loginLabel(email) : '';
+---
+
+<div class="pl">
+  <p class="pl__head">পোর্টাল লগইন</p>
+  {
+    email ? (
+      <p class="pl__now">
+        {isPhoneEmail(email) ? `মোবাইল: ${bnDigits(label)}` : `Gmail: ${label}`} · {hasPassword ? 'পাসওয়ার্ড দেওয়া আছে' : isPhoneEmail(email) ? 'পাসওয়ার্ড দেওয়া হয়নি' : 'Google দিয়ে ঢুকবে'}
+      </p>
+    ) : (
+      <p class="pl__now muted">এখনো চালু হয়নি। চালু করলে {kind === 'student' ? 'ছাত্রের (বা অভিভাবকের)' : 'শিক্ষকের'} মোবাইল নম্বরই হবে লগইন।</p>
+    )
+  }
+  <form method="post" action="/admin/offline/login" data-confirm={hasPassword ? 'নতুন পাসওয়ার্ড দিলে আগেরটি আর কাজ করবে না। চালিয়ে যাবেন?' : undefined}>
+    <input type="hidden" name="kind" value={kind} />
+    <input type="hidden" name="id" value={id} />
+    <button class="button button--sm">{hasPassword ? 'নতুন পাসওয়ার্ড দিন' : 'মোবাইল দিয়ে লগইন চালু করুন'}</button>
+  </form>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLFormElement>('.pl form[data-confirm]').forEach((f) =>
+    f.addEventListener('submit', (e) => {
+      if (!confirm(f.dataset.confirm!)) e.preventDefault();
+    }),
+  );
+</script>
+
+<style>
+  .pl {
+    margin-top: var(--space-4);
+    padding: var(--space-4);
+    border-radius: var(--radius-sm);
+    background: var(--gold-100);
+  }
+  .pl__head {
+    margin: 0;
+    font-weight: 700;
+  }
+  .pl__now {
+    margin: var(--space-1) 0 var(--space-3);
+    font-size: var(--text-sm);
+  }
+</style>

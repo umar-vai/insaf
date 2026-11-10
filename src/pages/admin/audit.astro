@@ -1,0 +1,89 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../layouts/Admin.astro';
+import { ACTION_BN, auditActors, auditLog, detailText } from '../../server/audit';
+import { dateBn } from '../../lib/format';
+
+// Owners only (middleware: adminModule returns 'owner' for this path).
+const p = Astro.url.searchParams;
+const filter = {
+  actor: p.get('actor') ?? '',
+  action: p.get('action') ?? '',
+  from: p.get('from') ?? '',
+  to: p.get('to') ?? '',
+  q: (p.get('q') ?? '').trim(),
+  before: p.get('before') ?? '',
+};
+const [rows, actors] = await Promise.all([auditLog(env.DB, filter), auditActors(env.DB)]);
+const groups = [...new Set(Object.keys(ACTION_BN).map((a) => a.split('.')[0]!))];
+const GROUP_BN: Record<string, string> = {
+  attendance: 'হাজিরা', batch: 'ব্যাচ', blog: 'ব্লগ', config: 'সিস্টেম', course: 'কোর্স', enrollment: 'অনলাইন ভর্তি', exam: 'পরীক্ষা', expense: 'খরচ',
+  fee_online: 'অনলাইন ফি', leave: 'ছুটি', material: 'উপকরণ', notice: 'নোটিশ', offline: 'ছাত্র ও ফি', order: 'অর্ডার', payroll: 'বেতন',
+  rating: 'মূল্যায়ন', reminder: 'রিমাইন্ডার', routine: 'রুটিন', settings: 'নিয়ম', staff: 'টিম', teacher: 'শিক্ষক', ticket: 'টিকেট',
+};
+const next = rows.length === 100 ? new URLSearchParams({ ...Object.fromEntries(p), before: rows[rows.length - 1]!.createdAt }) : null;
+---
+
+<Admin title="কে কী করেছে">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">প্রতিষ্ঠান</p>
+      <h1>কে কী করেছে</h1>
+      <p>অ্যাডমিন, শিক্ষক আর ছাত্রদের প্যানেল থেকে করা প্রতিটি পরিবর্তন: কে, কখন, কী করেছেন, কোন রেকর্ডে, আর কোন IP ঠিকানা থেকে। শুধু মালিক দেখেন। কোনো এন্ট্রি মোছা যায় না।</p>
+    </div>
+  </header>
+
+  <form class="card filters" method="get">
+    <label class="field">
+      <span>কে</span>
+      <select name="actor"><option value="">সবাই</option>{actors.map((a) => <option value={a} selected={a === filter.actor}>{a}</option>)}</select>
+    </label>
+    <label class="field">
+      <span>কী ধরনের কাজ</span>
+      <select name="action"><option value="">সব</option>{groups.map((g) => <option value={`${g}.`} selected={filter.action === `${g}.`}>{GROUP_BN[g] ?? g}</option>)}</select>
+    </label>
+    <label class="field"><span>থেকে</span><input type="date" name="from" value={filter.from} /></label>
+    <label class="field"><span>পর্যন্ত</span><input type="date" name="to" value={filter.to} /></label>
+    <label class="field"><span>খুঁজুন (রেকর্ড, বিস্তারিত বা IP)</span><input name="q" value={filter.q} maxlength="80" /></label>
+    <button class="button">দেখুন</button>
+  </form>
+
+  {
+    rows.length === 0 ? (
+      <p class="panel muted">এই ছাঁকনিতে কিছু পাওয়া যায়নি।</p>
+    ) : (
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>কখন</th><th>কে</th><th>কী করেছেন</th><th>কোন রেকর্ডে</th><th>বিস্তারিত</th><th>IP</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr>
+                <td><small>{dateBn(r.createdAt, true)}</small></td>
+                <td><small>{r.actor}</small></td>
+                <td>{ACTION_BN[r.action] ?? r.action}</td>
+                <td><small class="muted">{r.target}</small></td>
+                <td><small>{detailText(r.detailJson)}</small></td>
+                <td><small class="muted">{r.ip || 'নেই'}</small></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+  {next && <p><a class="button button--ghost" href={`?${next}`}>আরও পুরনো</a></p>}
+  <p class="muted"><small>IP ঠিকানা রাখা শুরু হয়েছে এই সুবিধা যোগ হওয়ার পর থেকে। আগের এন্ট্রিতে IP নেই।</small></p>
+</Admin>
+
+<style>
+  .filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+    gap: var(--space-3);
+    align-items: end;
+    margin-bottom: var(--space-4);
+  }
+  td small {
+    word-break: break-word;
+  }
+</style>

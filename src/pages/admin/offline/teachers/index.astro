@@ -1,0 +1,143 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import TeacherFields from '../../../../components/admin/TeacherFields.astro';
+import { listTeachers, parseTeacherForm, saveTeacher } from '../../../../server/office';
+import { addMonths, todayDhaka, waNumber } from '../../../../lib/offline';
+import { ratingOverview, stars } from '../../../../server/ratings';
+import { bnDigits, taka } from '../../../../lib/format';
+
+if (Astro.request.method === 'POST') {
+  const v = parseTeacherForm(await Astro.request.formData());
+  if (!v.ok) return Astro.redirect(`/admin/offline/teachers?new=1&error=${v.error}`, 303);
+  const id = await saveTeacher(env.DB, Astro.locals.staff!, null, v.value);
+  return Astro.redirect(`/admin/offline/teachers/${id}?saved=1`, 303);
+}
+const [teachers, ratings] = await Promise.all([listTeachers(env.DB), ratingOverview(env.DB, addMonths(`${todayDhaka().slice(0, 7)}-01`, -5).slice(0, 7))]);
+const active = teachers.filter((t) => t.status === 'active');
+const payroll = active.reduce((a, t) => a + t.basicPayMinor, 0);
+---
+
+<Admin title="শিক্ষক">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">একাডেমিক</p>
+      <h1>শিক্ষক ও কর্মী</h1>
+      <p>শিক্ষকের তথ্য, কোন ব্যাচ পড়ান আর মাসিক বেতন। বেতন শিট ও ছুটির আবেদন পরের ধাপে আসবে।</p>
+    </div>
+    <div class="actions"><a class="button" href="?new=1#new"><Icon name="plus" /> নতুন শিক্ষক</a></div>
+  </header>
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__icon"><Icon name="briefcase" /></span><span class="kpi__label">কর্মরত শিক্ষক</span><strong class="kpi__value">{bnDigits(active.length)}</strong></div>
+    <div class="kpi kpi--warn"><span class="kpi__icon"><Icon name="wallet" /></span><span class="kpi__label">মাসিক মূল বেতন মোট</span><strong class="kpi__value">{taka(payroll)}</strong></div>
+  </div>
+
+  <details class="card new" id="new" open={Astro.url.searchParams.has('new') || teachers.length === 0}>
+    <summary><strong>নতুন শিক্ষক যোগ করুন</strong></summary>
+    <form method="post" class="form-grid">
+      <TeacherFields />
+      <button class="button">সংরক্ষণ করুন</button>
+    </form>
+  </details>
+
+  {
+    teachers.length > 0 && (
+      <div class="grid">
+        {teachers.map((t) => {
+          const wa = waNumber(t.phone);
+          return (
+            <article class={`card teacher ${t.status === 'inactive' ? 'is-off' : ''}`}>
+              <div class="avatar" aria-hidden="true">{t.name.trim().charAt(0)}</div>
+              <div>
+                <h2><a href={`/admin/offline/teachers/${t.id}`}>{t.name}</a></h2>
+                <p class="muted">{t.role === 'staff' && 'অফিসের কর্মী · '}{t.subject || 'বিষয় দেওয়া নেই'}{t.status === 'inactive' && ' · এখন নেই'}</p>
+                {ratings.get(t.id) && <p class="rating">★ {stars(ratings.get(t.id)!.overall)} <small class="muted">({bnDigits(ratings.get(t.id)!.count)} জনের মূল্যায়ন)</small></p>}
+              </div>
+              <ul class="facts">
+                <li><strong>{bnDigits(t.batches ?? 0)}</strong><span>ব্যাচ</span></li>
+                <li><strong>{bnDigits(t.students ?? 0)}</strong><span>ছাত্র</span></li>
+                <li><strong>{t.basicPayMinor ? taka(t.basicPayMinor) : 'নেই'}</strong><span>মূল বেতন</span></li>
+              </ul>
+              <div class="actions">
+                <a class="button button--sm button--ghost" href={`tel:${t.phone}`}><Icon name="phone" /> {bnDigits(t.phone)}</a>
+                {wa && <a class="button button--sm button--wa" href={`https://wa.me/${wa}`} target="_blank" rel="noopener"><Icon name="whatsapp" /></a>}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    )
+  }
+</Admin>
+
+<style>
+  .kpis {
+    margin-bottom: var(--space-5);
+  }
+  .new {
+    margin-bottom: var(--space-5);
+  }
+  .new[open] summary {
+    margin-bottom: var(--space-4);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+    gap: var(--space-4);
+  }
+  .teacher {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-3) var(--space-4);
+    align-items: center;
+  }
+  .teacher.is-off {
+    opacity: 0.6;
+  }
+  .teacher h2 {
+    margin: 0;
+    font-size: var(--text-base);
+  }
+  .teacher p {
+    margin: 0;
+  }
+  .rating {
+    color: var(--gold-500);
+    font-weight: 700;
+  }
+  .avatar {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--green-700);
+    color: var(--white);
+    font: 700 var(--text-lg) / 1 var(--font-display);
+  }
+  .facts {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--space-2);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .facts li {
+    display: grid;
+    padding: var(--space-2);
+    border-radius: var(--radius-sm);
+    background: #f8faf6;
+    text-align: center;
+  }
+  .facts span {
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+  }
+  .teacher .actions {
+    grid-column: 1 / -1;
+  }
+</style>

@@ -1,0 +1,147 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../layouts/Admin.astro';
+import TeamAccessFields from '../../components/admin/TeamAccessFields.astro';
+import { addTeamMember, listTeam, parseAccessForm, removeStaff, setTeamAccess } from '../../server/admin';
+import { grantsFromForm, isOwner, LEVEL_BN, MODULE_BN, ROLE_BN } from '../../server/staff';
+import { dateBn } from '../../lib/format';
+
+const actor = Astro.locals.staff!;
+const owner = isOwner(env, actor);
+
+if (Astro.request.method === 'POST') {
+  // Only owners change who has access.
+  if (!owner) return Astro.redirect('/admin/team?error=1', 303);
+  const form = await Astro.request.formData();
+  const email = String(form.get('email') ?? '');
+  const action = form.get('action');
+  const v = parseAccessForm(form, grantsFromForm(form));
+  const ok =
+    action === 'add'
+      ? (await addTeamMember(env.DB, env, actor, email, v)) === 'added'
+      : action === 'access'
+        ? await setTeamAccess(env.DB, env, actor, email, v)
+        : await removeStaff(env.DB, env, actor, email);
+  return Astro.redirect(`/admin/team?${ok ? 'saved=1' : 'error=1'}`, 303);
+}
+const { owners, staff } = await listTeam(env.DB, env);
+const AREA_BN = { online: 'দান ও ওয়েবসাইট', offline: 'মাদরাসা অফিস', both: 'দুই অংশ' } as const;
+---
+
+<Admin title="টিম ও অনুমতি">
+  <h1>টিম ও অনুমতি</h1>
+  <p class="muted">
+    কাউকে টিমে নিলে বাছুন: কোন পদ (অ্যাডমিন, ম্যানেজার, হিসাবরক্ষক, অফিস সহকারী, কনটেন্ট এডিটর, শিক্ষক, শুধু দেখবে), কোন অংশের জন্য (অনলাইন, অফলাইন বা দুটোই), আর প্রতিটি অংশে কতটুকু ক্ষমতা। পদ বাছলে ক্ষমতাগুলো নিজে বসে যায়, তারপর যেকোনোটা বদলানো যায়। শিক্ষক পদে নিলে শিক্ষকের তালিকাতেও যোগ হয় আর তিনি শিক্ষক প্যানেল পান। মালিকদের ইমেইল Cloudflare এর গোপন সেটিং (ADMIN_EMAILS) থেকে আসে, তাঁরা সব পারেন।
+  </p>
+  {Astro.url.searchParams.has('error') && <p class="note note--bad" role="alert">সংরক্ষণ হয়নি। ইমেইল ঠিক আছে কিনা আর অন্তত একটি অংশে ক্ষমতা দেওয়া হয়েছে কিনা দেখুন (শিক্ষক পদ ছাড়া)।</p>}
+
+  <h2>মালিক</h2>
+  <ul class="panel list">
+    {owners.length === 0 ? <li class="muted">এখনো সেট করা হয়নি (লোকাল টেস্টে স্বাভাবিক)।</li> : owners.map((e) => <li><span>{e}</span><span class="pill pill--active">সব ক্ষমতা</span></li>)}
+  </ul>
+
+  <h2>টিম সদস্য</h2>
+  {staff.length === 0 && <p class="panel muted">কেউ নেই।</p>}
+  {
+    staff.map((s) => (
+      <section class="panel member">
+        <div class="member__head">
+          <span>
+            <strong>{s.name || s.email}</strong> <span class="pill pill--active">{ROLE_BN[s.role]?.label ?? s.role}</span> <span class="pill pill--draft">{AREA_BN[s.area] ?? s.area}</span>
+            <br />
+            <small class="muted">{s.name && `${s.email} · `}যোগ করেছেন {s.addedBy}, {dateBn(s.createdAt)}</small>
+          </span>
+          {owner && (
+            <form method="post" data-confirm={`${s.email} কে টিম থেকে বাদ দেবেন? সাথে সাথে সব অনুমতি চলে যাবে।`}>
+              <input type="hidden" name="email" value={s.email} />
+              <button class="button button--danger" name="action" value="remove">বাদ দিন</button>
+            </form>
+          )}
+        </div>
+        <p class="grants">
+          {s.moduleList.length === 0 ? <span class="muted">অ্যাডমিনে কোনো অংশ নেই (শুধু শিক্ষক প্যানেল)</span> : s.moduleList.map((m) => <span class="pill pill--info">{MODULE_BN[m].label}: {LEVEL_BN[s.grants[m]!]}</span>)}
+        </p>
+        {owner && (
+          <details>
+            <summary>পদ ও ক্ষমতা বদলান</summary>
+            <form method="post" class="edit">
+              <input type="hidden" name="email" value={s.email} />
+              <TeamAccessFields role={s.role} area={s.area} grants={s.grants} name={s.name} />
+              <button class="button" name="action" value="access">সংরক্ষণ</button>
+            </form>
+          </details>
+        )}
+      </section>
+    ))
+  }
+
+  {
+    owner ? (
+      <form method="post" class="panel add">
+        <h2>নতুন সদস্য নিয়োগ</h2>
+        <label class="field">
+          <span>Gmail (এই ইমেইল দিয়ে Google এ লগইন করবেন)</span>
+          <input name="email" type="email" required />
+        </label>
+        <TeamAccessFields />
+        <button class="button" name="action" value="add">নিয়োগ দিন</button>
+      </form>
+    ) : (
+      <p class="muted">শুধু মালিকরা টিমে কাউকে যোগ বা বাদ দিতে আর ক্ষমতা বদলাতে পারেন।</p>
+    )
+  }
+</Admin>
+
+<style>
+  .list {
+    list-style: none;
+    margin: 0;
+    display: grid;
+    gap: var(--space-3);
+    max-width: 900px;
+  }
+  .list li {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-3);
+  }
+  .member {
+    max-width: 900px;
+    margin-bottom: var(--space-3);
+    display: grid;
+    gap: var(--space-3);
+  }
+  .member__head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: var(--space-3);
+  }
+  .grants {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    margin: 0;
+  }
+  .edit {
+    display: grid;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+  }
+  .add {
+    margin-top: var(--space-5);
+    display: grid;
+    gap: var(--space-4);
+    max-width: 900px;
+  }
+  .add h2 {
+    margin: 0;
+  }
+  .edit .button,
+  .add .button {
+    justify-self: start;
+  }
+</style>

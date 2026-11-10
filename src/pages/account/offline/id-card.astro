@@ -1,0 +1,16 @@
+---
+import { env } from 'cloudflare:workers';
+import IdCards from '../../../components/IdCards.astro';
+import NotOffline from '../../../components/NotOffline.astro';
+import { currentStudent } from '../../../server/students';
+import { studentPanel } from '../../../server/panels';
+import { todayDhaka } from '../../../lib/offline';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline%2Fid-card', 303);
+// Only the offline students linked to this account's email.
+const { people } = await studentPanel(env.DB, me.email, todayDhaka());
+---
+
+{people.length === 0 ? <NotOffline me={me} /> : <IdCards people={people} />}

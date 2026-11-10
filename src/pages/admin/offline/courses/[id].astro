@@ -1,0 +1,72 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import { getOfflineCourse, parseOfflineCourseForm, updateOfflineCourse } from '../../../../server/offline';
+
+const id = Astro.params.id!;
+if (Astro.request.method === 'POST') {
+  const parsed = parseOfflineCourseForm(await Astro.request.formData());
+  if (!parsed.ok) return Astro.redirect(`/admin/offline/courses/${id}?error=${parsed.error}`, 303);
+  const ok = await updateOfflineCourse(env.DB, Astro.locals.staff!, id, parsed.value);
+  return Astro.redirect(ok ? '/admin/offline/courses?saved=1' : `/admin/offline/courses/${id}?error=1`, 303);
+}
+const course = await getOfflineCourse(env.DB, id);
+if (!course) return new Response('Not found', { status: 404 });
+const years = course.durationMonths % 12 === 0;
+---
+
+<Admin title={course.title}>
+  <header class="page-head"><div><p class="eyebrow">একাডেমিক</p><h1>{course.title}</h1></div></header>
+  <p class="muted">
+    ফি বা মেয়াদ বদলালে শুধু নতুন ভর্তিতে কাজ করবে। যারা আগে ভর্তি হয়েছেন, তাদের সাথে যে ফি ঠিক হয়েছিল সেটাই থাকবে।
+  </p>
+  <form method="post" class="panel grid">
+    <label class="field wide"><span>কোর্সের নাম</span><input name="title" required minlength="2" maxlength="200" value={course.title} /></label>
+    <label class="field"><span>মোট কোর্স ফি (টাকা)</span><input name="fee" inputmode="numeric" required value={course.feeMinor / 100} /></label>
+    <label class="field"><span>ভর্তি ফি (টাকা)</span><input name="admission" inputmode="numeric" value={course.admissionFeeMinor ? course.admissionFeeMinor / 100 : ''} /></label>
+    <div class="field">
+      <span>কোর্সের মেয়াদ</span>
+      <div class="pair">
+        <input name="duration" inputmode="numeric" required value={years ? course.durationMonths / 12 : course.durationMonths} aria-label="মেয়াদ" />
+        <select name="unit" aria-label="মাস না বছর">
+          <option value="month" selected={!years}>মাস</option>
+          <option value="year" selected={years}>বছর</option>
+        </select>
+      </div>
+    </div>
+    <label class="field">
+      <span>অবস্থা</span>
+      <select name="status">
+        <option value="active" selected={course.status === 'active'}>চালু (নতুন ভর্তি নেওয়া যাবে)</option>
+        <option value="archived" selected={course.status === 'archived'}>বন্ধ (নতুন ভর্তি নয়)</option>
+      </select>
+    </label>
+    <label class="field wide"><span>নোট</span><textarea name="note" maxlength="2000">{course.note}</textarea></label>
+    <div class="row">
+      <button class="button">সংরক্ষণ করুন</button>
+      <a class="button button--ghost" href="/admin/offline/courses">ফিরে যান</a>
+    </div>
+  </form>
+</Admin>
+
+<style>
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: var(--space-4);
+    max-width: 820px;
+  }
+  .wide,
+  .row {
+    grid-column: 1 / -1;
+  }
+  .row {
+    display: flex;
+    gap: var(--space-2);
+  }
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-2);
+  }
+</style>

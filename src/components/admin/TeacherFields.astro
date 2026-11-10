@@ -1,0 +1,28 @@
+---
+import type { Teacher } from '../../server/office';
+
+interface Props {
+  teacher?: Teacher | null;
+}
+const { teacher } = Astro.props;
+---
+
+<label class="field"><span>নাম</span><input name="name" required minlength="2" maxlength="200" value={teacher?.name} /></label>
+<label class="field"><span>ফোন</span><input name="phone" type="tel" required value={teacher?.phone} placeholder="01XXXXXXXXX" /></label>
+<label class="field"><span>Gmail (প্যানেলে লগইনের জন্য)</span><input name="email" type="email" value={teacher?.email} placeholder="name@gmail.com" /></label>
+<label class="field">
+  <span>ধরন</span>
+  <select name="role"><option value="teacher">শিক্ষক</option><option value="staff" selected={teacher?.role === 'staff'}>অফিসের কর্মী (ক্লাস নেন না)</option></select>
+</label>
+<label class="field"><span>বিষয় বা পদ</span><input name="subject" maxlength="120" value={teacher?.subject} placeholder="যেমন তাজবীদ, হিফজ" /></label>
+<label class="field"><span>মাসিক মূল বেতন (টাকা)</span><input name="basicPay" inputmode="numeric" value={teacher?.basicPayMinor ? teacher.basicPayMinor / 100 : ''} /></label>
+<label class="field"><span>যোগদানের তারিখ</span><input name="joinedOn" type="date" value={teacher?.joinedOn} /></label>
+{
+  teacher && (
+    <label class="field">
+      <span>অবস্থা</span>
+      <select name="status"><option value="active">কর্মরত</option><option value="inactive" selected={teacher.status === 'inactive'}>এখন নেই</option></select>
+    </label>
+  )
+}
+<label class="field wide"><span>নোট (ঐচ্ছিক)</span><input name="note" maxlength="2000" value={teacher?.note} /></label>

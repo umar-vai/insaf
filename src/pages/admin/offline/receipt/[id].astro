@@ -1,0 +1,12 @@
+---
+// A money receipt to print or save as PDF. Standalone page, no admin menu.
+import { env } from 'cloudflare:workers';
+import MoneyReceipt from '../../../../components/MoneyReceipt.astro';
+import { getReceipt } from '../../../../server/offline';
+import { todayDhaka } from '../../../../lib/offline';
+
+const r = await getReceipt(env.DB, Astro.params.id!, todayDhaka());
+if (!r) return new Response('Not found', { status: 404 });
+---
+
+<MoneyReceipt r={r} forStaff />

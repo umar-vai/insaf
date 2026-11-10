@@ -1,0 +1,15 @@
+---
+import AccountShell from './AccountShell.astro';
+import type { Student } from '../server/students';
+
+interface Props {
+  me: Student;
+}
+---
+
+<AccountShell me={Astro.props.me} active="home" title="শিক্ষক প্যানেল">
+  <section class="panel">
+    <h2>শিক্ষক প্যানেল</h2>
+    <p class="muted">আপনার এই ইমেইল ({Astro.props.me.email}) কোনো কর্মরত শিক্ষকের সাথে যুক্ত নেই। অফিসকে আপনার Gmail শিক্ষক তালিকায় যোগ করতে বলুন, তারপর আবার আসুন।</p>
+  </section>
+</AccountShell>

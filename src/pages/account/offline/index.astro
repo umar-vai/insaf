@@ -1,0 +1,138 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotOffline from '../../../components/NotOffline.astro';
+import MaterialList from '../../../components/MaterialList.astro';
+import Icon from '../../../components/Icon.astro';
+import { currentStudent } from '../../../server/students';
+import { listMaterials, nextClass, officeNotices, studentPanel } from '../../../server/panels';
+import { DAY_BN, dayBn, parseDays, studentCode, timeBn, todayDhaka, waNumber, weekday } from '../../../lib/offline';
+import { bnDigits, dateBn, taka } from '../../../lib/format';
+import { batchTeachers, examLine, listExams, masterRoutine } from '../../../server/academic';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline', 303);
+const today = todayDhaka();
+const panel = await studentPanel(env.DB, me.email, today);
+const batchIds = panel.batches.map((b) => b.id);
+const offlineIds = panel.people.map((p) => p.student.id);
+const [notices, materials, subjectTeachers, exams, routineFile] = await Promise.all([
+  officeNotices(env.DB, 'student', batchIds, 8, offlineIds),
+  listMaterials(env.DB, batchIds),
+  batchTeachers(env.DB, batchIds),
+  listExams(env.DB, { batchIds, from: today, limit: 20 }),
+  masterRoutine(env.DB),
+]);
+const now = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+const next = nextClass(panel.batches, today, now);
+const active = panel.enrollments.filter((e) => e.status === 'active');
+const totals = active.reduce((a, e) => ({ paid: a.paid + e.ledger.paidMinor, due: a.due + e.ledger.dueMinor, overdue: a.overdue + e.ledger.overdueMinor }), { paid: 0, due: 0, overdue: 0 });
+---
+
+{
+  panel.people.length === 0 ? (
+    <NotOffline me={me} />
+  ) : (
+    <AccountShell me={me} active="offline" title="স্টুডেন্ট প্যানেল">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <p class="eyebrow">আমার মাদরাসা</p>
+            <h1>{panel.people.map((p) => p.student.name).join(', ')}</h1>
+            <p>{panel.people.map((p) => <span class="id">{studentCode(p.student.studentNo)}</span>)}</p>
+          </div>
+        </header>
+
+        <div class="kpis">
+          <a class="kpi" href="/account/offline/fees"><span class="kpi__icon"><Icon name="coins" /></span><span class="kpi__label">মোট দিয়েছেন</span><strong class="kpi__value">{taka(totals.paid)}</strong></a>
+          <a class={`kpi ${totals.overdue ? 'kpi--bad' : 'kpi--warn'}`} href="/account/offline/fees"><span class="kpi__icon"><Icon name="alert" /></span><span class="kpi__label">বাকি</span><strong class="kpi__value">{taka(totals.due)}</strong><span class="kpi__hint">{totals.overdue ? `তারিখ পার ${taka(totals.overdue)}` : 'তারিখ পার হয়নি'}</span></a>
+          <div class="kpi kpi--info"><span class="kpi__icon"><Icon name="clock" /></span><span class="kpi__label">পরের ক্লাস</span><strong class="kpi__value small">{next ? `${next.day === today ? 'আজ' : DAY_BN[weekday(next.day)]} ${timeBn(next.batch.startTime)}` : 'নেই'}</strong><span class="kpi__hint">{next && `${next.batch.name} · ${dayBn(next.day)}`}</span></div>
+        </div>
+
+        <div class="cols">
+          <section class="card">
+            <div class="card__head"><h2>ক্লাস রুটিন</h2></div>
+            {panel.batches.length === 0 ? <p class="muted">এখনো ব্যাচ ঠিক হয়নি। অফিসে যোগাযোগ করুন।</p> : (
+              <ul class="list">
+                {panel.batches.map((b) => {
+                  const wa = b.teacherPhone ? waNumber(b.teacherPhone) : null;
+                  return (
+                    <li>
+                      <div>
+                        <strong>{b.courseTitle}</strong> <span class="muted">· {b.name}</span>
+                        <small>{parseDays(b.days).map((d) => DAY_BN[d]).join(', ')} · {[timeBn(b.startTime), timeBn(b.endTime)].filter(Boolean).join(' থেকে ')}{b.room && ` · ${b.room}`}</small>
+                        {b.teacherName && <small>শিক্ষক: {b.teacherName}{b.teacherPhone && <> · <a href={`tel:${b.teacherPhone}`}>{bnDigits(b.teacherPhone)}</a></>}</small>}
+                        {subjectTeachers.filter((t) => t.batchId === b.id).map((t) => (
+                          <small>{t.subject}: {t.teacherName} · <a href={`tel:${t.teacherPhone}`}>{bnDigits(t.teacherPhone)}</a></small>
+                        ))}
+                      </div>
+                      {wa && <a class="button button--sm button--ghost" href={`https://wa.me/${wa}`} target="_blank" rel="noopener"><Icon name="whatsapp" /></a>}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {routineFile && <p><a class="button button--ghost button--sm" href="/api/routine" target="_blank"><Icon name="download" /> পুরো প্রতিষ্ঠানের রুটিন</a></p>}
+          </section>
+          <section class="card">
+            <div class="card__head"><h2>নোটিশ</h2></div>
+            {notices.length === 0 ? <p class="muted">কোনো নোটিশ নেই।</p> : (
+              <ul class="list">
+                {notices.map((n) => <li><div><strong>{n.title}</strong><small>{n.targetName ? `${n.targetName} · ` : ''}{dateBn(n.createdAt)}</small>{n.body && <p class="body">{n.body}</p>}{n.fileName && <a class="attach" href={`/api/notice-file/${n.id}`} target="_blank"><Icon name="download" size={16} /> {n.fileName}</a>}</div></li>)}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        <div class="cols block">
+          <section class="card">
+            <div class="card__head"><h2>পরীক্ষার তারিখ</h2></div>
+            {exams.length === 0 ? <p class="muted">সামনে কোনো পরীক্ষা নেই।</p> : (
+              <ul class="list">
+                {exams.map((x) => <li><div><strong>{dayBn(x.examDate)}</strong><small>{examLine(x)} · {x.batchName}</small></div>{x.feeMinor > 0 && <small class="muted">ফি {taka(x.feeMinor)}</small>}</li>)}
+              </ul>
+            )}
+          </section>
+          <section class="card">
+            <div class="card__head"><h2>আমার তথ্য</h2></div>
+            {panel.people.map((p) => (
+              <ul class="list">
+                <li><span class="muted">নাম</span><span>{p.student.name} <span class="id">{studentCode(p.student.studentNo)}</span></span></li>
+                <li><span class="muted">ফোন</span><span>{bnDigits(p.student.phone)}</span></li>
+                {p.student.guardianPhone && <li><span class="muted">অভিভাবক</span><span>{bnDigits(p.student.guardianPhone)}</span></li>}
+                <li><span class="muted">Gmail</span><span>{p.student.email}</span></li>
+                {p.student.address && <li><span class="muted">ঠিকানা</span><span>{p.student.address}</span></li>}
+              </ul>
+            ))}
+            <p class="muted"><small>কোনো তথ্য ভুল থাকলে <a href="/account/offline/tickets">অফিসকে জানান</a>। পাসওয়ার্ড লাগে না, Google দিয়ে লগইন হয়।</small></p>
+          </section>
+        </div>
+
+        <section class="card block">
+          <div class="card__head"><h2>পড়ার উপকরণ</h2></div>
+          <MaterialList materials={materials} showBatch />
+        </section>
+      </div>
+    </AccountShell>
+  )
+}
+
+<style>
+  .small {
+    font-size: var(--text-lg);
+  }
+  .block {
+    margin-top: var(--space-5);
+  }
+  .attach {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+  }
+  .body {
+    margin: var(--space-1) 0 0;
+    white-space: pre-line;
+  }
+</style>

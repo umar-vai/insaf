@@ -1,0 +1,83 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../components/AccountShell.astro';
+import NotTeacher from '../../components/NotTeacher.astro';
+import Icon from '../../components/Icon.astro';
+import { cancelLeave, datesBetween, listLeave, parseLeaveForm, requestLeave } from '../../server/hr';
+import { teacherSession } from '../../server/panels';
+import { getSettings } from '../../server/settings';
+import { dayBn, todayDhaka } from '../../lib/offline';
+import { bnDigits } from '../../lib/format';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const { me, teacher } = await teacherSession(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Fteacher%2Fleave', 303);
+if (Astro.request.method === 'POST' && teacher) {
+  const form = await Astro.request.formData();
+  if (form.get('action') === 'cancel') {
+    await cancelLeave(env.DB, me.email, String(form.get('id') ?? ''), teacher.id);
+    return Astro.redirect('/teacher/leave?saved=1', 303);
+  }
+  const v = parseLeaveForm(form);
+  if (!v.ok) return Astro.redirect(`/teacher/leave?error=${v.error}`, 303);
+  await requestLeave(env.DB, me.email, teacher.id, v.value);
+  return Astro.redirect('/teacher/leave?saved=1', 303);
+}
+const [leaves, s] = teacher ? await Promise.all([listLeave(env.DB, { teacherId: teacher.id }), getSettings(env.DB)]) : [[], null];
+const today = todayDhaka();
+const STATUS = { pending: 'অপেক্ষায়', approved: 'অনুমোদিত', rejected: 'নামঞ্জুর', cancelled: 'ফিরিয়ে নিয়েছেন' } as const;
+const PILL = { pending: 'pending', approved: 'present', rejected: 'absent', cancelled: 'archived' } as const;
+---
+
+{
+  !teacher ? (
+    <NotTeacher me={me} />
+  ) : (
+    <AccountShell me={me} active="t-leave" title="ছুটির আবেদন" mode="teacher">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <h1>ছুটির আবেদন</h1>
+            <p>মাসে {bnDigits(s!.paidLeaveDays)} দিন পর্যন্ত অনুমোদিত ছুটি বেতনসহ। এর বেশি হলে বিনা বেতনে ধরা হয়।</p>
+          </div>
+        </header>
+        {Astro.url.searchParams.has('saved') && <p class="note note--good" role="status">সংরক্ষণ হয়েছে।</p>}
+        {Astro.url.searchParams.has('error') && <p class="note note--bad" role="alert">তারিখ আর কারণ ঠিকমতো লিখে আবার চেষ্টা করুন।</p>}
+
+        <section class="card">
+          <div class="card__head"><h2>নতুন আবেদন</h2></div>
+          <form method="post" class="form-grid">
+            <label class="field"><span>থেকে</span><input type="date" name="fromDay" required min={today} /></label>
+            <label class="field"><span>পর্যন্ত (এক দিনের হলে খালি রাখুন)</span><input type="date" name="toDay" min={today} /></label>
+            <label class="field wide"><span>কারণ</span><textarea name="reason" required minlength="2" maxlength="1000" rows="3"></textarea></label>
+            <button class="button"><Icon name="check" /> আবেদন পাঠান</button>
+          </form>
+        </section>
+
+        <h2>আমার আবেদন</h2>
+        {leaves.length === 0 ? <p class="muted">এখনো কোনো আবেদন নেই।</p> : (
+          <ul class="list card">
+            {leaves.map((l) => (
+              <li>
+                <div>
+                  <strong>{l.fromDay === l.toDay ? dayBn(l.fromDay) : `${dayBn(l.fromDay)} থেকে ${dayBn(l.toDay)}`}</strong> <span class="muted">· {bnDigits(datesBetween(l.fromDay, l.toDay).length)} দিন</span>
+                  <small>{l.reason}{l.decisionNote && ` · মন্তব্য: ${l.decisionNote}`}{l.status === 'approved' && l.kind === 'unpaid' && ' · বিনা বেতনে'}</small>
+                </div>
+                <span>
+                  <span class={`pill pill--${PILL[l.status]}`}>{STATUS[l.status]}</span>
+                  {l.status === 'pending' && (
+                    <form method="post" data-confirm="আবেদনটি ফিরিয়ে নেবেন?">
+                      <input type="hidden" name="action" value="cancel" />
+                      <input type="hidden" name="id" value={l.id} />
+                      <button class="button button--sm button--ghost">ফিরিয়ে নিন</button>
+                    </form>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </AccountShell>
+  )
+}

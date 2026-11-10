@@ -1,0 +1,194 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotOffline from '../../../components/NotOffline.astro';
+import Icon from '../../../components/Icon.astro';
+import { currentStudent } from '../../../server/students';
+import { studentPanel } from '../../../server/panels';
+import { feeChoices, feePaymentByReference } from '../../../server/fee-pay';
+import { getSettings } from '../../../server/settings';
+import { sslConfigured } from '../../../server/sslcommerz';
+import { gatewayEnv } from '../../../server/config';
+import { addDays, dayBn, ITEM_KIND_BN, METHOD_BN, planBn, todayDhaka } from '../../../lib/offline';
+import { bnDigits, taka } from '../../../lib/format';
+import { whatsappUrl } from '../../../lib/site';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline%2Ffees', 303);
+const today = todayDhaka();
+const [panel, s] = await Promise.all([studentPanel(env.DB, me.email, today), getSettings(env.DB)]);
+const canPay = s.onlineFees && sslConfigured(await gatewayEnv(env.DB, env));
+// Coming back from SSLCommerz: say what happened to this payment, only if it is this account's.
+const ref = Astro.url.searchParams.get('pay') ?? '';
+const back = /^TF-[A-Z0-9]{10}$/.test(ref) ? await feePaymentByReference(env.DB, ref) : null;
+const mine = back && back.studentId === me.id ? back : null;
+const ERR: Record<string, string> = {
+  off: 'এখন অনলাইনে ফি দেওয়া বন্ধ আছে। অফিসে দিন।',
+  too_many: 'অল্প সময়ে অনেকবার চেষ্টা হয়েছে। একটু পরে আবার চেষ্টা করুন।',
+  not_found: 'ভর্তিটি পাওয়া যায়নি।',
+  nothing_due: 'এই মুহূর্তে এই অঙ্কটি দেওয়ার মতো বাকি নেই। পাতাটি আবার খুলে দেখুন।',
+  gateway: 'পেমেন্ট পেজ খোলা যায়নি। একটু পরে আবার চেষ্টা করুন।',
+};
+const error = ERR[Astro.url.searchParams.get('error') ?? ''];
+const STATE_BN = { paid: 'পরিশোধিত', partial: 'কিছু দেওয়া হয়েছে', overdue: 'তারিখ পার', upcoming: 'সামনে' } as const;
+const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'absent', upcoming: 'draft' } as const;
+---
+
+{
+  panel.people.length === 0 ? (
+    <NotOffline me={me} />
+  ) : (
+    <AccountShell me={me} active="offline-fees" title="ফি ও রসিদ">
+      <div class="ui">
+        <header class="page-head"><div><h1>ফি ও রসিদ</h1><p>কোন কিস্তি কবে, কত দিয়েছেন, কত বাকি। প্রতিটি জমার রসিদ এখান থেকে প্রিন্ট বা PDF করা যায়।</p></div></header>
+
+        {mine?.status === 'paid' && <p class="note note--good" role="status">আলহামদুলিল্লাহ, {taka(mine.amountMinor)} জমা হয়েছে। নিচের রসিদের তালিকায় দেখুন।</p>}
+        {mine && (mine.status === 'pending' || mine.status === 'review') && (
+          <p class="note note--warn" role="status">আপনার পেমেন্ট ({taka(mine.amountMinor)}) যাচাই হচ্ছে। টাকা কাটা হয়ে থাকলে অফিস দেখে জমা করে দেবে। দরকার হলে <a href={whatsappUrl(`আমার অনলাইন ফি পেমেন্ট ${mine.reference} যাচাই হচ্ছে দেখাচ্ছে`)}>WhatsApp এ জানান</a>।</p>
+        )}
+        {mine && (mine.status === 'failed' || mine.status === 'cancelled') && <p class="note note--bad" role="status">পেমেন্ট সম্পন্ন হয়নি, কোনো টাকা জমা হয়নি। চাইলে আবার চেষ্টা করুন।</p>}
+        {error && <p class="note note--bad" role="alert">{error}</p>}
+
+        {panel.enrollments.map((e) => {
+          const L = e.ledger;
+          const choices = canPay ? feeChoices(e) : [];
+          return (
+            <section class="card block">
+              <div class="card__head">
+                <div>
+                  <h2>{e.courseTitle}</h2>
+                  <small class="muted">{e.studentName}{e.batch && ` · ${e.batch}`} · {planBn(e.planMonths)}</small>
+                </div>
+                <strong>বাকি {taka(L.dueMinor)}</strong>
+              </div>
+              <div class="sums">
+                <div><span class="muted">মোট</span><strong>{taka(L.totalMinor)}</strong></div>
+                <div><span class="muted">দিয়েছেন</span><strong class="good">{taka(L.paidMinor)}</strong></div>
+                <div><span class="muted">তারিখ পার</span><strong class={L.overdueMinor ? 'bad' : ''}>{taka(L.overdueMinor)}</strong></div>
+                <div><span class="muted">পরের টাকা দেওয়ার শেষ তারিখ</span><strong>{L.next ? dayBn(L.next.dueDate) : 'নেই'}</strong>{L.next && <small class="muted">{taka(L.next.amountMinor)}</small>}</div>
+              </div>
+              <div class="kinds">
+                {(['fee', 'exam', 'late', 'other'] as const).filter((k) => L.byKind[k].totalMinor > 0).map((k) => (
+                  <span><span class="muted">{ITEM_KIND_BN[k]}</span> {taka(L.byKind[k].totalMinor)}{L.byKind[k].dueMinor > 0 && <small class="muted"> (বাকি {taka(L.byKind[k].dueMinor)})</small>}</span>
+                ))}
+              </div>
+              {s.lateFeeTaka > 0 && L.next && (
+                <p class="muted late"><small>কিস্তির তারিখের {bnDigits(s.lateGraceDays)} দিনের মধ্যে পুরো টাকা না দিলে {taka(s.lateFeeTaka * 100)} লেট ফি যোগ হবে। এই কিস্তির জন্য শেষ দিন {dayBn(addDays(L.next.dueDate, s.lateGraceDays))}।</small></p>
+              )}
+              {choices.length > 0 && (
+                <form method="post" action="/api/offline-fee" class="pay">
+                  <input type="hidden" name="enrollmentId" value={e.id} />
+                  <fieldset>
+                    <legend>অনলাইনে দিন (বিকাশ, নগদ, রকেট, কার্ড)</legend>
+                    {choices.map((c, i) => (
+                      <label class="choice"><input type="radio" name="choice" value={c.key} checked={i === 0} /> {c.label}: <strong>{taka(c.amountMinor)}</strong></label>
+                    ))}
+                  </fieldset>
+                  <button class="button button--leaf"><Icon name="lock" /> পেমেন্ট করুন</button>
+                </form>
+              )}
+              <details>
+                <summary>কিস্তি ও ফির তালিকা ({bnDigits(L.installments.length)}টি)</summary>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>কী</th><th>তারিখ</th><th class="num">টাকা</th><th class="num">দেওয়া</th><th>অবস্থা</th></tr></thead>
+                    <tbody>{L.installments.map((i) => <tr><td>{i.label}</td><td>{dayBn(i.dueDate)}</td><td class="num">{taka(i.amountMinor)}</td><td class="num">{i.paidMinor ? taka(i.paidMinor) : ''}</td><td><span class={`pill pill--${STATE_PILL[i.state]}`}>{STATE_BN[i.state]}</span></td></tr>)}</tbody>
+                  </table>
+                </div>
+              </details>
+            </section>
+          );
+        })}
+
+        <section class="card block">
+          <div class="card__head"><h2>জমার রসিদ</h2></div>
+          {panel.payments.filter((p) => !p.voidedAt).length === 0 ? <p class="muted">এখনো কোনো টাকা জমা হয়নি।</p> : (
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>রসিদ</th><th>তারিখ</th><th>কোর্স</th><th>মাধ্যম</th><th>ট্রানজেকশন আইডি</th><th class="num">টাকা</th></tr></thead>
+                <tbody>
+                  {panel.payments.filter((p) => !p.voidedAt).map((p) => (
+                    <tr>
+                      <td><a href={`/account/offline/receipt/${p.id}`} target="_blank">#{bnDigits(p.receiptNo)}</a></td>
+                      <td>{dayBn(p.paidOn)}</td>
+                      <td>{p.courseTitle}</td>
+                      <td>{METHOD_BN[p.method]}</td>
+                      <td><small>{p.reference}</small></td>
+                      <td class="num">{taka(p.amountMinor)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
+    </AccountShell>
+  )
+}
+
+<style>
+  /* Wide tables scroll inside their card instead of widening the page on phones. */
+  .ui,
+  .block {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .kinds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-4);
+    margin-top: var(--space-3);
+  }
+  .late {
+    margin: var(--space-2) 0 0;
+  }
+  .block {
+    margin-top: var(--space-5);
+  }
+  .card__head h2 {
+    margin: 0;
+  }
+  .sums {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+  .sums div {
+    display: grid;
+    padding: var(--space-3);
+    background: #f8faf6;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+  }
+  .pay {
+    display: grid;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    margin-bottom: var(--space-3);
+    background: var(--mint-50);
+    border: 1px solid var(--leaf-200);
+    border-radius: var(--radius-sm);
+  }
+  .pay fieldset {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-2);
+  }
+  .pay legend {
+    font-weight: 700;
+    margin-bottom: var(--space-2);
+  }
+  .choice {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .pay .button {
+    justify-self: start;
+  }
+</style>

@@ -1,0 +1,53 @@
+---
+import { mediaUrl } from '../lib/format';
+
+// A course cover shown whole, never cropped. Covers come in many shapes
+// (16:9 banners, square and portrait posters); the frame is 16:9 and any
+// empty side is filled with a soft, blurred copy of the same image.
+interface Props {
+  imageKey: string;
+  /** Widths available: imported covers have 400 and 800. */
+  width?: 400 | 800;
+  sizes?: string;
+  eager?: boolean;
+  alt?: string;
+  class?: string;
+}
+const { imageKey, width = 800, sizes, eager = false, alt = '', class: className } = Astro.props;
+const single = /\.(webp|jpe?g|png)$/.test(imageKey);
+const src = mediaUrl(imageKey, width);
+const srcset = single || !sizes ? undefined : `${mediaUrl(imageKey, 400)} 400w, ${mediaUrl(imageKey, 800)} 800w`;
+---
+
+<span class:list={['cover', className]}>
+  <img class="cover__bg" src={mediaUrl(imageKey, 400)} alt="" aria-hidden="true" loading={eager ? 'eager' : 'lazy'} decoding="async" />
+  <img class="cover__img" src={src} srcset={srcset} sizes={srcset ? sizes : undefined} alt={alt} loading={eager ? 'eager' : 'lazy'} decoding="async" width="800" height="450" />
+</span>
+
+<style>
+  .cover {
+    position: relative;
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: var(--color-tint);
+  }
+  .cover__bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: blur(18px) saturate(1.1);
+    transform: scale(1.25);
+    opacity: 0.75;
+  }
+  .cover__img {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    transition: transform 0.5s var(--ease);
+  }
+</style>

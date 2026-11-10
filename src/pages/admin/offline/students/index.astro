@@ -1,0 +1,141 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import EnrollFields from '../../../../components/admin/OfflineEnrollFields.astro';
+import {
+  createOfflineStudent,
+  enrollOffline,
+  listOfflineCourses,
+  listOfflineStudents,
+  parseEnrollForm,
+  parseOfflineStudentForm,
+  studentsWithPhone,
+} from '../../../../server/offline';
+import { listBatches } from '../../../../server/office';
+import { dayBn, studentCode, todayDhaka } from '../../../../lib/offline';
+import { bnDigits, taka } from '../../../../lib/format';
+
+const today = todayDhaka();
+const actor = Astro.locals.staff!;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const student = parseOfflineStudentForm(form);
+  if (!student.ok) return Astro.redirect(`/admin/offline/students?new=1&error=${student.error}`, 303);
+  // Same phone already here: open that person instead of making a second one, unless told to.
+  if (form.get('confirmDuplicate') !== 'on') {
+    const same = await studentsWithPhone(env.DB, student.value.phone);
+    if (same.length) return Astro.redirect(`/admin/offline/students?new=1&dup=${encodeURIComponent(same[0]!.id)}`, 303);
+  }
+  const enroll = form.get('courseId') ? parseEnrollForm(form) : null;
+  if (enroll && !enroll.ok) return Astro.redirect(`/admin/offline/students?new=1&error=${enroll.error}`, 303);
+  const id = await createOfflineStudent(env.DB, actor, student.value);
+  if (enroll?.ok) await enrollOffline(env.DB, actor, id, enroll.value);
+  return Astro.redirect(`/admin/offline/students/${id}?saved=1`, 303);
+}
+
+const q = Astro.url.searchParams.get('q') ?? '';
+const f = Astro.url.searchParams.get('f');
+const filter = f === 'due' || f === 'overdue' ? f : 'all';
+const [students, courses, batches] = await Promise.all([listOfflineStudents(env.DB, q, today, filter), listOfflineCourses(env.DB, false), listBatches(env.DB, { activeOnly: true })]);
+const openNew = Astro.url.searchParams.has('new');
+const dup = Astro.url.searchParams.get('dup');
+const link = (k: string) => `/admin/offline/students?${new URLSearchParams({ ...(q ? { q } : {}), ...(k !== 'all' ? { f: k } : {}) })}`;
+---
+
+<Admin title="ছাত্র">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">ছাত্র ও ফি</p>
+      <h1>ছাত্র ও ভর্তি</h1>
+      <p>আইডি, নাম, ফোন বা ইমেইল দিয়ে খুঁজুন। প্রত্যেক ছাত্র ভর্তির সময় একটি আইডি পায় (যেমন TI-0001)।</p>
+    </div>
+    <div class="actions">
+      <a class="button" href="?new=1#new"><Icon name="plus" /> নতুন ভর্তি</a>
+      <a class="button button--ghost" href="/admin/offline/export/students.csv"><Icon name="download" /> Excel</a>
+    </div>
+  </header>
+
+  <details class="card new" id="new" open={openNew}>
+    <summary><strong>নতুন ছাত্র ভর্তি ফর্ম</strong></summary>
+    {
+      dup && (
+        <p class="note note--warn">
+          এই ফোন নম্বরে একজন ছাত্র আগে থেকেই আছেন। <a href={`/admin/offline/students/${dup}`}>তাঁর প্রোফাইল খুলুন</a> এবং সেখান থেকে নতুন কোর্সে ভর্তি করুন। একই নম্বরে আলাদা মানুষ হলে (যেমন ভাইবোন) নিচের "তবুও নতুন করে রাখুন" টিক দিয়ে আবার সংরক্ষণ করুন।
+        </p>
+      )
+    }
+    <form method="post" class="form-grid">
+      <h3>ছাত্রের তথ্য</h3>
+      <label class="field"><span>ছাত্রের নাম</span><input name="name" required minlength="2" maxlength="200" /></label>
+      <label class="field"><span>ফোন নম্বর</span><input name="phone" type="tel" required placeholder="01XXXXXXXXX" /></label>
+      <label class="field"><span>অভিভাবকের ফোন (ঐচ্ছিক)</span><input name="guardianPhone" type="tel" /></label>
+      <label class="field"><span>Gmail (প্যানেলে লগইনের জন্য, ঐচ্ছিক)</span><input name="email" type="email" placeholder="name@gmail.com" /></label>
+      <label class="field wide"><span>ঠিকানা</span><textarea name="address" maxlength="500"></textarea></label>
+      <label class="field wide"><span>নোট (ঐচ্ছিক)</span><input name="note" maxlength="2000" /></label>
+
+      <h3>কোর্সে ভর্তি</h3>
+      {
+        courses.length === 0 ? (
+          <p class="wide muted">এখনো কোনো চালু বিভাগ নেই। আগে <a href="/admin/offline/courses">কোর্স যোগ করুন</a>, অথবা এখন শুধু ছাত্রের তথ্য রেখে পরে ভর্তি করুন।</p>
+        ) : (
+          <EnrollFields courses={courses} batches={batches} today={today} optional />
+        )
+      }
+      {dup && <label class="check wide"><input type="checkbox" name="confirmDuplicate" /> তবুও নতুন করে রাখুন</label>}
+      <button class="button">ভর্তি সংরক্ষণ করুন</button>
+    </form>
+  </details>
+
+  <form class="toolbar" method="get">
+    <input name="q" value={q} placeholder="আইডি, নাম, ফোন বা ইমেইল" aria-label="ছাত্র খুঁজুন" />
+    {filter !== 'all' && <input type="hidden" name="f" value={filter} />}
+    <button class="button" type="submit"><Icon name="search" /> খুঁজুন</button>
+  </form>
+  <nav class="tabs" aria-label="ছাঁকনি">
+    <a href={link('all')} aria-current={filter === 'all' ? 'page' : undefined}>সবাই</a>
+    <a href={link('due')} aria-current={filter === 'due' ? 'page' : undefined}>যাদের টাকা বাকি</a>
+    <a href={link('overdue')} aria-current={filter === 'overdue' ? 'page' : undefined}>তারিখ পার হয়ে গেছে</a>
+  </nav>
+
+  {
+    students.length === 0 ? (
+      <div class="card empty"><Icon name="users" size={28} /><p>কাউকে পাওয়া যায়নি।</p></div>
+    ) : (
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>আইডি</th><th>ছাত্র</th><th>কোর্স</th><th class="num">মোট বাকি</th><th>পরের কিস্তি</th><th></th></tr></thead>
+          <tbody>
+            {students.map((s) => (
+              <tr class={s.overdueMinor ? 'late' : ''}>
+                <td><span class="id">{studentCode(s.studentNo)}</span></td>
+                <td>
+                  <a href={`/admin/offline/students/${s.id}`}><strong>{s.name}</strong></a>
+                  <br /><a class="muted" href={`tel:${s.phone}`}>{bnDigits(s.phone)}</a>
+                </td>
+                <td>{s.courses || <span class="muted">কোনো কোর্সে নেই</span>}</td>
+                <td class="num">
+                  {s.dueMinor ? taka(s.dueMinor) : <span class="pill pill--paid">পরিশোধিত</span>}
+                  {s.overdueMinor > 0 && <small class="bad"><br />তারিখ পার: {taka(s.overdueMinor)}</small>}
+                </td>
+                <td>{s.nextDue ? dayBn(s.nextDue) : ''}</td>
+                <td><a class="button button--sm button--ghost" href={`/admin/offline/students/${s.id}`}>খুলুন</a></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+  <p class="muted"><small>{bnDigits(students.length)} জন দেখানো হচ্ছে</small></p>
+</Admin>
+
+<style>
+  .new {
+    margin-bottom: var(--space-5);
+  }
+  .new[open] summary {
+    margin-bottom: var(--space-4);
+  }
+</style>

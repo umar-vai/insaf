@@ -1,0 +1,157 @@
+---
+// One day's attendance for a batch: a row per student with present, absent,
+// late or leave, and a save button. The page handles the form.
+import Icon from './Icon.astro';
+import type { RosterRow } from '../server/office';
+import { ATTENDANCE, ATTENDANCE_BN, DAY_BN, dayBn, studentCode, weekday } from '../lib/offline';
+import { bnDigits } from '../lib/format';
+
+interface Props {
+  rows: RosterRow[];
+  day: string;
+  batchName: string;
+  marked: number;
+}
+const { rows, day, batchName, marked } = Astro.props;
+---
+
+<form method="post" class="card sheet" data-sheet>
+  <input type="hidden" name="day" value={day} />
+  <div class="card__head">
+    <div>
+      <h2>{batchName} · {dayBn(day)}</h2>
+      <small class="muted">{DAY_BN[weekday(day)]} · {bnDigits(rows.length)} জন{marked > 0 && ` · আগে ${bnDigits(marked)} জনের নেওয়া হয়েছে`}</small>
+    </div>
+    <button type="button" class="button button--sm button--ghost" data-all-present><Icon name="check" /> সবাই উপস্থিত</button>
+  </div>
+  <ul class="roster">
+    {rows.map((r) => (
+      <li>
+        <span class="who">
+          {r.roll && <span class="roll">{bnDigits(r.roll)}</span>}
+          <span><strong>{r.name}</strong> <span class="id">{studentCode(r.studentNo)}</span></span>
+        </span>
+        <span class="seg" role="radiogroup" aria-label={`${r.name} এর হাজিরা`}>
+          {ATTENDANCE.map((st) => (
+            <label class={`seg--${st}`}>
+              <input type="radio" name={`s_${r.enrollmentId}`} value={st} checked={(r.status ?? 'present') === st} />
+              <span>{ATTENDANCE_BN[st]}</span>
+            </label>
+          ))}
+        </span>
+      </li>
+    ))}
+  </ul>
+  <div class="foot">
+    <span class="muted" data-count></span>
+    <button class="button button--leaf"><Icon name="check" /> হাজিরা সংরক্ষণ করুন</button>
+  </div>
+</form>
+
+<script>
+  const sheet = document.querySelector<HTMLFormElement>('[data-sheet]');
+  if (sheet) {
+    const count = sheet.querySelector<HTMLElement>('[data-count]')!;
+    const update = () => {
+      const all = sheet.querySelectorAll('.roster li').length;
+      const here = sheet.querySelectorAll('input[value="present"]:checked, input[value="late"]:checked').length;
+      count.textContent = `${here} / ${all} জন উপস্থিত`.replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]!);
+    };
+    sheet.addEventListener('change', update);
+    sheet.querySelector('[data-all-present]')!.addEventListener('click', () => {
+      sheet.querySelectorAll<HTMLInputElement>('input[value="present"]').forEach((i) => (i.checked = true));
+      update();
+    });
+    update();
+  }
+</script>
+
+<style>
+  .roster {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .roster li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-3) 0;
+    border-top: 1px solid var(--color-line);
+  }
+  .who {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+  .roll {
+    display: grid;
+    place-items: center;
+    min-width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--mint-100);
+    font-weight: 700;
+    color: var(--green-700);
+  }
+  .seg {
+    display: inline-flex;
+    padding: 3px;
+    gap: 2px;
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    background: #f8faf6;
+  }
+  .seg label {
+    position: relative;
+    cursor: pointer;
+  }
+  .seg input {
+    position: absolute;
+    opacity: 0;
+    inset: 0;
+  }
+  /* Big enough to tap with a thumb. */
+  .seg span {
+    display: block;
+    padding: 0.5em 0.95em;
+    border-radius: 999px;
+    font: 600 var(--text-sm) / 1.5 var(--font-display);
+    color: var(--color-text-muted);
+  }
+  .seg input:focus-visible + span {
+    outline: 2px solid var(--leaf-500);
+  }
+  .seg--present input:checked + span {
+    background: var(--green-700);
+    color: var(--white);
+  }
+  .seg--absent input:checked + span {
+    background: var(--bad-600);
+    color: var(--white);
+  }
+  .seg--late input:checked + span {
+    background: var(--warn-100);
+    color: var(--warn-700);
+  }
+  .seg--leave input:checked + span {
+    background: var(--info-100);
+    color: var(--info-700);
+  }
+  /* The save button stays in view while scrolling a long list. */
+  .foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding-block: var(--space-3);
+    border-top: 1px solid var(--color-line);
+    background: var(--color-surface);
+  }
+</style>

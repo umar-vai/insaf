@@ -1,0 +1,124 @@
+---
+// Write a notice and see the earlier ones. Used by the online and the offline
+// parts, each with its own audiences. The page handles the form.
+import Icon from '../Icon.astro';
+import { AUDIENCE_BN, TARGETED, type Audience, type Notice } from '../../server/office';
+import { dateBn } from '../../lib/format';
+
+interface Props {
+  audiences: readonly Audience[];
+  /** For each audience that names one group or person: the choices (courses, batches, students, teachers). */
+  targets: Partial<Record<Audience, { id: string; label: string }[]>>;
+  notices: Notice[];
+  where: string;
+}
+const { audiences, targets, notices, where } = Astro.props;
+const TARGET_LABEL: Partial<Record<Audience, string>> = { course: 'কোর্স', batch: 'ব্যাচ', offline_student: 'ছাত্র', teacher: 'শিক্ষক' };
+const targeted = audiences.filter((a) => TARGETED.includes(a));
+---
+
+<div class="cols cols--wide board">
+  <section class="card">
+    <div class="card__head"><h2>নতুন নোটিশ</h2></div>
+    <form method="post" class="form-grid" data-notice enctype="multipart/form-data">
+      <input type="hidden" name="action" value="create" />
+      <label class="field wide"><span>শিরোনাম</span><input name="title" required minlength="2" maxlength="160" /></label>
+      <label class="field">
+        <span>কারা দেখবে</span>
+        <select name="audience" data-audience>{audiences.map((a) => <option value={a}>{AUDIENCE_BN[a]}</option>)}</select>
+      </label>
+      {targeted.map((a) => (
+        <label class="field" data-target={a} hidden>
+          <span>{TARGET_LABEL[a]}</span>
+          <select name={`target_${a}`}>{(targets[a] ?? []).map((t) => <option value={t.id}>{t.label}</option>)}</select>
+        </label>
+      ))}
+      <label class="field wide"><span>বিস্তারিত</span><textarea name="body" rows="5" maxlength="5000"></textarea></label>
+      <label class="field wide"><span>ফাইল যুক্ত করুন (ঐচ্ছিক: PDF, ছবি, Word, Excel, ১০ MB পর্যন্ত)</span><input name="file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,image/*" /></label>
+      <label class="check wide"><input type="checkbox" name="pinned" /> উপরে পিন করে রাখুন</label>
+      <p class="wide muted"><small>{where}</small></p>
+      <button class="button"><Icon name="bell" /> নোটিশ প্রকাশ করুন</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="card__head"><h2>আগের নোটিশ</h2></div>
+    {
+      notices.length === 0 ? (
+        <div class="empty"><Icon name="bell" size={28} /><p>এখনো কোনো নোটিশ দেওয়া হয়নি।</p></div>
+      ) : (
+        <ul class="notices">
+          {notices.map((n) => (
+            <li class={n.status === 'hidden' ? 'is-hidden' : ''}>
+              <div class="notices__head">
+                <strong>{n.pinned ? '📌 ' : ''}{n.title}</strong>
+                <span class={`pill pill--${n.status}`}>{n.status === 'published' ? 'প্রকাশিত' : 'লুকানো'}</span>
+              </div>
+              <small class="muted">{AUDIENCE_BN[n.audience]}{n.targetName && `: ${n.targetName}`} · {dateBn(n.createdAt, true)} · {n.createdBy}</small>
+              {n.body && <p>{n.body}</p>}
+              {n.fileName && <a class="attach" href={`/api/notice-file/${n.id}`} target="_blank"><Icon name="download" size={16} /> {n.fileName}</a>}
+              <form method="post">
+                <input type="hidden" name="action" value={n.status === 'published' ? 'hide' : 'publish'} />
+                <input type="hidden" name="id" value={n.id} />
+                <button class="button button--sm button--ghost">{n.status === 'published' ? 'লুকিয়ে ফেলুন' : 'আবার দেখান'}</button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </section>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLFormElement>('[data-notice]').forEach((f) => {
+    const aud = f.querySelector('[data-audience]') as unknown as HTMLSelectElement;
+    const targets = f.querySelectorAll<HTMLElement>('[data-target]');
+    const sync = () => targets.forEach((t) => (t.hidden = t.dataset.target !== aud.value));
+    aud.addEventListener('input', sync);
+    sync();
+  });
+</script>
+
+<style>
+  .board {
+    margin-top: 0;
+  }
+  .notices {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .notices li {
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--color-line);
+    border-left: 3px solid var(--green-700);
+    border-radius: var(--radius-sm);
+  }
+  .notices li.is-hidden {
+    opacity: 0.6;
+    border-left-color: var(--color-line);
+  }
+  .notices__head {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+  .notices p {
+    margin: var(--space-1) 0;
+    white-space: pre-line;
+  }
+  .attach {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    justify-self: start;
+  }
+  .notices form {
+    justify-self: start;
+  }
+</style>

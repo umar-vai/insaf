@@ -1,0 +1,73 @@
+---
+import Icon from './Icon.astro';
+
+// The phone menu: the places people go most, always one tap away.
+const path = Astro.url.pathname;
+const items = [
+  { href: '/', label: 'হোম', icon: 'home', on: path === '/' },
+  { href: '/land', label: 'জমি প্রজেক্ট', icon: 'pin', on: path.startsWith('/land') },
+  { href: '/donate', label: 'দান করুন', icon: 'heart', on: path.startsWith('/donate') || path.startsWith('/zakat') },
+  { href: '/account', label: 'লগইন', icon: 'user', on: path.startsWith('/account') || path.startsWith('/teacher') },
+] as const;
+---
+
+<nav class="bnav" aria-label="মোবাইল মেনু">
+  {
+    items.map((i) => (
+      <a href={i.href} class="bnav__item" aria-current={i.on ? 'page' : undefined}>
+        <Icon name={i.icon} size={22} />
+        <span>{i.label}</span>
+      </a>
+    ))
+  }
+</nav>
+
+<style>
+  .bnav {
+    display: none;
+  }
+  @media (max-width: 960px) {
+    :global(body:has(> .bnav)) {
+      --bnav-h: calc(62px + env(safe-area-inset-bottom));
+      padding-bottom: var(--bnav-h);
+    }
+    .bnav {
+      position: fixed;
+      inset: auto 0 0;
+      z-index: 46;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      height: var(--bnav-h);
+      padding-bottom: env(safe-area-inset-bottom);
+      background: rgb(255 255 255 / 0.97);
+      border-top: 1px solid var(--color-line);
+      box-shadow: 0 -6px 20px -12px rgb(4 38 26 / 0.3);
+    }
+    @supports (backdrop-filter: blur(10px)) {
+      .bnav {
+        background: rgb(255 255 255 / 0.88);
+        backdrop-filter: blur(12px);
+      }
+    }
+    .bnav__item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+      color: var(--color-text-muted);
+      text-decoration: none;
+      font: 550 0.75rem / 1.2 var(--font-display);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .bnav__item[aria-current='page'] {
+      color: var(--color-primary);
+    }
+    .bnav__item[aria-current='page'] :global(svg) {
+      background: var(--color-tint);
+      border-radius: 999px;
+      padding: 2px 14px;
+      box-sizing: content-box;
+    }
+  }
+</style>

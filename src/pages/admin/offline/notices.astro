@@ -1,0 +1,45 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import NoticeBoard from '../../../components/admin/NoticeBoard.astro';
+import { createNotice, listBatches, listNotices, listTeachers, OFFLINE_AUDIENCES, parseNoticeForm, setNoticeStatus } from '../../../server/office';
+import { studentCode } from '../../../lib/offline';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+  if (action === 'create') {
+    const v = parseNoticeForm(form, OFFLINE_AUDIENCES);
+    if (!v.ok || !(await createNotice(env.DB, Astro.locals.staff!, v.value, { bucket: env.MEDIA, file: form.get('file') }))) return Astro.redirect(`/admin/offline/notices?error=${v.ok ? 'target' : v.error}`, 303);
+  } else if (action === 'hide' || action === 'publish') {
+    await setNoticeStatus(env.DB, Astro.locals.staff!, String(form.get('id') ?? ''), action === 'hide' ? 'hidden' : 'published', OFFLINE_AUDIENCES);
+  }
+  return Astro.redirect('/admin/offline/notices?saved=1', 303);
+}
+const [notices, batches, teachers, students] = await Promise.all([
+  listNotices(env.DB, OFFLINE_AUDIENCES),
+  listBatches(env.DB, { activeOnly: true }),
+  listTeachers(env.DB, true),
+  env.DB.prepare(`SELECT id, name, student_no AS studentNo FROM offline_students WHERE status = 'active' ORDER BY name LIMIT 2000`).all<{ id: string; name: string; studentNo: number | null }>(),
+]);
+---
+
+<Admin title="পোর্টালের নোটিশ">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">একাডেমিক</p>
+      <h1>নোটিশ বোর্ড</h1>
+      <p>সবার জন্য, শুধু ছাত্রদের, শুধু শিক্ষকদের, একটি ব্যাচের, অথবা একজন ছাত্র বা শিক্ষকের জন্য নোটিশ দিন। চাইলে PDF বা ছবি যুক্ত করুন।</p>
+    </div>
+  </header>
+  <NoticeBoard
+    audiences={OFFLINE_AUDIENCES}
+    targets={{
+      batch: batches.map((b) => ({ id: b.id, label: `${b.name} · ${b.courseTitle}` })),
+      offline_student: students.results.map((s) => ({ id: s.id, label: `${s.name} ${studentCode(s.studentNo)}` })),
+      teacher: teachers.map((t) => ({ id: t.id, label: t.name })),
+    }}
+    notices={notices}
+    where="ছাত্র ও শিক্ষকরা নিজেদের প্যানেলের প্রথম পাতায় এই নোটিশ দেখবে। যুক্ত করা ফাইল শুধু তারাই নামাতে পারবে যাদের জন্য নোটিশ।"
+  />
+</Admin>

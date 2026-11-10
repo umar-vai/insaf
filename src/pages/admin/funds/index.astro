@@ -1,0 +1,84 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import FundProgress from '../../../components/donate/FundProgress.astro';
+import { listFunds, parseFundForm, saveFund } from '../../../server/donations';
+import { slugify } from '../../../server/admin';
+
+const actor = Astro.locals.staff!;
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const title = String(form.get('title') ?? '').trim();
+  form.set('slug', String(form.get('slug') || slugify(title, 'fund')).toLowerCase());
+  const v = parseFundForm(form);
+  if (!v.ok) return Astro.redirect(`/admin/funds?error=${v.error}`, 303);
+  const r = await saveFund(env.DB, actor, null, v.value);
+  if (!r.ok) return Astro.redirect('/admin/funds?error=slug_taken', 303);
+  return Astro.redirect(`/admin/funds/${r.id}?saved=1`, 303);
+}
+const funds = await listFunds(env.DB, { all: true });
+const ERR: Record<string, string> = { title: 'নাম লিখুন।', slug: 'ওয়েব ঠিকানায় শুধু ইংরেজি ছোট হাতের অক্ষর, সংখ্যা ও হাইফেন দিন।', slug_taken: 'এই ওয়েব ঠিকানা আগেই আছে।' };
+const error = ERR[Astro.url.searchParams.get('error') ?? ''];
+---
+
+<Admin title="তহবিল ও গল্প">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">দান CRM</p>
+      <h1>তহবিল ও গল্প</h1>
+      <p>প্রতিটি তহবিলের নিজের পেজ, লক্ষ্যমাত্রা, গল্প আর অগ্রগতির খবর। লক্ষ্য দিলে পেজে প্রগ্রেস বার দেখাবে।</p>
+    </div>
+  </header>
+  {error && <p class="note note--bad" role="alert">{error}</p>}
+
+  <section class="funds">
+    {
+      funds.map((f) => (
+        <a class="card fund" href={`/admin/funds/${f.id}`}>
+          <div class="card__head">
+            <h2>{f.title}</h2>
+            <span class={`pill pill--${f.status === 'active' ? 'active' : 'hidden'}`}>{f.status === 'active' ? 'চালু' : 'লুকানো'}</span>
+          </div>
+          <FundProgress raisedMinor={f.raisedMinor} goalMinor={f.goalMinor} donors={f.donors} gifts={f.gifts} memberGoal={f.memberGoal} size="sm" />
+          <small class="muted">/donate/{f.slug}</small>
+        </a>
+      ))
+    }
+  </section>
+
+  <details class="card new">
+    <summary><strong><Icon name="plus" /> নতুন তহবিল</strong></summary>
+    <form method="post" class="form-grid">
+      <label class="field"><span>নাম</span><input name="title" required maxlength="120" placeholder="যেমন মসজিদ নির্মাণ" /></label>
+      <label class="field"><span>ওয়েব ঠিকানা (ইংরেজিতে)</span><input name="slug" pattern="[a-z0-9][a-z0-9-]*" placeholder="masjid" /></label>
+      <label class="field"><span>লক্ষ্য (টাকা, ঐচ্ছিক)</span><input name="goal" inputmode="numeric" /></label>
+      <label class="field wide"><span>ছোট পরিচিতি</span><input name="summary" maxlength="400" /></label>
+      <button class="button">তহবিল খুলুন</button>
+    </form>
+  </details>
+</Admin>
+
+<style>
+  .funds {
+    display: grid;
+    gap: var(--space-4);
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    margin-bottom: var(--space-5);
+  }
+  .fund {
+    display: grid;
+    gap: var(--space-3);
+    color: inherit !important;
+    text-decoration: none;
+  }
+  .fund:hover {
+    border-color: var(--green-700);
+  }
+  .new summary {
+    cursor: pointer;
+  }
+  .new[open] summary {
+    margin-bottom: var(--space-4);
+  }
+</style>

@@ -1,0 +1,150 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { approvePayroll, editPayroll, generatePayroll, listPayroll, payPayroll, reopenPayroll } from '../../../server/hr';
+import { getSettings, SALARY_BASIS_BN } from '../../../server/settings';
+import { localsMayDo } from '../../../server/staff';
+import { addMonths, dayBn, METHOD_BN, monthBn, PAY_METHODS, todayDhaka, type PayMethod } from '../../../lib/offline';
+import { bnDigits, taka } from '../../../lib/format';
+
+const actor = Astro.locals.staff!;
+// Owners, and team members with full power in this part, approve and void.
+const owner = localsMayDo(Astro.locals, 'hr', 'full');
+const today = todayDhaka();
+const thisMonth = today.slice(0, 7);
+const asked = Astro.url.searchParams.get('m') ?? '';
+const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(asked) ? asked : thisMonth;
+const here = `/admin/offline/payroll?m=${month}`;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+  const id = String(form.get('id') ?? '');
+  let ok = true;
+  if (action === 'generate') await generatePayroll(env.DB, actor, month, await getSettings(env.DB));
+  else if (action === 'edit') ok = await editPayroll(env.DB, actor, id, form);
+  else if (action === 'approve' && owner) ok = (await approvePayroll(env.DB, actor, month, id ? [id] : undefined)) > 0;
+  else if (action === 'reopen' && owner) ok = await reopenPayroll(env.DB, actor, id);
+  else if (action === 'pay' && owner) ok = await payPayroll(env.DB, actor, id, String(form.get('paidOn') ?? today), String(form.get('method') ?? 'cash'), today);
+  else ok = false;
+  return Astro.redirect(`${here}&${ok ? 'saved=1' : 'error=payroll'}`, 303);
+}
+
+const [rows, s] = await Promise.all([listPayroll(env.DB, month), getSettings(env.DB)]);
+const total = rows.reduce((a, r) => a + r.netMinor, 0);
+const paid = rows.filter((r) => r.status === 'paid').reduce((a, r) => a + r.netMinor, 0);
+const drafts = rows.filter((r) => r.status === 'draft').length;
+const STATUS = { draft: 'খসড়া', approved: 'অনুমোদিত', paid: 'পরিশোধিত' } as const;
+const PILL = { draft: 'draft', approved: 'info', paid: 'paid' } as const;
+---
+
+<Admin title="বেতন শিট">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">শিক্ষক ও বেতন</p>
+      <h1>বেতন শিট</h1>
+      <p>শিট তৈরি করলে প্রত্যেক কর্মরত শিক্ষকের মূল বেতন, কাজের দিন আর অনুমোদিত ছুটি থেকে বেতন নিজে হিসাব হয়। বোনাস বা অন্য কাটা লিখে দিন, মালিক অনুমোদন দিলে পরিশোধ করুন। পরিশোধ করলে টাকাটা খরচের হিসাবে চলে যায়।</p>
+    </div>
+    <div class="actions"><a class="button button--ghost" href="/admin/offline/settings"><Icon name="layers" /> বেতনের নিয়ম</a></div>
+  </header>
+
+  <form class="toolbar" method="get">
+    <a class="button button--ghost" href={`?m=${addMonths(`${month}-01`, -1).slice(0, 7)}`} aria-label="আগের মাস">‹</a>
+    <input type="month" name="m" value={month} aria-label="মাস বাছুন" />
+    <button class="button button--ghost">দেখুন</button>
+    {month < thisMonth && <a class="button button--ghost" href={`?m=${addMonths(`${month}-01`, 1).slice(0, 7)}`} aria-label="পরের মাস">›</a>}
+  </form>
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__icon"><Icon name="wallet" /></span><span class="kpi__label">{monthBn(month, true)} মোট বেতন</span><strong class="kpi__value">{taka(total)}</strong><span class="kpi__hint">{bnDigits(rows.length)} জন শিক্ষক</span></div>
+    <div class="kpi kpi--info"><span class="kpi__icon"><Icon name="check" /></span><span class="kpi__label">পরিশোধ হয়েছে</span><strong class="kpi__value">{taka(paid)}</strong><span class="kpi__hint">বাকি {taka(total - paid)}</span></div>
+  </div>
+
+  <section class="card block">
+    <div class="card__head">
+      <div>
+        <h2>এই মাসের শিট</h2>
+        <small class="muted">নিয়ম: {SALARY_BASIS_BN[s.salaryBasis]} · মাসে {bnDigits(s.paidLeaveDays)} দিন ছুটি বেতনসহ</small>
+      </div>
+      <div class="actions">
+        <form method="post"><input type="hidden" name="action" value="generate" /><button class="button button--sm"><Icon name="swap" /> {rows.length ? 'আবার হিসাব করুন' : 'শিট তৈরি করুন'}</button></form>
+        {owner && drafts > 0 && <form method="post" data-confirm="খসড়া সব বেতন অনুমোদন দেবেন?"><input type="hidden" name="action" value="approve" /><button class="button button--sm button--leaf"><Icon name="check" /> সব অনুমোদন ({bnDigits(drafts)})</button></form>}
+      </div>
+    </div>
+    {
+      rows.length === 0 ? (
+        <div class="empty"><Icon name="wallet" size={28} /><p>এই মাসের শিট এখনো তৈরি হয়নি।</p></div>
+      ) : (
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>শিক্ষক</th><th class="num">মূল বেতন</th><th class="num">দিন / ছুটি</th><th class="num">কাটা</th><th>বোনাস ও অন্য কাটা</th><th class="num">প্রাপ্য</th><th>অবস্থা</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr>
+                  <td><a href={`/admin/offline/teachers/${r.teacherId}`}><strong>{r.teacherName}</strong></a><br /><a class="muted" href={`/admin/offline/payslip/${r.id}`} target="_blank"><small>পে স্লিপ</small></a></td>
+                  <td class="num">{taka(r.basicMinor)}</td>
+                  <td class="num">{bnDigits(r.workDays)} দিন<small class="muted"><br />ছুটি {bnDigits(r.leaveDays)}, বিনা বেতনে {bnDigits(r.unpaidDays)}</small></td>
+                  <td class="num">{r.deductionMinor ? `− ${taka(r.deductionMinor)}` : '০'}</td>
+                  <td>
+                    {r.status === 'draft' ? (
+                      <form method="post" class="edit">
+                        <input type="hidden" name="action" value="edit" />
+                        <input type="hidden" name="id" value={r.id} />
+                        <input name="bonus" inputmode="numeric" value={r.bonusMinor ? r.bonusMinor / 100 : ''} placeholder="বোনাস" aria-label="বোনাস" />
+                        <input name="other" inputmode="numeric" value={r.otherDeductionMinor ? r.otherDeductionMinor / 100 : ''} placeholder="অন্য কাটা" aria-label="অন্য কাটা" />
+                        <input name="note" value={r.note} placeholder="নোট" aria-label="নোট" />
+                        <button class="button button--sm button--ghost">রাখুন</button>
+                      </form>
+                    ) : (
+                      <small>বোনাস {taka(r.bonusMinor)} · কাটা {taka(r.otherDeductionMinor)}{r.note && <><br />{r.note}</>}</small>
+                    )}
+                  </td>
+                  <td class="num"><strong>{taka(r.netMinor)}</strong></td>
+                  <td>
+                    <span class={`pill pill--${PILL[r.status]}`}>{STATUS[r.status]}</span>
+                    {r.status === 'paid' && <small class="muted"><br />{dayBn(r.paidOn)} · {METHOD_BN[(r.paidMethod ?? 'cash') as PayMethod]}</small>}
+                    {owner && r.status === 'draft' && (
+                      <form method="post"><input type="hidden" name="action" value="approve" /><input type="hidden" name="id" value={r.id} /><button class="button button--sm button--ghost">অনুমোদন</button></form>
+                    )}
+                    {owner && r.status === 'approved' && (
+                      <form method="post" class="pay" data-confirm={`${r.teacherName} কে ${taka(r.netMinor)} পরিশোধ হয়েছে বলে লিখবেন? খরচের হিসাবেও যোগ হবে।`}>
+                        <input type="hidden" name="action" value="pay" />
+                        <input type="hidden" name="id" value={r.id} />
+                        <input type="date" name="paidOn" value={today} max={today} aria-label="তারিখ" />
+                        <select name="method" aria-label="মাধ্যম">{PAY_METHODS.map((m) => <option value={m}>{METHOD_BN[m]}</option>)}</select>
+                        <button class="button button--sm button--leaf">পরিশোধ</button>
+                      </form>
+                    )}
+                    {owner && r.status === 'approved' && (
+                      <form method="post"><input type="hidden" name="action" value="reopen" /><input type="hidden" name="id" value={r.id} /><button class="button button--sm button--ghost">খসড়ায় ফেরত</button></form>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+  </section>
+  {!owner && <p class="muted"><small>অনুমোদন আর পরিশোধ মালিক বা সম্পূর্ণ ক্ষমতার সদস্য করতে পারেন।</small></p>}
+</Admin>
+
+<style>
+  .kpis {
+    max-width: 640px;
+  }
+  .block {
+    margin-top: var(--space-5);
+  }
+  .edit,
+  .pay {
+    display: grid;
+    gap: var(--space-1);
+    min-width: 150px;
+  }
+  .pay {
+    margin-top: var(--space-2);
+  }
+</style>

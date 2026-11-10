@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.astro/
+.wrangler/
+.dev.vars
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+# local-data/ and private-data/ hold student details. They are committed only
+# because the GitHub repository is private (owner, 2026-11-06).
+*.sql.gz
+
+# The WordPress backup holds donor phone numbers and the old payment store
+# password. It stays on this computer only; the importer reads it from here.
+/u148519723_bTIlC.sql
+/uploads/
+/private-data/
+.claude/launch.json

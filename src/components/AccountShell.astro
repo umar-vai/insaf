@@ -1,0 +1,381 @@
+---
+// The signed in student's area: a greeting header and the section menu
+// (a sidebar on wide screens, a sideways scrolling strip on phones).
+import { env } from 'cloudflare:workers';
+import Base from '../layouts/Base.astro';
+import Icon from './Icon.astro';
+import { isStaffEmail } from '../server/staff';
+import { offlineIdsForEmail, teacherForEmail } from '../server/panels';
+import '../styles/panel.css';
+import type { Student } from '../server/students';
+import { loginLabel } from '../server/password';
+
+interface Props {
+  me: Student;
+  active: 'home' | 'profile' | 'offline' | 'offline-fees' | 'offline-attendance' | 'offline-rate' | 'offline-id' | 'offline-tickets' | 't-home' | 't-leave' | 't-salary' | 't-tickets';
+  title: string;
+  /** The teacher panel uses the same frame with its own menu. */
+  mode?: 'student' | 'teacher';
+}
+const { me, active, title, mode = 'student' } = Astro.props;
+// Who else this account is in the office: a teacher, a student (or the
+// guardian of one or more students).
+const [staff, teacher, offlineIds] = await Promise.all([isStaffEmail(env, me.email), teacherForEmail(env.DB, me.email), offlineIdsForEmail(env.DB, me.email)]);
+const initial = (me.name.trim() || me.email).charAt(0).toUpperCase();
+const shown = loginLabel(me.email);
+
+const OFFLINE_NAV = [
+  { key: 'offline', href: '/account/offline', label: 'ড্যাশবোর্ড', icon: 'home' },
+  { key: 'offline-fees', href: '/account/offline/fees', label: 'ফি ও রসিদ', icon: 'coins' },
+  { key: 'offline-attendance', href: '/account/offline/attendance', label: 'হাজিরা', icon: 'clipboard' },
+  { key: 'offline-id', href: '/account/offline/id-card', label: 'আইডি কার্ড', icon: 'user' },
+  { key: 'offline-rate', href: '/account/offline/rate', label: 'শিক্ষক মূল্যায়ন', icon: 'star' },
+  { key: 'offline-tickets', href: '/account/offline/tickets', label: 'অফিসকে লিখুন', icon: 'mail' },
+  { key: 'profile', href: '/account/profile', label: 'প্রোফাইল ও পাসওয়ার্ড', icon: 'lock' },
+] as const;
+const TEACHER_NAV = [
+  { key: 't-home', href: '/teacher', label: 'শিক্ষক ড্যাশবোর্ড', icon: 'grid' },
+  { key: 't-leave', href: '/teacher/leave', label: 'ছুটির আবেদন', icon: 'calendar' },
+  { key: 't-salary', href: '/teacher/salary', label: 'বেতন ও পে স্লিপ', icon: 'wallet' },
+  { key: 't-tickets', href: '/teacher/tickets', label: 'অফিসকে লিখুন', icon: 'mail' },
+  { key: 'profile', href: '/account/profile', label: 'প্রোফাইল ও পাসওয়ার্ড', icon: 'lock' },
+] as const;
+const BASIC_NAV = [
+  { key: 'home', href: '/account', label: 'অ্যাকাউন্ট', icon: 'home' },
+  { key: 'profile', href: '/account/profile', label: 'প্রোফাইল ও পাসওয়ার্ড', icon: 'lock' },
+] as const;
+type NavItem = { key: string; href: string; label: string; icon: Parameters<typeof Icon>[0]['name'] };
+const nav: readonly NavItem[] = mode === 'teacher' || (teacher && active === 'profile' && !offlineIds.length) ? TEACHER_NAV : offlineIds.length ? OFFLINE_NAV : BASIC_NAV;
+---
+
+<Base title={title} description="মাদরাসাতুল ইনসাফ পোর্টাল" bottomNav={false}>
+  <meta slot="head" name="robots" content="noindex" />
+  <section class="acc-hero on-dark">
+    <div class="container acc-hero__row">
+      <div class="acc-hero__who">
+        <span class="acc-hero__avatar" aria-hidden="true">{initial}</span>
+        <div>
+          <p class="acc-hero__hi">আসসালামু আলাইকুম</p>
+          <h1>{me.name.trim() || 'আমার অ্যাকাউন্ট'}</h1>
+          <p class="muted">{shown}</p>
+        </div>
+      </div>
+      <div class="acc-hero__actions">
+        {staff && <a class="button button--leaf" href="/admin">অ্যাডমিন প্যানেল</a>}
+        {teacher && mode !== 'teacher' && <a class="button button--leaf" href="/teacher">শিক্ষক প্যানেল</a>}
+        {teacher && offlineIds.length > 0 && mode === 'teacher' && <a class="button button--leaf" href="/account/offline">স্টুডেন্ট প্যানেল</a>}
+        <form method="post" action="/api/auth/logout">
+          <button class="button button--ghost" type="submit"><Icon name="logout" /> লগআউট</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <div class="container acc">
+    <nav class="acc-nav" aria-label="অ্যাকাউন্টের অংশ">
+      {
+        nav.map((n) => (
+          <a href={n.href} aria-current={n.key === active ? 'page' : undefined}>
+            <Icon name={n.icon} size={19} />
+            {n.label}
+          </a>
+        ))
+      }
+    </nav>
+    <div class="acc-main">
+      <slot />
+    </div>
+  </div>
+</Base>
+
+<script>
+  // On phones, keep the open section's tab in view in the sideways strip.
+  // Ask before anything that cannot be undone with one click.
+  document.querySelectorAll<HTMLFormElement>('form[data-confirm]').forEach((f) =>
+    f.addEventListener('submit', (e) => {
+      if (!confirm(f.dataset.confirm!)) e.preventDefault();
+    }),
+  );
+</script>
+
+<style is:global>
+  /* Building blocks shared by every account page. */
+  .acc-main {
+    display: grid;
+    gap: var(--space-6);
+  }
+  .acc-main h2 {
+    font-size: var(--text-xl);
+    margin: 0;
+  }
+  .panel {
+    padding: clamp(1.1rem, 0.8rem + 1.5vw, 1.75rem);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--shadow-sm);
+  }
+  .panel__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+    margin-bottom: var(--space-5);
+  }
+  .panel__head a {
+    font: 600 var(--text-sm) / 1.4 var(--font-display);
+  }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+    gap: var(--space-4);
+  }
+  .stat {
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-5);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--shadow-sm);
+  }
+  .stat svg {
+    color: var(--color-accent);
+  }
+  .stat strong {
+    font: 700 var(--text-2xl) / 1.1 var(--font-display);
+    color: var(--color-primary-strong);
+  }
+  .stat span {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+  .note {
+    margin: 0;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    background: var(--color-tint);
+    color: var(--color-primary-strong);
+  }
+  .note--bad {
+    background: #fdecea;
+    color: #8a1c12;
+  }
+  .note--good {
+    background: #e7f6e3;
+    color: #1d5c22;
+  }
+  .chip--bad {
+    background: #fdecea;
+    color: #8a1c12;
+  }
+  .chip--muted {
+    background: var(--mint-100);
+    color: var(--color-text-muted);
+  }
+  .rows {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .rows > li {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: var(--space-4) 0;
+    border-top: 1px solid var(--color-line);
+  }
+  .rows > li:first-child {
+    border-top: 0;
+    padding-top: 0;
+  }
+  .rows > li:last-child {
+    padding-bottom: 0;
+  }
+  .rows__main {
+    flex: 1;
+    min-width: 0;
+  }
+  .rows__main strong,
+  .rows__main a.rows__title {
+    display: block;
+    color: var(--color-text);
+    font: 600 var(--text-base) / 1.4 var(--font-display);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+  .rows__main small {
+    display: block;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+  }
+  .rows__end {
+    flex: none;
+    display: grid;
+    justify-items: end;
+    gap: var(--space-1);
+    text-align: right;
+  }
+  .empty-box {
+    padding: var(--space-10) var(--space-6);
+    text-align: center;
+    border: 1px dashed var(--color-line);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+  }
+  .empty-box p {
+    color: var(--color-text-muted);
+  }
+  @media (max-width: 560px) {
+    .rows > li {
+      flex-wrap: wrap;
+    }
+    .rows__end {
+      width: 100%;
+      grid-auto-flow: column;
+      justify-content: space-between;
+      align-items: center;
+    }
+  }
+</style>
+
+<style>
+  .acc-hero {
+    padding-block: var(--space-10);
+  }
+  .acc-hero__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-6);
+    flex-wrap: wrap;
+  }
+  .acc-hero__who {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    min-width: 0;
+  }
+  .acc-hero__who > div {
+    min-width: 0;
+  }
+  .acc-hero__avatar {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--leaf-500);
+    color: var(--green-950);
+    font: 700 1.75rem / 1 var(--font-display);
+    box-shadow: 0 0 0 4px rgb(255 255 255 / 0.12);
+  }
+  .acc-hero__hi {
+    color: var(--gold-300);
+    font: 600 var(--text-sm) / 1.4 var(--font-display);
+    margin: 0 0 var(--space-1);
+  }
+  .acc-hero h1 {
+    color: var(--white);
+    font-size: var(--text-2xl);
+    margin: 0;
+  }
+  .acc-hero .muted {
+    margin: 0;
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+  }
+  .acc-hero__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
+
+  .acc {
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr);
+    gap: var(--space-8);
+    align-items: start;
+    padding-block: var(--space-10) var(--section);
+  }
+  .acc-nav {
+    position: sticky;
+    top: calc(var(--header-h) + var(--space-4));
+    display: grid;
+    gap: var(--space-1);
+    padding: var(--space-3);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--shadow-sm);
+  }
+  .acc-nav a {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    color: var(--color-text);
+    font: 600 var(--text-sm) / 1.3 var(--font-display);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .acc-nav a:hover {
+    background: var(--color-tint);
+  }
+  .acc-nav a[aria-current] {
+    background: var(--color-primary);
+    color: var(--color-primary-ink);
+  }
+  .acc-main {
+    min-width: 0;
+  }
+
+  @media (max-width: 960px) {
+    .acc-hero {
+      padding-block: var(--space-5);
+    }
+    /* Logout is on the profile page on phones; keep the courses higher up. */
+    .acc-hero__actions form {
+      display: none;
+    }
+    .acc-hero__avatar {
+      width: 52px;
+      height: 52px;
+      font-size: 1.4rem;
+    }
+    .acc {
+      grid-template-columns: minmax(0, 1fr);
+      gap: var(--space-6);
+      padding-top: var(--space-5);
+    }
+    /* Every menu button visible at once, two to a row: nothing hides off screen. */
+    .acc-nav {
+      position: static;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--space-2);
+      padding: 0;
+      background: none;
+      border: 0;
+      box-shadow: none;
+    }
+    .acc-nav a {
+      gap: var(--space-2);
+      padding: var(--space-3);
+      border-radius: var(--radius-sm);
+      background: var(--color-surface);
+      border: 1px solid var(--color-line);
+      white-space: normal;
+      min-height: 48px;
+    }
+    .acc-nav a[aria-current] {
+      border-color: var(--color-primary);
+    }
+  }
+</style>

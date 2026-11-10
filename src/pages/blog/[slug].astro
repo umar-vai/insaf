@@ -1,0 +1,260 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import BlogCard from '../../components/BlogCard.astro';
+import Icon from '../../components/Icon.astro';
+import { publishedPost, relatedPosts } from '../../server/blog';
+import { renderBlogHtml } from '../../lib/blog-html';
+import { bnDigits, dateBn, mediaUrl } from '../../lib/format';
+import { SITE } from '../../lib/site';
+
+const post = await publishedPost(env.DB, Astro.params.slug ?? '');
+if (!post) return new Response(null, { status: 404 });
+const related = await relatedPosts(env.DB, post);
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+
+const url = new URL(`/blog/${post.slug}`, Astro.site).href;
+const cover = post.coverKey ? mediaUrl(post.coverKey) : undefined;
+const share = encodeURIComponent(url);
+const jsonLd = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'Article',
+  headline: post.title,
+  description: post.seoDescription || post.excerpt,
+  datePublished: post.publishedAt,
+  dateModified: post.updatedAt,
+  author: { '@type': post.authorName ? 'Person' : 'Organization', name: post.authorName || SITE.name },
+  publisher: { '@type': 'Organization', name: SITE.name, logo: { '@type': 'ImageObject', url: new URL('/logo-wide.png', Astro.site).href } },
+  image: cover ? new URL(cover, Astro.site).href : undefined,
+  mainEntityOfPage: url,
+}).replace(/</g, '\\u003c');
+---
+
+<Base title={post.seoTitle || post.title} description={post.seoDescription || post.excerpt} image={cover}>
+  <script slot="head" type="application/ld+json" set:html={jsonLd} />
+  <meta slot="head" property="og:type" content="article" />
+
+  <header class="ah on-dark">
+    <div class="container ah__inner">
+      <nav class="crumbs" aria-label="আপনি এখানে আছেন">
+        <a href="/">হোম</a><span aria-hidden="true">/</span><a href="/blog">নোটিশ</a>
+        {post.category && (<><span aria-hidden="true">/</span><a href={`/blog?category=${encodeURIComponent(post.category)}`}>{post.category}</a></>)}
+      </nav>
+      <h1>{post.title}</h1>
+      <p class="ah__meta">
+        {post.authorName && <span><Icon name="user" size={16} /> {post.authorName}</span>}
+        <span><Icon name="calendar" size={16} /> {dateBn(post.publishedAt)}</span>
+        <span><Icon name="clock" size={16} /> {bnDigits(post.minutes)} মিনিটে পড়া</span>
+      </p>
+    </div>
+  </header>
+
+  <div class="container art">
+    {cover && <img class="art__cover" src={cover} alt="" width="1200" height="675" fetchpriority="high" />}
+    <article class="prose art__body" set:html={renderBlogHtml(post.bodyHtml)} />
+
+    <div class="art__share">
+      <span>শেয়ার করুন:</span>
+      <a href={`https://wa.me/?text=${encodeURIComponent(`${post.title} ${url}`)}`} rel="noopener" target="_blank" aria-label="WhatsApp এ শেয়ার"><Icon name="whatsapp" /></a>
+      <a href={`https://www.facebook.com/sharer/sharer.php?u=${share}`} rel="noopener" target="_blank" aria-label="Facebook এ শেয়ার"><Icon name="facebook" /></a>
+      <button type="button" data-copy={url} aria-label="লিংক কপি করুন"><Icon name="layers" /> <span>লিংক কপি</span></button>
+    </div>
+
+    <aside class="art__cta on-dark">
+      <p class="art__kufi arabic" lang="ar">تمرين</p>
+      <div>
+        <h2>পড়ার পাশাপাশি এবার শিখুন ধাপে ধাপে</h2>
+        <p class="muted">কুরআন বুঝে পড়া আর আরবি শেখার কোর্সগুলো দেখুন, নিজের সময় অনুযায়ী।</p>
+      </div>
+      <a class="button button--leaf" href="/courses">কোর্স দেখুন <Icon name="arrow" /></a>
+    </aside>
+  </div>
+
+  {
+    related.length > 0 && (
+      <section class="container section related">
+        <h2>আরও পড়ুন</h2>
+        <div class="grid">{related.map((p) => <BlogCard post={p} />)}</div>
+      </section>
+    )
+  }
+</Base>
+
+<script>
+  document.querySelector<HTMLButtonElement>('[data-copy]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget as HTMLButtonElement;
+    try {
+      await navigator.clipboard.writeText(btn.dataset.copy!);
+      btn.querySelector('span')!.textContent = 'কপি হয়েছে';
+    } catch {
+      prompt('লিংকটি কপি করুন', btn.dataset.copy);
+    }
+  });
+</script>
+
+<style>
+  .ah {
+    padding-block: var(--space-12) calc(var(--space-16) + 40px);
+    background-image:
+      radial-gradient(ellipse 60% 60% at 85% 10%, rgb(201 162 78 / 0.22), transparent 70%),
+      var(--pattern-dark);
+  }
+  .ah__inner {
+    max-width: 860px;
+  }
+  .crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-bottom: var(--space-5);
+    font-size: var(--text-sm);
+  }
+  .crumbs a {
+    color: var(--color-on-dark-muted) !important;
+    text-decoration: none;
+  }
+  .crumbs span {
+    color: var(--color-on-dark-muted);
+  }
+  .ah h1 {
+    color: var(--white);
+    font-size: clamp(1.8rem, 1.3rem + 2.2vw, 3rem);
+  }
+  .ah__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-6);
+    margin: var(--space-5) 0 0;
+    color: var(--color-on-dark-muted);
+    font-size: var(--text-sm);
+  }
+  .ah__meta span {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .ah__meta :global(svg) {
+    color: var(--gold-300);
+  }
+
+  .art {
+    max-width: 860px;
+    margin-top: calc(-1 * (var(--space-16) + 10px));
+    position: relative;
+  }
+  .art__cover {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    margin-bottom: var(--space-10);
+  }
+  .art:not(:has(.art__cover)) .art__body {
+    padding: clamp(1.25rem, 1rem + 2vw, 2.5rem);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-lg);
+  }
+  .art__body {
+    max-width: none;
+    font-size: 1.125rem;
+    line-height: 1.85;
+  }
+  .art__body :global(h2) {
+    margin-top: var(--space-10);
+    font-size: var(--text-2xl);
+    color: var(--color-primary-strong);
+  }
+  .art__body :global(img) {
+    border-radius: var(--radius);
+    margin: var(--space-6) auto;
+  }
+  .art__body :global(.embed) {
+    aspect-ratio: 16 / 9;
+    margin: var(--space-6) 0;
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: #000;
+  }
+  .art__body :global(.embed iframe) {
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+  .art__body :global(blockquote) {
+    font-size: 1.2rem;
+  }
+  .art__share {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+    margin: var(--space-10) 0;
+    padding-block: var(--space-5);
+    border-block: 1px solid var(--color-line);
+    font: 600 var(--text-sm) / 1.4 var(--font-display);
+  }
+  .art__share a,
+  .art__share button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    min-width: 44px;
+    height: 44px;
+    padding: 0 var(--space-3);
+    border-radius: 999px;
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
+    color: var(--color-primary);
+    font: inherit;
+    cursor: pointer;
+    transition: background-color 0.2s, color 0.2s, transform 0.2s;
+  }
+  .art__share a:hover,
+  .art__share button:hover {
+    background: var(--color-primary);
+    color: var(--color-primary-ink);
+    transform: translateY(-2px);
+  }
+  .art__cta {
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    flex-wrap: wrap;
+    padding: clamp(1.5rem, 1rem + 2vw, 2.5rem);
+    border-radius: var(--radius-lg);
+  }
+  .art__cta > div {
+    flex: 1 1 280px;
+  }
+  .art__cta h2 {
+    color: var(--white);
+    font-size: var(--text-xl);
+    margin-bottom: var(--space-2);
+  }
+  .art__cta p {
+    margin: 0;
+  }
+  .art__kufi {
+    position: absolute;
+    right: -10px;
+    bottom: -30px;
+    margin: 0;
+    font-family: var(--font-kufi);
+    font-size: 7rem;
+    color: rgb(255 255 255 / 0.05);
+    pointer-events: none;
+  }
+  .related h2 {
+    margin-bottom: var(--space-6);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+    gap: var(--space-6);
+  }
+</style>

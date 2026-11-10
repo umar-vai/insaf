@@ -1,0 +1,115 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { feePaymentsToReview, resolveFeeReview } from '../../../server/fee-pay';
+import { dayBn } from '../../../lib/offline';
+import { bnDigits, dateBn, taka } from '../../../lib/format';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const ok = await resolveFeeReview(env.DB, Astro.locals.staff!, String(form.get('id') ?? ''), String(form.get('note') ?? ''));
+  return Astro.redirect(`/admin/offline/online-payments?${ok ? 'saved=1' : 'error=note'}`, 303);
+}
+const [review, recent] = await Promise.all([
+  feePaymentsToReview(env.DB),
+  env.DB.prepare(
+    `SELECT p.reference, p.amount_minor AS amountMinor, p.status, p.payment_id AS paymentId, p.created_at AS createdAt, s.id AS sid, s.name, c.title
+     FROM offline_online_payments p JOIN offline_enrollments e ON e.id = p.enrollment_id JOIN offline_students s ON s.id = e.student_id
+     JOIN offline_courses c ON c.id = e.course_id ORDER BY p.created_at DESC LIMIT 60`,
+  ).all<{ reference: string; amountMinor: number; status: string; paymentId: string | null; createdAt: string; sid: string; name: string; title: string }>(),
+]);
+const REASON: Record<string, string> = {
+  mismatch: 'SSLCommerz এর টাকা বা রেফারেন্স আমাদের হিসাবের সাথে মেলেনি',
+  risky: 'SSLCommerz পেমেন্টটিকে ঝুঁকিপূর্ণ বলেছে',
+  too_much: 'এর মধ্যে অফিসে টাকা জমা হয়ে গেছে, তাই এই টাকা বাকির চেয়ে বেশি',
+  missing: 'ভর্তির তথ্য পাওয়া যায়নি',
+};
+const STATUS: Record<string, [string, string]> = {
+  paid: ['জমা হয়েছে', 'paid'],
+  pending: ['অসম্পূর্ণ', 'draft'],
+  failed: ['ব্যর্থ', 'archived'],
+  cancelled: ['বাতিল', 'archived'],
+  review: ['যাচাই দরকার', 'absent'],
+  resolved: ['সমাধান হয়েছে', 'info'],
+};
+---
+
+<Admin title="অনলাইনে আসা ফি">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">হিসাব</p>
+      <h1>অনলাইনে আসা ফি</h1>
+      <p>ছাত্ররা নিজের প্যানেল থেকে SSLCommerz দিয়ে যে ফি দেয়। SSLCommerz যাচাই করলে নিজে থেকেই রসিদসহ জমা হয়। কিছু না মিললে নিচে "যাচাই দরকার" এ আসে।</p>
+    </div>
+  </header>
+
+  {
+    review.length > 0 && (
+      <section class="card block">
+        <div class="card__head"><h2><Icon name="alert" /> যাচাই দরকার ({bnDigits(review.length)})</h2></div>
+        <ul class="list">
+          {review.map((r) => (
+            <li class="rev">
+              <div>
+                <a href={`/admin/offline/students/${r.offlineStudentId}`}><strong>{r.studentName}</strong></a> · {r.courseTitle} · <strong>{taka(r.amountMinor)}</strong>
+                <small>{REASON[r.reviewReason ?? ''] ?? r.reviewReason} · {r.reference}{r.bankTranId && ` · ব্যাংক ${r.bankTranId}`} · {dateBn(r.createdAt, true)}</small>
+                <small>টাকা SSLCommerz এ এসেছে। দরকার হলে ছাত্রের পাতায় হাতে জমা করুন বা ফেরত দিন, তারপর এখানে কী করলেন লিখে রাখুন।</small>
+              </div>
+              <form method="post" class="resolve">
+                <input type="hidden" name="id" value={r.id} />
+                <input name="note" required minlength="2" placeholder="কী করা হলো" aria-label="কী করা হলো" />
+                <button class="button button--sm">সমাধান হয়েছে</button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+
+  <section class="card block">
+    <div class="card__head"><h2>সর্বশেষ অনলাইন পেমেন্ট</h2></div>
+    {
+      recent.results.length === 0 ? (
+        <div class="empty"><Icon name="globe" size={28} /><p>এখনো কেউ অনলাইনে ফি দেয়নি।</p></div>
+      ) : (
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>তারিখ</th><th>ছাত্র</th><th>কোর্স</th><th class="num">টাকা</th><th>অবস্থা</th><th>রসিদ</th></tr></thead>
+            <tbody>
+              {recent.results.map((r) => (
+                <tr>
+                  <td>{dayBn(r.createdAt.slice(0, 10))}<small class="muted"><br />{r.reference}</small></td>
+                  <td><a href={`/admin/offline/students/${r.sid}`}>{r.name}</a></td>
+                  <td>{r.title}</td>
+                  <td class="num">{taka(r.amountMinor)}</td>
+                  <td><span class={`pill pill--${STATUS[r.status]?.[1] ?? 'draft'}`}>{STATUS[r.status]?.[0] ?? r.status}</span></td>
+                  <td>{r.paymentId && <a href={`/admin/offline/receipt/${r.paymentId}`} target="_blank">দেখুন</a>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+  </section>
+</Admin>
+
+<style>
+  .block {
+    margin-bottom: var(--space-5);
+  }
+  .card__head h2 {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .rev {
+    flex-wrap: wrap;
+  }
+  .resolve {
+    display: flex;
+    gap: var(--space-2);
+  }
+</style>

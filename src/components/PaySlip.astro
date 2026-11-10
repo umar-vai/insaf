@@ -1,0 +1,176 @@
+---
+// A salary slip to print or save as PDF, as a whole page. Used by the office
+// and by the teacher's own panel.
+import type { PayrollRow } from '../server/hr';
+import { SALARY_BASIS_BN } from '../server/settings';
+import { dayBn, METHOD_BN, monthBn, type PayMethod } from '../lib/offline';
+import { bnDigits, taka } from '../lib/format';
+import { env } from 'cloudflare:workers';
+import { institute } from '../server/config';
+
+interface Props {
+  p: PayrollRow;
+}
+// Name, address, phone and logo as the owner set them on the system page.
+const inst = await institute(env.DB);
+const { p } = Astro.props;
+const STATUS = { draft: 'খসড়া (এখনো চূড়ান্ত নয়)', approved: 'অনুমোদিত, পরিশোধ বাকি', paid: 'পরিশোধিত' } as const;
+---
+
+<!doctype html>
+<html lang="bn">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>পে স্লিপ {monthBn(p.month, true)} | {p.teacherName}</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        margin: 0;
+        background: #eef4ef;
+        font-family: 'Hind Siliguri', 'Nirmala UI', system-ui, sans-serif;
+        color: #10261b;
+      }
+      .sheet {
+        max-width: 640px;
+        margin: 24px auto;
+        background: #fff;
+        padding: 32px;
+        border-radius: 12px;
+        box-shadow: 0 2px 10px rgb(0 0 0 / 0.08);
+      }
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+        border-bottom: 2px solid #0b3d2a;
+        padding-bottom: 16px;
+      }
+      header img {
+        height: 48px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0;
+        text-align: right;
+      }
+      .void {
+        margin: 16px 0 0;
+        padding: 10px;
+        border: 2px solid #b42318;
+        color: #b42318;
+        font-weight: 700;
+        text-align: center;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 8px 16px;
+        margin: 20px 0;
+      }
+      dt {
+        color: #4b6357;
+      }
+      dd {
+        margin: 0;
+        font-weight: 600;
+      }
+      .amount {
+        font-size: 28px;
+        font-weight: 800;
+        text-align: center;
+        padding: 16px;
+        background: #e8f5e4;
+        border-radius: 10px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 20px 0;
+      }
+      td {
+        padding: 6px 0;
+        border-bottom: 1px solid #e3ebe5;
+      }
+      td:last-child {
+        text-align: right;
+        font-weight: 600;
+      }
+      footer {
+        margin-top: 40px;
+        display: flex;
+        justify-content: space-between;
+        font-size: 13px;
+        color: #4b6357;
+      }
+      .sign {
+        border-top: 1px solid #10261b;
+        padding-top: 4px;
+        min-width: 160px;
+        text-align: center;
+      }
+      .tools {
+        text-align: center;
+        margin: 16px;
+      }
+      .tools button {
+        font: inherit;
+        padding: 10px 20px;
+        border-radius: 8px;
+        border: 0;
+        background: #0b3d2a;
+        color: #fff;
+        cursor: pointer;
+      }
+      @media print {
+        body {
+          background: #fff;
+        }
+        .sheet {
+          box-shadow: none;
+          margin: 0;
+          max-width: none;
+        }
+        .tools {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tools"><button type="button" onclick="print()">প্রিন্ট বা PDF</button></div>
+    <main class="sheet">
+      <header>
+        <img src={inst.logo} alt={inst.name} />
+        <h1>পে স্লিপ<br /><small>{monthBn(p.month, true)}</small></h1>
+      </header>
+      {p.status !== 'paid' && <p class="void">{STATUS[p.status]}</p>}
+      <dl>
+        <dt>নাম</dt><dd>{p.teacherName}</dd>
+        <dt>ফোন</dt><dd>{bnDigits(p.teacherPhone)}</dd>
+        <dt>হিসাবের নিয়ম</dt><dd>{SALARY_BASIS_BN[p.basis]}</dd>
+        <dt>কাজের দিন</dt><dd>{bnDigits(p.workDays)} দিন</dd>
+        <dt>ছুটি</dt><dd>{bnDigits(p.leaveDays)} দিন (বেতনসহ {bnDigits(p.paidLeaveDays)}, বিনা বেতনে {bnDigits(p.unpaidDays)})</dd>
+        {p.status === 'paid' && <><dt>পরিশোধ</dt><dd>{dayBn(p.paidOn)}, {METHOD_BN[(p.paidMethod ?? 'cash') as PayMethod] ?? p.paidMethod}</dd></>}
+        {p.note && <><dt>নোট</dt><dd>{p.note}</dd></>}
+      </dl>
+      <table>
+        <tbody>
+          <tr><td>মূল বেতন</td><td>{taka(p.basicMinor)}</td></tr>
+          <tr><td>বোনাস</td><td>{taka(p.bonusMinor)}</td></tr>
+          <tr><td>বিনা বেতনের ছুটির জন্য কাটা</td><td>− {taka(p.deductionMinor)}</td></tr>
+          <tr><td>অন্যান্য কাটা</td><td>− {taka(p.otherDeductionMinor)}</td></tr>
+        </tbody>
+      </table>
+      <div class="amount">মোট প্রাপ্য: {taka(p.netMinor)}</div>
+      <footer>
+        <span>{inst.name}<br />{inst.address}</span>
+        <span class="sign">কর্তৃপক্ষের স্বাক্ষর</span>
+      </footer>
+    </main>
+  </body>
+</html>

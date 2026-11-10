@@ -1,0 +1,174 @@
+---
+import Base from '../layouts/Base.astro';
+import PageHero from '../components/PageHero.astro';
+import SectionHead from '../components/SectionHead.astro';
+import Icon from '../components/Icon.astro';
+import { FOUNDER, SITE } from '../lib/site';
+import { DEPARTMENTS, FACILITIES } from '../lib/madrasa';
+
+// Copy from the old site's home page ("কেন মাদরাসাতুল ইনসাফ?").
+const PRINCIPLES = [
+  { icon: 'book', title: 'সহিহ আকিদা ও বিশুদ্ধ ইলম', text: 'আহলে সুন্নাত ওয়াল জামাআতের আকিদা ও উলামায়ে কেরামের বিশ্বস্ত ধারার আলোকে পরিচালিত।' },
+  { icon: 'users', title: 'তালিম, তারবিয়ত ও দাওয়াত', text: 'শুধু পাঠ্যসূচি নয়; হাফেজ, আলেম ও দীনি কর্মী গড়ে তোলার সমন্বিত প্রয়াস।' },
+  { icon: 'clipboard', title: 'শূরাভিত্তিক পরিচালনা', text: 'সুস্পষ্ট গঠনতন্ত্র ও জবাবদিহিমূলক ব্যবস্থাপনা।' },
+  { icon: 'lock', title: 'স্বচ্ছতা ও আমানতদারি', text: 'শিক্ষা, প্রশাসন ও অর্থনীতিতে স্বচ্ছতা, আমানতদারি ও শৃঙ্খলা মৌলিক নীতি।' },
+] as const;
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=3600');
+---
+
+<Base title="আমাদের সম্পর্কে" description="মাদরাসাতুল ইনসাফ একটি কুরআন ও সুন্নাহভিত্তিক ইলমি মারকাজ, আহলে সুন্নাত ওয়াল জামাআতের আকিদা ও উলামায়ে কেরামের বিশ্বস্ত ধারার আলোকে পরিচালিত।">
+  <PageHero
+    image="students-books"
+    crumbs={[{ href: '/about', label: 'আমাদের সম্পর্কে' }]}
+    eyebrow={SITE.slogan}
+    title="কেন মাদরাসাতুল ইনসাফ?"
+    lead="আগামী প্রজন্মের ইলমিযাত্রাকে সহিহ আকিদা, বিশুদ্ধ ইলম ও আমলের পথে পরিচালিত করাই আমাদের মূল লক্ষ্য।"
+  />
+
+  <section class="section container story">
+    <div class="prose" data-reveal>
+      <p>মাদরাসাতুল ইনসাফ একটি কুরআন ও সুন্নাহভিত্তিক ইলমি মারকাজ, যা আহলে সুন্নাত ওয়াল জামাআতের আকিদা ও উলামায়ে কেরামের বিশ্বস্ত ধারার আলোকে পরিচালিত। প্রতিষ্ঠানটি প্রতিষ্ঠা করেন {FOUNDER.name}, একজন ভাষাপ্রশিক্ষক ও দীনি সংগঠক, যিনি এর নীতিগত অভিভাবক ও দিকনির্দেশক।</p>
+      <p>এর মূল লক্ষ্য হলো আগামী প্রজন্মের ইলমিযাত্রাকে সহিহ আকিদা, বিশুদ্ধ ইলম ও আমলের পথে পরিচালিত করা। এখানে ইলম শিক্ষা দেওয়া হয় কেবল পাঠ্যসূচির মধ্যে সীমাবদ্ধ রেখে নয়; বরং তালিম, তারবিয়ত ও দাওয়াতের সমন্বয়ে এমন হাফেজ, আলেম ও দীনি কর্মী গড়ে তোলার প্রয়াস চলে, যারা সময়োপযোগী ও সৃজনশীল দক্ষতা অর্জনের মাধ্যমে ব্যক্তি, সমাজ ও রাষ্ট্রজীবনে ন্যায়, ইনসাফ ও নৈতিকতার প্রতিনিধিত্ব করতে সক্ষম।</p>
+      <p>মাদরাসাটি শূরাভিত্তিক পরিচালনা, সুস্পষ্ট গঠনতন্ত্র ও জবাবদিহিমূলক ব্যবস্থাপনার মাধ্যমে পরিচালিত হয়। শিক্ষা কার্যক্রম, প্রশাসন ও অর্থনীতিতে স্বচ্ছতা, আমানতদারি ও শৃঙ্খলাকে মৌলিক নীতি হিসেবে অনুসরণ করা হয়।</p>
+      <p>আগামী প্রজন্মের ইলমিযাত্রাকে সমাজ ও বাস্তবতা থেকে বিচ্ছিন্ন না রেখে, নৈতিক নেতৃত্ব ও আদর্শ সমাজ গঠনে অবদান রাখাই মাদরাসাতুল ইনসাফের চিন্তাধারা। এ লক্ষ্যেই মাদরাসাতুল ইনসাফের পথচলা।</p>
+    </div>
+    <aside class="founder" data-reveal>
+      <img src="/images/emblem.webp" alt="" width="120" height="120" loading="lazy" />
+      <p class="founder__label">প্রতিষ্ঠাতা</p>
+      <p class="founder__name">{FOUNDER.name}</p>
+      <p class="muted">{FOUNDER.role}</p>
+    </aside>
+  </section>
+
+  <section class="section section--tint">
+    <div class="container">
+      <SectionHead eyebrow="আমাদের নীতি" title="যেভাবে পরিচালিত হয়" />
+      <div class="cards">
+        {
+          PRINCIPLES.map((p) => (
+            <article class="card" data-reveal>
+              <span class="card__icon"><Icon name={p.icon} size={24} /></span>
+              <h3>{p.title}</h3>
+              <p>{p.text}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="section container">
+    <SectionHead eyebrow="শিক্ষা কার্যক্রম" title="বিভাগসমূহ" />
+    <div class="cards">
+      {
+        DEPARTMENTS.map((d) => (
+          <article class="card" data-reveal>
+            <h3>{d.title}</h3>
+            <p>{d.text}</p>
+          </article>
+        ))
+      }
+    </div>
+    <SectionHead eyebrow="সুযোগ-সুবিধা" title="শিক্ষার্থীদের জন্য" />
+    <div class="cards">
+      {
+        FACILITIES.map((f) => (
+          <article class="card" data-reveal>
+            <span class="card__icon"><Icon name={f.icon} size={24} /></span>
+            <h3>{f.title}</h3>
+            <p>{f.text}</p>
+          </article>
+        ))
+      }
+    </div>
+    <div class="cta">
+      <a class="button" href="/admission">ভর্তি তথ্য <Icon name="arrow" /></a>
+      <a class="button button--gold" href="/land"><Icon name="heart" size={18} /> জমি প্রজেক্টে দান</a>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .story {
+    display: grid;
+    gap: var(--space-10);
+    align-items: start;
+  }
+  @media (min-width: 900px) {
+    .story {
+      grid-template-columns: 1.6fr 1fr;
+    }
+  }
+  .prose p {
+    font-size: var(--text-lg);
+  }
+  .founder {
+    display: grid;
+    justify-items: center;
+    text-align: center;
+    padding: var(--space-8) var(--space-6);
+    border-radius: var(--radius-arch);
+    background: var(--green-900);
+    background-image: var(--pattern-dark);
+    color: var(--color-on-dark);
+  }
+  .founder img {
+    width: 110px;
+    height: 110px;
+    padding: 10px;
+    border-radius: 50%;
+    background: var(--ivory);
+  }
+  .founder__label {
+    margin: var(--space-4) 0 0;
+    color: var(--gold-300);
+    font-weight: 600;
+  }
+  .founder__name {
+    margin: var(--space-1) 0;
+    font: 700 var(--text-xl) / 1.4 var(--font-display);
+    color: var(--white);
+  }
+  .founder .muted {
+    color: var(--color-on-dark-muted);
+    margin: 0;
+  }
+  .section--tint {
+    background: var(--color-tint);
+    background-image: var(--pattern-light);
+  }
+  .cards {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    margin-bottom: var(--space-12);
+  }
+  .card {
+    padding: var(--space-6);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+  }
+  .card__icon {
+    display: inline-grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: var(--gold-100);
+    color: var(--gold-500);
+  }
+  .card h3 {
+    margin: var(--space-3) 0 var(--space-2);
+  }
+  .card p {
+    margin: 0;
+    color: var(--color-text-muted);
+  }
+  .cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    justify-content: center;
+  }
+</style>

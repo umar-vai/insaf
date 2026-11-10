@@ -1,0 +1,163 @@
+---
+import Icon from './Icon.astro';
+import { bnDigits, dateBn, mediaUrl } from '../lib/format';
+import type { PostCard } from '../server/blog';
+
+interface Props {
+  post: PostCard;
+  /** The wide first card on the blog page. */
+  lead?: boolean;
+}
+const { post, lead = false } = Astro.props;
+---
+
+<article class:list={['bc', lead && 'bc--lead']} data-reveal>
+  <a class="bc__media" href={`/blog/${post.slug}`} tabindex="-1" aria-hidden="true">
+    {
+      post.coverKey ? (
+        <img src={mediaUrl(post.coverKey)} alt="" loading={lead ? 'eager' : 'lazy'} width="800" height="450" />
+      ) : (
+        <span class="bc__art">
+          <span class="arabic" lang="ar">تمرين</span>
+        </span>
+      )
+    }
+  </a>
+  <div class="bc__body">
+    <p class="bc__meta">
+      {post.category && <span class="chip">{post.category}</span>}
+      <span>{dateBn(post.publishedAt)}</span>
+      <span><Icon name="clock" size={14} /> {bnDigits(post.minutes)} মিনিট</span>
+    </p>
+    <h3><a href={`/blog/${post.slug}`}>{post.title}</a></h3>
+    {post.excerpt && <p class="bc__ex">{post.excerpt}</p>}
+    <span class="bc__more">পড়ুন <Icon name="arrow" size={16} /></span>
+  </div>
+</article>
+
+<style>
+  .bc {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.35s var(--ease), box-shadow 0.35s var(--ease);
+  }
+  .bc:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+  }
+  .bc__media {
+    display: block;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: var(--mint-100);
+  }
+  .bc__media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.6s var(--ease);
+  }
+  .bc:hover .bc__media img {
+    transform: scale(1.05);
+  }
+  /* Posts without a picture get a calm patterned panel instead. */
+  .bc__art {
+    display: grid;
+    place-items: center;
+    height: 100%;
+    background: var(--color-dark) var(--pattern-dark);
+  }
+  .bc__art span {
+    font-family: var(--font-kufi);
+    font-size: clamp(2.5rem, 2rem + 2vw, 3.5rem);
+    line-height: 1.2;
+    color: var(--gold-300);
+    opacity: 0.85;
+  }
+  .bc__body {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    gap: var(--space-2);
+    padding: var(--space-5);
+  }
+  .bc__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+  }
+  .bc__meta span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .bc h3 {
+    margin: 0;
+    font-size: var(--text-lg);
+  }
+  .bc h3 a {
+    color: inherit;
+    text-decoration: none;
+  }
+  /* The whole card is the link. */
+  .bc h3 a::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+  .bc__ex {
+    margin: 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .bc__more {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: auto;
+    padding-top: var(--space-2);
+    color: var(--color-primary);
+    font: 600 var(--text-sm) / 1.4 var(--font-display);
+  }
+  .bc:hover .bc__more :global(svg) {
+    transform: translateX(4px);
+  }
+  .bc__more :global(svg) {
+    transition: transform 0.3s var(--ease);
+  }
+  @media (min-width: 900px) {
+    .bc--lead {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    }
+    .bc--lead .bc__media {
+      aspect-ratio: auto;
+      min-height: 320px;
+    }
+    .bc--lead .bc__body {
+      justify-content: center;
+      padding: var(--space-10);
+    }
+    .bc--lead h3 {
+      font-size: var(--text-2xl);
+    }
+    .bc--lead .bc__ex {
+      font-size: var(--text-base);
+      -webkit-line-clamp: 4;
+    }
+  }
+</style>

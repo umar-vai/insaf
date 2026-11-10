@@ -1,0 +1,344 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import Icon from '../../components/Icon.astro';
+import AccountShell from '../../components/AccountShell.astro';
+import { currentStudent } from '../../server/students';
+import { googleConfigured } from '../../server/google';
+import { teacherForEmail, offlineIdsForEmail } from '../../server/panels';
+import { isStaffEmail } from '../../server/staff';
+import { isTestSite } from '../../lib/envs';
+import { safeReturnTo } from '../../server/session';
+import { whatsappUrl } from '../../lib/site';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+const returnTo = safeReturnTo(Astro.url.searchParams.get('return'));
+// Signed in and sent here from somewhere else: go back there.
+if (me && returnTo !== '/account') return Astro.redirect(returnTo, 303);
+// Teachers and students have their own panels.
+if (me) {
+  if (await teacherForEmail(env.DB, me.email)) return Astro.redirect('/teacher', 303);
+  if ((await offlineIdsForEmail(env.DB, me.email)).length) return Astro.redirect('/account/offline', 303);
+}
+const staff = me ? await isStaffEmail(env, me.email) : false;
+
+const ERRORS: Record<string, string> = {
+  password: 'মোবাইল নম্বর (বা ইমেইল) অথবা পাসওয়ার্ড মেলেনি। আবার দেখে লিখুন।',
+  email: 'ইমেইল ঠিকানাটি সঠিক নয়। আবার দেখে লিখুন।',
+  too_many: 'অল্প সময়ে অনেকবার চেষ্টা হয়েছে। কিছুক্ষণ পরে আবার চেষ্টা করুন।',
+  mail: 'এই মুহূর্তে ইমেইল পাঠানো যাচ্ছে না। একটু পরে আবার চেষ্টা করুন।',
+  expired: 'সময় শেষ হয়ে গেছে। আবার চেষ্টা করুন।',
+  google_off: 'Google দিয়ে লগইন এখনো চালু হয়নি। মোবাইল নম্বর ও পাসওয়ার্ড দিয়ে লগইন করুন।',
+  cancelled: 'Google লগইন বাতিল হয়েছে।',
+  failed: 'Google দিয়ে লগইন করা যায়নি। আবার চেষ্টা করুন।',
+};
+const error = ERRORS[Astro.url.searchParams.get('error') ?? ''];
+const google = googleConfigured(env);
+const testSite = isTestSite(env);
+---
+
+{
+  !me ? (
+    <Base title="লগইন" description="মাদরাসাতুল ইনসাফের স্টুডেন্ট ও শিক্ষক পোর্টাল।">
+      <meta slot="head" name="robots" content="noindex" />
+      <section class="auth">
+        <div class="auth__card">
+          <img class="auth__logo" src="/images/emblem.webp" alt="" width="72" height="72" />
+          <h1>পোর্টালে লগইন</h1>
+          <p class="auth__sub">শিক্ষার্থী, অভিভাবক ও শিক্ষকদের জন্য</p>
+          {error && <p class="auth__error" role="alert">{error}</p>}
+
+          <form method="post" action="/api/auth/password" class="form">
+            <input type="hidden" name="return" value={returnTo} />
+            <label for="login">মোবাইল নম্বর বা ইমেইল</label>
+            <input id="login" name="login" inputmode="tel" autocomplete="username" required placeholder="০১XXXXXXXXX" />
+            <label for="password">পাসওয়ার্ড</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required />
+            <button class="button button--block" type="submit">লগইন <Icon name="arrow" /></button>
+          </form>
+
+          {google && (
+            <>
+              <p class="or"><span>অথবা</span></p>
+              <a class="google" href={`/api/auth/google?return=${encodeURIComponent(returnTo)}`}>
+                <svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true">
+                  <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.1C12.4 13.7 17.7 9.5 24 9.5z" />
+                  <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.6z" />
+                  <path fill="#FBBC05" d="M10.5 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.8-4.6l-7.9-6.1A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l7.9-6.1z" />
+                  <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.6-5.9c-2.1 1.4-4.9 2.3-8.3 2.3-6.3 0-11.6-4.2-13.5-10l-7.9 6.1C6.6 42.6 14.6 48 24 48z" />
+                </svg>
+                Google দিয়ে লগইন
+              </a>
+            </>
+          )}
+
+          {testSite && (
+            <form method="post" action="/api/auth/code" class="form form--test">
+              <input type="hidden" name="return" value={returnTo} />
+              <label for="email">ইমেইলে কোড (শুধু টেস্ট সাইটে)</label>
+              <input id="email" name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
+              <button class="button button--ghost button--block" type="submit">কোড পাঠান</button>
+            </form>
+          )}
+          <p class="auth__help">
+            পাসওয়ার্ড অফিস থেকে দেওয়া হয়। ভুলে গেলে বা লগইনে অসুবিধা হলে <a href={whatsappUrl('আসসালামু আলাইকুম, পোর্টালে লগইন করতে অসুবিধা হচ্ছে।')} rel="noopener">অফিসে জানান</a>।
+          </p>
+        </div>
+      </section>
+    </Base>
+  ) : (
+    <AccountShell me={me} active="home" title="আমার অ্যাকাউন্ট">
+      <section class="panel">
+        {staff ? (
+          <div class="start">
+            <p>আপনি মাদরাসার অফিস টিমের সদস্য।</p>
+            <a class="button" href="/admin">অ্যাডমিন প্যানেলে যান <Icon name="arrow" /></a>
+          </div>
+        ) : (
+          <div class="start">
+            <p>এই অ্যাকাউন্টের সাথে এখনো কোনো শিক্ষার্থী বা শিক্ষকের তথ্য যুক্ত হয়নি।</p>
+            <p class="muted">অফিসে আপনার মোবাইল নম্বর বা এই ইমেইলটি ({me.email}) জানালে যুক্ত করে দেওয়া হবে।</p>
+            <a class="button button--ghost" href={whatsappUrl('আসসালামু আলাইকুম, আমার পোর্টাল অ্যাকাউন্ট যুক্ত করতে চাই।')} rel="noopener"><Icon name="whatsapp" /> অফিসে জানান</a>
+          </div>
+        )}
+      </section>
+    </AccountShell>
+  )
+}
+
+<style>
+  .auth__logo {
+    width: 72px;
+    height: 72px;
+    margin-inline: auto;
+  }
+  .auth__sub {
+    text-align: center;
+    color: var(--color-text-muted);
+    margin: 0 0 var(--space-4);
+  }
+  .form--test {
+    margin-top: var(--space-4);
+  }
+  .auth {
+    min-height: calc(100vh - var(--header-h));
+    display: grid;
+    place-items: center;
+    padding: var(--space-12) var(--gutter);
+    background: var(--mint-50) var(--pattern-light);
+  }
+  .auth__card {
+    width: min(100%, 440px);
+    padding: clamp(1.5rem, 1rem + 3vw, 2.75rem);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--shadow-lg);
+  }
+  .auth__kufi {
+    margin: 0;
+    font-family: var(--font-kufi);
+    font-size: 2.2rem;
+    line-height: 1.2;
+    color: var(--color-accent);
+    text-align: left;
+  }
+  .auth h1 {
+    font-size: var(--text-2xl);
+  }
+  .auth__error {
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    background: #fdecea;
+    color: #8a1c12;
+    font-size: var(--text-sm);
+  }
+  .google {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    min-height: 52px;
+    border-radius: 999px;
+    border: 1px solid var(--color-line);
+    background: var(--white);
+    color: var(--color-text);
+    font: 600 var(--text-base) / 1 var(--font-display);
+    text-decoration: none;
+    transition: box-shadow 0.2s;
+  }
+  .google:hover {
+    box-shadow: var(--shadow);
+  }
+  .or {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin: var(--space-5) 0;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+  .or::before,
+  .or::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--color-line);
+  }
+  .form {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .form label {
+    font: 600 var(--text-sm) / 1.4 var(--font-display);
+  }
+  .form input {
+    min-height: 52px;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--color-line);
+    background: var(--color-bg);
+    font: inherit;
+    color: var(--color-text);
+  }
+  .form input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px rgb(201 162 78 / 0.2);
+  }
+  .auth__note {
+    font-size: var(--text-xs);
+    margin: var(--space-4) 0 0;
+  }
+  .auth__help {
+    margin: var(--space-4) 0 0;
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--color-line);
+    font-size: var(--text-sm);
+  }
+
+  .stat {
+    color: inherit;
+    text-decoration: none;
+    transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  }
+  a.stat:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+  }
+  .start {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+  }
+  .start p {
+    margin: 0;
+    flex: 1 1 260px;
+  }
+  .bar {
+    height: 8px;
+    margin: var(--space-2) 0;
+    border-radius: 99px;
+    background: var(--mint-100);
+    overflow: hidden;
+  }
+  .bar span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--green-600), var(--leaf-500));
+  }
+  .go {
+    flex: none;
+    min-height: 44px;
+  }
+  .timeline {
+    display: grid;
+    gap: var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .timeline li {
+    position: relative;
+    display: flex;
+    gap: var(--space-3);
+  }
+  .timeline li:not(:last-child)::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 34px;
+    bottom: calc(-1 * var(--space-4) + 2px);
+    width: 2px;
+    background: var(--color-line);
+  }
+  .timeline__dot {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--color-tint);
+    color: var(--color-primary);
+  }
+  .timeline__dot--paid,
+  .timeline__dot--certificate {
+    background: #fbf1da;
+    color: #7a5410;
+  }
+  .timeline li > div {
+    min-width: 0;
+  }
+  .timeline a {
+    display: block;
+    color: var(--color-text);
+    font: 600 var(--text-base) / 1.4 var(--font-display);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+  .timeline a:hover {
+    color: var(--color-primary);
+  }
+  .timeline small {
+    display: block;
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+  @media (max-width: 560px) {
+    .go {
+      width: 100%;
+    }
+  }
+  .notices h2 {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .notices ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .notices li {
+    display: grid;
+    gap: 2px;
+    padding: var(--space-3) var(--space-4);
+    border-left: 3px solid var(--leaf-500);
+    background: var(--mint-50);
+    border-radius: var(--radius-sm);
+  }
+  .notices small {
+    color: var(--color-text-muted);
+  }
+  .notices p {
+    margin: var(--space-1) 0 0;
+    white-space: pre-line;
+  }
+</style>

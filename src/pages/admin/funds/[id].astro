@@ -1,0 +1,187 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { addFundUpdate, fundById, fundUpdates, parseFundForm, saveFund, setFundCover, setFundUpdateStatus } from '../../../server/donations';
+import { IMAGE_TYPES, storeUpload } from '../../../server/files';
+import { LAND } from '../../../lib/land';
+import { todayDhaka } from '../../../lib/offline';
+import { dateBn, mediaUrl } from '../../../lib/format';
+
+const actor = Astro.locals.staff!;
+const id = Astro.params.id ?? '';
+const fund = await fundById(env.DB, id);
+if (!fund) return Astro.redirect('/admin/funds', 302);
+const here = `/admin/funds/${id}`;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+  if (action === 'save') {
+    const v = parseFundForm(form);
+    if (!v.ok) return Astro.redirect(`${here}?error=${v.error}`, 303);
+    const r = await saveFund(env.DB, actor, id, v.value);
+    return Astro.redirect(`${here}?${r.ok ? 'saved=1' : 'error=slug_taken'}`, 303);
+  }
+  if (action === 'cover') {
+    const stored = await storeUpload(env.MEDIA, form.get('cover'), 'uploads/funds', IMAGE_TYPES, 4 * 1024 * 1024);
+    if (!stored.ok) return Astro.redirect(`${here}?error=cover_${stored.reason}`, 303);
+    if (fund.coverKey) await env.MEDIA.delete(fund.coverKey);
+    await setFundCover(env.DB, actor, id, stored.file.key);
+    return Astro.redirect(`${here}?saved=1`, 303);
+  }
+  if (action === 'cover_remove' && fund.coverKey) {
+    await env.MEDIA.delete(fund.coverKey);
+    await setFundCover(env.DB, actor, id, null);
+    return Astro.redirect(`${here}?saved=1`, 303);
+  }
+  if (action === 'update') {
+    let imageKey: string | null = null;
+    const file = form.get('image');
+    if (file instanceof File && file.size > 0) {
+      const stored = await storeUpload(env.MEDIA, file, 'uploads/funds', IMAGE_TYPES, 4 * 1024 * 1024);
+      if (!stored.ok) return Astro.redirect(`${here}?error=cover_${stored.reason}#updates`, 303);
+      imageKey = stored.file.key;
+    }
+    const ok = await addFundUpdate(env.DB, actor, id, { title: String(form.get('title') ?? ''), body: String(form.get('body') ?? ''), happenedOn: String(form.get('happened_on') ?? ''), imageKey });
+    return Astro.redirect(`${here}?${ok ? 'saved=1' : 'error=update'}#updates`, 303);
+  }
+  if (action === 'update_hide' || action === 'update_show') {
+    await setFundUpdateStatus(env.DB, actor, String(form.get('update_id') ?? ''), action === 'update_hide' ? 'hidden' : 'published');
+    return Astro.redirect(`${here}?saved=1#updates`, 303);
+  }
+  return Astro.redirect(here, 303);
+}
+
+const updates = await fundUpdates(env.DB, id, true);
+const ERR: Record<string, string> = {
+  title: 'নাম লিখুন।',
+  slug: 'ওয়েব ঠিকানায় শুধু ইংরেজি ছোট হাতের অক্ষর, সংখ্যা ও হাইফেন দিন।',
+  slug_taken: 'এই ওয়েব ঠিকানা আগেই আছে।',
+  goal: 'লক্ষ্যের পরিমাণ সঠিক নয়।',
+  member_goal: 'সদস্য সংখ্যা সঠিক নয়।',
+  cover_type: 'ছবি JPG, PNG বা WebP হতে হবে।',
+  cover_size: 'ছবি ৪ MB এর কম হতে হবে।',
+  cover_missing: 'ছবি বাছুন।',
+  update: 'শিরোনাম ও তারিখ দিন।',
+};
+const error = ERR[Astro.url.searchParams.get('error') ?? ''];
+const isLand = fund.slug === LAND.fund || fund.slug === LAND.memberFund;
+const publicUrl = fund.slug === LAND.fund ? '/land' : `/donate/${fund.slug}`;
+---
+
+<Admin title={fund.title}>
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/funds">তহবিল</a></p>
+      <h1>{fund.title}</h1>
+      <p><a href={publicUrl} target="_blank">{publicUrl}</a>{isLand && ' · জমি প্রজেক্টের ল্যান্ডিং পেজে এই তহবিল দেখায়'}</p>
+    </div>
+    <div class="actions"><a class="button button--ghost" href={`/admin/donations?fund=${id}`}><Icon name="receipt" /> এই তহবিলের দান</a></div>
+  </header>
+  {error && <p class="note note--bad" role="alert">{error}</p>}
+
+  <div class="cols cols--wide">
+    <section class="card">
+      <div class="card__head"><h2>তথ্য</h2></div>
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="save" />
+        <label class="field"><span>নাম</span><input name="title" required maxlength="120" value={fund.title} /></label>
+        <label class="field"><span>ওয়েব ঠিকানা</span><input name="slug" required pattern="[a-z0-9][a-z0-9-]*" value={fund.slug} readonly={isLand} /></label>
+        <label class="field"><span>লক্ষ্য (টাকা)</span><input name="goal" inputmode="numeric" value={fund.goalMinor ? String(fund.goalMinor / 100) : ''} placeholder="খালি: প্রগ্রেস বার নেই" /></label>
+        <label class="field"><span>সদস্য লক্ষ্য (জন, ঐচ্ছিক)</span><input name="member_goal" inputmode="numeric" value={fund.memberGoal ?? ''} /></label>
+        <label class="field"><span>দ্রুত বাছাইয়ের পরিমাণ (টাকা)</span><input name="presets" value={fund.presetAmounts} placeholder="500,1000,2000" /></label>
+        <label class="field"><span>ক্রম</span><input name="position" inputmode="numeric" value={fund.position} /></label>
+        <label class="field"><span>অবস্থা</span><select name="status"><option value="active" selected={fund.status === 'active'}>চালু (সাইটে দেখাবে)</option><option value="hidden" selected={fund.status === 'hidden'}>লুকানো</option></select></label>
+        <label class="field wide"><span>ছোট পরিচিতি</span><input name="summary" maxlength="400" value={fund.summary} /></label>
+        <label class="field wide"><span>গল্প ও বিস্তারিত (সাধারণ লেখা; ## দিয়ে শিরোনাম, - দিয়ে তালিকা)</span><textarea name="story" rows="12">{fund.storyText}</textarea></label>
+        <button class="button"><Icon name="check" /> সংরক্ষণ</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card__head"><h2>কভার ছবি</h2></div>
+      {fund.coverKey && <img class="cover" src={mediaUrl(fund.coverKey)} alt="" />}
+      <form method="post" enctype="multipart/form-data" class="form-grid">
+        <input type="hidden" name="action" value="cover" />
+        <label class="field wide"><span>নতুন ছবি (JPG, PNG, WebP, ৪ MB পর্যন্ত)</span><input type="file" name="cover" accept="image/jpeg,image/png,image/webp" required /></label>
+        <button class="button button--ghost">আপলোড</button>
+      </form>
+      {
+        fund.coverKey && (
+          <form method="post">
+            <input type="hidden" name="action" value="cover_remove" />
+            <button class="button button--sm button--danger">ছবি সরান</button>
+          </form>
+        )
+      }
+    </section>
+  </div>
+
+  <section class="card" id="updates">
+    <div class="card__head"><h2>অগ্রগতির খবর (গল্পের টাইমলাইন)</h2></div>
+    <p class="muted">যেমন: “জমির বায়না দেওয়া হয়েছে”, “রেজিস্ট্রি সম্পন্ন”। দাতারা পেজে টাইমলাইনে দেখবেন।</p>
+    <form method="post" enctype="multipart/form-data" class="form-grid">
+      <input type="hidden" name="action" value="update" />
+      <label class="field"><span>শিরোনাম</span><input name="title" required maxlength="160" /></label>
+      <label class="field"><span>তারিখ</span><input type="date" name="happened_on" required value={todayDhaka()} /></label>
+      <label class="field wide"><span>বিস্তারিত</span><textarea name="body" rows="3" maxlength="5000"></textarea></label>
+      <label class="field wide"><span>ছবি (ঐচ্ছিক)</span><input type="file" name="image" accept="image/jpeg,image/png,image/webp" /></label>
+      <button class="button"><Icon name="plus" /> খবর যোগ করুন</button>
+    </form>
+    {
+      updates.length > 0 && (
+        <ul class="ups">
+          {updates.map((u) => (
+            <li class={u.status === 'hidden' ? 'off' : ''}>
+              <div>
+                <strong>{u.title}</strong>
+                <small class="muted">{dateBn(u.happenedOn)}{u.status === 'hidden' && ' · লুকানো'}</small>
+                {u.body && <p>{u.body}</p>}
+              </div>
+              <form method="post">
+                <input type="hidden" name="update_id" value={u.id} />
+                <button class="button button--sm button--ghost" name="action" value={u.status === 'hidden' ? 'update_show' : 'update_hide'}>{u.status === 'hidden' ? 'দেখান' : 'লুকান'}</button>
+              </form>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </section>
+</Admin>
+
+<style>
+  .cover {
+    width: 100%;
+    border-radius: var(--radius);
+    margin-bottom: var(--space-3);
+  }
+  #updates {
+    margin-top: var(--space-5);
+  }
+  .ups {
+    list-style: none;
+    padding: 0;
+    margin: var(--space-5) 0 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .ups li {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+  }
+  .ups li div {
+    display: grid;
+  }
+  .ups p {
+    margin: var(--space-1) 0 0;
+  }
+  .ups .off {
+    opacity: 0.6;
+  }
+</style>

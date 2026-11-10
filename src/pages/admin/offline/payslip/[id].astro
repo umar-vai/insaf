@@ -1,0 +1,10 @@
+---
+import { env } from 'cloudflare:workers';
+import PaySlip from '../../../../components/PaySlip.astro';
+import { getPayroll } from '../../../../server/hr';
+
+const p = await getPayroll(env.DB, Astro.params.id!);
+if (!p) return new Response('Not found', { status: 404 });
+---
+
+<PaySlip p={p} />

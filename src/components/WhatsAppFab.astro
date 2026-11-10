@@ -1,0 +1,66 @@
+---
+import Icon from './Icon.astro';
+import { whatsappUrl } from '../lib/site';
+
+interface Props {
+  message?: string;
+}
+const { message = 'আসসালামু আলাইকুম, মাদরাসাতুল ইনসাফ সম্পর্কে জানতে চাই।' } = Astro.props;
+---
+
+<a class="fab" href={whatsappUrl(message)} rel="noopener" aria-label="WhatsApp এ মেসেজ পাঠান">
+  <Icon name="whatsapp" size={28} />
+</a>
+
+<style>
+  .fab {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(16px, env(safe-area-inset-bottom));
+    z-index: 40;
+    display: grid;
+    place-items: center;
+    width: 58px;
+    height: 58px;
+    border-radius: 50%;
+    background: #25d366;
+    color: #fff;
+    box-shadow: 0 10px 28px -6px rgb(4 38 26 / 0.45);
+    transition: transform 0.25s var(--ease);
+  }
+  .fab:hover {
+    transform: scale(1.06);
+  }
+  .fab::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid #25d366;
+    animation: ring 2.6s ease-out infinite;
+  }
+  @keyframes ring {
+    from {
+      transform: scale(1);
+      opacity: 0.7;
+    }
+    to {
+      transform: scale(1.5);
+      opacity: 0;
+    }
+  }
+  :global(body[data-has-buybar]) .fab {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+  /* On phones it floats a little smaller, just above the bottom menu. */
+  @media (max-width: 960px) {
+    :global(body:has(> .bnav)) .fab {
+      width: 52px;
+      height: 52px;
+      bottom: calc(var(--bnav-h) + 14px);
+    }
+    :global(body:has(> .bnav)[data-has-buybar]) .fab {
+      bottom: calc(var(--bnav-h) + 84px);
+    }
+  }
+</style>

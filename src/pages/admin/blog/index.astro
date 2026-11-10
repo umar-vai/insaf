@@ -1,0 +1,90 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import { adminPosts, createPost } from '../../../server/blog';
+import { bnDigits, dateBn, mediaUrl } from '../../../lib/format';
+
+let error = false;
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const r = await createPost(env.DB, Astro.locals.staff!, String(form.get('title') ?? ''));
+  if (r.ok) return Astro.redirect(`/admin/blog/${r.id}?new=1`, 303);
+  error = true;
+}
+const posts = await adminPosts(env.DB);
+const live = posts.filter((p) => p.status === 'published').length;
+---
+
+<Admin title="ব্লগ">
+  <h1>ব্লগ</h1>
+  <p class="muted">{bnDigits(live)} টি চালু লেখা · {bnDigits(posts.length - live)} টি খসড়া · <a href="/blog" target="_blank" rel="noopener">সাইটে ব্লগ দেখুন</a></p>
+  <form method="post" class="panel create">
+    <label class="field">
+      <span>নতুন লেখা শুরু করুন</span>
+      <input name="title" required minlength="2" maxlength="200" placeholder="লেখার শিরোনাম" />
+    </label>
+    <button class="button" type="submit">+ নতুন লেখা</button>
+  </form>
+  {error && <p class="err" role="alert">শিরোনাম ২ থেকে ২০০ অক্ষরের মধ্যে দিন।</p>}
+
+  {
+    posts.length === 0 ? (
+      <p class="panel muted">এখনো কোনো লেখা নেই। উপরে শিরোনাম লিখে প্রথম লেখাটি শুরু করুন।</p>
+    ) : (
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th></th><th>শিরোনাম</th><th>অবস্থা</th><th>বিষয়</th><th>প্রকাশ</th><th>পড়ার সময়</th></tr>
+          </thead>
+          <tbody>
+            {posts.map((p) => (
+              <tr>
+                <td class="thumb">{p.coverKey ? <img src={mediaUrl(p.coverKey, 400)} alt="" width="72" height="40" /> : <span />}</td>
+                <td>
+                  <a href={`/admin/blog/${p.id}`}>{p.title}</a>
+                  {p.featured ? <span class="pill pill--paid">উপরে</span> : null}
+                  <br />
+                  <small class="muted">/blog/{p.slug}</small>
+                </td>
+                <td><span class={`pill pill--${p.status}`}>{p.status === 'published' ? 'চালু' : 'খসড়া'}</span></td>
+                <td>{p.category || 'নেই'}</td>
+                <td>{p.publishedAt ? dateBn(p.publishedAt) : 'নেই'}</td>
+                <td>{bnDigits(p.minutes)} মিনিট</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+</Admin>
+
+<style>
+  .create {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    align-items: end;
+    max-width: 860px;
+    margin-bottom: var(--space-4);
+  }
+  .create .field {
+    flex: 1;
+    min-width: 220px;
+  }
+  .err {
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-sm);
+    background: #fde4e1;
+    color: #8a1c12;
+  }
+  .thumb img,
+  .thumb span {
+    display: block;
+    width: 72px;
+    height: 40px;
+    border-radius: 6px;
+    object-fit: cover;
+    background: var(--color-tint);
+  }
+</style>

@@ -1,0 +1,49 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../components/AccountShell.astro';
+import NotTeacher from '../../components/NotTeacher.astro';
+import TicketDesk from '../../components/tickets/TicketDesk.astro';
+import { teacherSession } from '../../server/panels';
+import { closeTicket, getTicket, listTickets, openTicket, ownsTicket, parseReply, parseTicketForm, replyTicket } from '../../server/tickets';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const { me, teacher } = await teacherSession(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Fteacher%2Ftickets', 303);
+const base = '/teacher/tickets';
+
+if (Astro.request.method === 'POST' && teacher) {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+  if (action === 'new') {
+    const v = parseTicketForm(form);
+    if (!v.ok) return Astro.redirect(`${base}?error=${v.error}`, 303);
+    const id = await openTicket(env.DB, me.email, { kind: 'teacher', teacherId: teacher.id }, v.value);
+    return Astro.redirect(`${base}?t=${id}&saved=1`, 303);
+  }
+  const ticketId = String(form.get('ticketId') ?? '');
+  const t = await getTicket(env.DB, ticketId);
+  if (!t || !ownsTicket(t.ticket, { teacherId: teacher.id })) return Astro.redirect(base, 303);
+  if (action === 'reply') await replyTicket(env.DB, me.email, ticketId, 'teacher', parseReply(form));
+  if (action === 'close') await closeTicket(env.DB, me.email, ticketId);
+  return Astro.redirect(`${base}?t=${ticketId}`, 303);
+}
+
+const tickets = teacher ? await listTickets(env.DB, { teacherId: teacher.id }) : [];
+const wanted = Astro.url.searchParams.get('t');
+const loaded = wanted && teacher ? await getTicket(env.DB, wanted) : null;
+const open = loaded && teacher && ownsTicket(loaded.ticket, { teacherId: teacher.id }) ? loaded : null;
+---
+
+{
+  !teacher ? (
+    <NotTeacher me={me} />
+  ) : (
+    <AccountShell me={me} active="t-tickets" title="অফিসকে লিখুন" mode="teacher">
+      <div class="ui">
+        <header class="page-head"><div><h1>অফিসকে লিখুন</h1><p>ক্লাস, বেতন বা অন্য কোনো বিষয়ে অফিসকে জানাতে এখানে লিখুন।</p></div></header>
+        {Astro.url.searchParams.has('saved') && <p class="note note--good" role="status">পাঠানো হয়েছে। অফিস উত্তর দিলে এখানে দেখবেন।</p>}
+        <TicketDesk tickets={tickets} open={open} base={base} side="asker" />
+      </div>
+    </AccountShell>
+  )
+}

@@ -1,0 +1,31 @@
+/* Fonts a visitor or staff member can pick with the Aa button. Files load only when one is used. */
+@font-face { font-family: 'Hind Siliguri'; font-weight: 400; font-style: normal; font-display: swap; src: url('/fonts/extra/hind-siliguri-bengali-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Hind Siliguri'; font-weight: 700; font-style: normal; font-display: swap; src: url('/fonts/extra/hind-siliguri-bengali-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Noto Sans Bengali'; font-weight: 400; font-style: normal; font-display: swap; src: url('/fonts/extra/noto-sans-bengali-bengali-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Noto Sans Bengali'; font-weight: 700; font-style: normal; font-display: swap; src: url('/fonts/extra/noto-sans-bengali-bengali-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Noto Serif Bengali'; font-weight: 400; font-style: normal; font-display: swap; src: url('/fonts/extra/noto-serif-bengali-bengali-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Noto Serif Bengali'; font-weight: 700; font-style: normal; font-display: swap; src: url('/fonts/extra/noto-serif-bengali-bengali-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Baloo Da 2'; font-weight: 400; font-style: normal; font-display: swap; src: url('/fonts/extra/baloo-da-2-bengali-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Baloo Da 2'; font-weight: 700; font-style: normal; font-display: swap; src: url('/fonts/extra/baloo-da-2-bengali-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Mina'; font-weight: 400; font-style: normal; font-display: swap; src: url('/fonts/extra/mina-bengali-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Mina'; font-weight: 700; font-style: normal; font-display: swap; src: url('/fonts/extra/mina-bengali-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Atma'; font-weight: 400; font-style: normal; font-display: swap; src: url('/fonts/extra/atma-bengali-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Atma'; font-weight: 700; font-style: normal; font-display: swap; src: url('/fonts/extra/atma-bengali-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Tiro Bangla'; font-weight: 400; font-style: normal; font-display: swap; src: url('/fonts/extra/tiro-bangla-bengali-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Galada'; font-weight: 400; font-style: normal; font-display: swap; src: url('/fonts/extra/galada-bengali-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Li Ador Noirrit'; font-weight: 300; font-style: normal; font-display: swap; src: url('/fonts/extra/li-ador-noirrit-300.woff2') format('woff2'); }
+@font-face { font-family: 'Li Ador Noirrit'; font-weight: 400; font-style: normal; font-display: swap; src: url('/fonts/extra/li-ador-noirrit-400.woff2') format('woff2'); }
+@font-face { font-family: 'Li Ador Noirrit'; font-weight: 600; font-style: normal; font-display: swap; src: url('/fonts/extra/li-ador-noirrit-600.woff2') format('woff2'); }
+@font-face { font-family: 'Li Ador Noirrit'; font-weight: 700; font-style: normal; font-display: swap; src: url('/fonts/extra/li-ador-noirrit-700.woff2') format('woff2'); }
+@font-face { font-family: 'Kalpurush'; font-weight: 400; font-style: normal; font-display: swap; src: url('/fonts/extra/kalpurush-400.woff2') format('woff2'); }
+:root[data-font-pick='hind'] { --font-display: 'Hind Siliguri', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; --font-body: 'Hind Siliguri', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; }
+:root[data-font-pick='noto-sans'] { --font-display: 'Noto Sans Bengali', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; --font-body: 'Noto Sans Bengali', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; }
+:root[data-font-pick='noto-serif'] { --font-display: 'Noto Serif Bengali', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; --font-body: 'Noto Serif Bengali', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; }
+:root[data-font-pick='baloo'] { --font-display: 'Baloo Da 2', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; --font-body: 'Baloo Da 2', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; }
+:root[data-font-pick='mina'] { --font-display: 'Mina', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; --font-body: 'Mina', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; }
+:root[data-font-pick='atma'] { --font-display: 'Atma', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; --font-body: 'Atma', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; }
+:root[data-font-pick='tiro'] { --font-display: 'Tiro Bangla', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; --font-body: 'Tiro Bangla', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; }
+:root[data-font-pick='galada'] { --font-display: 'Galada', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; --font-body: 'Galada', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; }
+:root[data-font-pick='li-ador'] { --font-display: 'Li Ador Noirrit', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; --font-body: 'Li Ador Noirrit', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; }
+:root[data-font-pick='kalpurush'] { --font-display: 'Kalpurush', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; --font-body: 'Kalpurush', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; }
+:root[data-font-pick='solaiman'] { --font-display: 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; --font-body: 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif; }

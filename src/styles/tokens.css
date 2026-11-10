@@ -1,0 +1,112 @@
+/*
+ * Madrasatul Insaf design tokens. The single source of colour, type and spacing.
+ * To change the look, change values here or in the component itself.
+ * Never add a second stylesheet that overrides these.
+ *
+ * Direction: "mihrab and light", in the madrasa's own colours: the logo's
+ * deep green for surfaces and text, its book gold as the accent (progress,
+ * highlights), warm ivory paper for reading, and a quiet eight point star pattern.
+ */
+:root {
+  /* Greens: 950 to 700 are for surfaces and text, leaf is the logo green. */
+  --green-950: #102a20;
+  --green-900: #17362a;
+  --green-800: #0b4f2c;
+  --green-700: #006633;
+  --green-600: #128043;
+  --leaf-500: #c9a24e;
+  --leaf-400: #dcbb6e;
+  --leaf-200: #eedfb8;
+  --mint-100: #e8f4e1;
+  --mint-50: #f3f9ef;
+  --ivory: #fbf9f3;
+  --white: #ffffff;
+  --ink: #13241b;
+  --ink-muted: #56665c;
+  --line: #e2e8dd;
+  --gold-500: #b48a3c;
+  --gold-300: #d9b25c;
+  --gold-100: #f7eedb;
+  /* The logo's orange, for small labels such as a discount. */
+  --orange-400: #f2a531;
+
+  --color-bg: var(--ivory);
+  --color-surface: var(--white);
+  --color-tint: var(--mint-50);
+  --color-line: var(--line);
+  --color-text: var(--ink);
+  --color-text-muted: var(--ink-muted);
+  --color-primary: var(--green-700);
+  --color-primary-strong: var(--green-900);
+  --color-primary-ink: var(--white);
+  --color-accent: var(--leaf-500);
+  --color-ornament: var(--gold-500);
+  --color-dark: var(--green-950);
+  --color-dark-raised: var(--green-900);
+  --color-on-dark: #e9f3ec;
+  --color-on-dark-muted: #a9c3b2;
+  --color-focus: var(--leaf-500);
+
+  /* Status colours for badges and notes: good, warning, bad, info. */
+  --good-100: #dff3d6;
+  --good-700: #1d5c13;
+  --warn-100: #fff1d0;
+  --warn-700: #7a5100;
+  --bad-100: #fde4e1;
+  --bad-600: #b42318;
+  --bad-700: #8a1c12;
+  --info-100: #e1ecfb;
+  --info-700: #1f4f8f;
+  /* Charts: income and expense (checked for colour blind readers). */
+  --chart-income: var(--green-700);
+  --chart-expense: #e0952a;
+  --chart-grid: #e8ece5;
+
+  /* Type. Display is modern Bangla, body is easy to read for long text (Anek Bangla, with SolaimanLipi and Hind Siliguri behind it for any missing letter),
+     Amiri is for Quran and hadith, Reem Kufi for the Arabic wordmark. */
+  --font-display: 'Anek Bangla', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif;
+  --font-body: 'Anek Bangla', 'SolaimanLipi', 'Hind Siliguri', system-ui, sans-serif;
+  --font-arabic: 'Amiri', 'Traditional Arabic', serif;
+  --font-kufi: 'Reem Kufi', 'Amiri', serif;
+
+  --text-xs: 0.8125rem;
+  --text-sm: 0.9375rem;
+  --text-base: 1.0625rem;
+  --text-lg: 1.1875rem;
+  --text-xl: clamp(1.35rem, 1.15rem + 0.8vw, 1.65rem);
+  --text-2xl: clamp(1.7rem, 1.3rem + 1.8vw, 2.5rem);
+  --text-3xl: clamp(2.1rem, 1.4rem + 3.2vw, 3.75rem);
+  --leading: 1.75;
+  --leading-tight: 1.25;
+
+  /* Space and shape */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-20: 5rem;
+  --section: clamp(1.5rem, 1.1rem + 1.4vw, 2.5rem);
+  --radius-sm: 10px;
+  --radius: 18px;
+  --radius-lg: 28px;
+  /* A round topped arch, as in a mihrab. */
+  --radius-arch: 999px 999px var(--radius) var(--radius);
+  --shadow-sm: 0 1px 2px rgb(4 38 26 / 0.06);
+  --shadow: 0 1px 2px rgb(4 38 26 / 0.05), 0 10px 30px -8px rgb(4 38 26 / 0.12);
+  --shadow-lg: 0 2px 4px rgb(4 38 26 / 0.05), 0 24px 60px -16px rgb(4 38 26 / 0.28);
+  --container: 1200px;
+  --gutter: 16px;
+  --header-h: 72px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Eight point star lattice, drawn once and tiled. Light lines for dark
+     sections, green lines for light sections. */
+  --pattern-dark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='none' stroke='%23ffffff' stroke-opacity='.07' stroke-width='1'%3E%3Crect x='30' y='30' width='36' height='36'/%3E%3Crect x='30' y='30' width='36' height='36' transform='rotate(45 48 48)'/%3E%3Ccircle cx='48' cy='48' r='9'/%3E%3Cpath d='M48 0v22.5M48 73.5V96M0 48h22.5M73.5 48H96M0 0l22.5 22.5M96 0L73.5 22.5M0 96l22.5-22.5M96 96L73.5 73.5'/%3E%3C/g%3E%3C/svg%3E");
+  --pattern-light: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='96' height='96' viewBox='0 0 96 96'%3E%3Cg fill='none' stroke='%230f6b3e' stroke-opacity='.075' stroke-width='1'%3E%3Crect x='30' y='30' width='36' height='36'/%3E%3Crect x='30' y='30' width='36' height='36' transform='rotate(45 48 48)'/%3E%3Ccircle cx='48' cy='48' r='9'/%3E%3Cpath d='M48 0v22.5M48 73.5V96M0 48h22.5M73.5 48H96M0 0l22.5 22.5M96 0L73.5 22.5M0 96l22.5-22.5M96 96L73.5 73.5'/%3E%3C/g%3E%3C/svg%3E");
+}

@@ -1,0 +1,572 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../layouts/Base.astro';
+import Icon from '../components/Icon.astro';
+import SectionHead from '../components/SectionHead.astro';
+import DonateForm from '../components/donate/DonateForm.astro';
+import FundProgress from '../components/donate/FundProgress.astro';
+import BankCard from '../components/donate/BankCard.astro';
+import BarChart from '../components/admin/BarChart.astro';
+import { fundUpdates, listFunds, monthlyTotals, recentGifts, storyHtml } from '../server/donations';
+import { LAND } from '../lib/land';
+import { SITE, whatsappUrl } from '../lib/site';
+import { bnDigits, dateBn, mediaUrl, taka } from '../lib/format';
+import { monthBn } from '../lib/offline';
+
+// The land purchase landing page, made for ads: the reason in a few lines,
+// how far the goal is, and the form, again and again, never more than a
+// thumb away. Every number on it comes from counted gifts.
+
+const funds = await listFunds(env.DB);
+const buy = funds.find((f) => f.slug === LAND.fund);
+const members = funds.find((f) => f.slug === LAND.memberFund);
+if (!buy) return Astro.redirect('/donate', 302);
+
+const landIds = [buy.id, members?.id].filter(Boolean) as string[];
+const raisedMinor = buy.raisedMinor + (members?.raisedMinor ?? 0);
+const donors = buy.donors + (members?.donors ?? 0);
+const gifts = buy.gifts + (members?.gifts ?? 0);
+const goalMinor = buy.goalMinor ?? LAND.goalMinor;
+
+const [months, recent, updates] = await Promise.all([
+  Promise.all(landIds.map((id) => monthlyTotals(env.DB, id, 9))),
+  recentGifts(env.DB, buy.id, 10),
+  fundUpdates(env.DB, buy.id),
+]);
+const monthRows = months[0]!.map((m, i) => ({ label: monthBn(m.month), values: [months.reduce((s, f) => s + (f[i]?.minor ?? 0), 0)] }));
+const error = Astro.url.searchParams.get('error');
+const formFunds = funds.filter((f) => landIds.includes(f.id));
+Astro.response.headers.set('Cache-Control', error ? 'no-store' : 'public, max-age=30, s-maxage=60');
+
+const WHY = [
+  {
+    icon: 'heart',
+    title: 'সদকায়ে জারিয়া',
+    text: 'আপনার দানে কেনা জমির ওপর দাঁড়িয়ে একজন শিক্ষার্থী যতদিন কুরআন তিলাওয়াত করবে, তার সাওয়াব আপনি কিয়ামত পর্যন্ত পাবেন।',
+  },
+  { icon: 'home', title: 'স্থায়ী ঠিকানা', text: 'এটি হবে দীনি শিক্ষার একটি মজবুত দুর্গ, যা আগামী প্রজন্মের ঈমান রক্ষায় কাজ করবে।' },
+  { icon: 'users', title: 'প্রিয়জনদের স্মরণে', text: 'আপনি চাইলে আপনার মৃত বাবা-মা বা প্রিয়জনদের নামেও জমি ক্রয়ে শরিক হতে পারেন।' },
+] as const;
+
+const FAQ = [
+  {
+    q: 'দানের টাকা কোথায় খরচ হবে?',
+    a: 'এই তহবিলের অর্থ শুধু মাদরাসার স্থায়ী ক্যাম্পাসের জমি ক্রয়ের জন্য সংরক্ষিত ও ব্যয় হয়।',
+  },
+  { q: 'কীভাবে দান করব?', a: 'বিকাশ, নগদ, রকেট, কার্ড বা নেট ব্যাংকিংয়ে এই পেজ থেকেই দান করা যায়। বড় অঙ্কের দান মাদরাসার ব্যাংক অ্যাকাউন্টে পাঠাতে পারেন।' },
+  { q: 'রসিদ পাব কি?', a: 'হ্যাঁ। পেমেন্ট নিশ্চিত হলেই রসিদ দেখা ও প্রিন্ট করা যায়। ব্যাংকে বা অফিসে দিলে অফিস থেকে রসিদ দেওয়া হয়।' },
+  { q: 'মৃত বাবা-মায়ের পক্ষ থেকে দান করা যাবে?', a: 'অবশ্যই। ফর্মে “অন্য কারো পক্ষ থেকে দান” ঘরে তাঁদের নাম লিখে দিন।' },
+] as const;
+---
+
+<Base title="জমি ক্রয় প্রজেক্ট" description="মাদরাসাতুল ইনসাফের স্থায়ী ক্যাম্পাসের জমি কিনতে আপনার সদকায়ে জারিয়ায় শরিক হোন। বিকাশ, নগদ, কার্ডে নিরাপদে দান করুন।" image="/images/students-quran-1280.webp" bottomNav={false}>
+  <section class="lh on-dark">
+    <div class="container lh__grid">
+      <div class="lh__copy">
+        <p class="lh__eyebrow"><Icon name="pin" size={18} /> স্থায়ী ক্যাম্পাস ও ভূমি ক্রয় প্রজেক্ট</p>
+        <h1>মাদরাসার স্থায়ী ক্যাম্পাস গড়তে আপনার অংশীদারিত্ব নিশ্চিত করুন</h1>
+        <blockquote class="lh__hadith">
+          <p>“যখন মানুষ মৃত্যুবরণ করে তখন তার সমস্ত আমল বন্ধ হয়ে যায়, তিন প্রকার আমল ছাড়া: সদাকাহ জারিয়াহ, উপকারী জ্ঞান এবং সুসন্তান যে তার জন্য দু‘আ করে।”</p>
+          <cite>সহীহ মুসলিম, হাদীস ১৬৩১</cite>
+        </blockquote>
+        <div class="lh__progress">
+          <FundProgress raisedMinor={raisedMinor} goalMinor={goalMinor} donors={donors} gifts={gifts} onDark />
+        </div>
+        <div class="lh__cta">
+          <a class="button button--gold" href="#donate-form"><Icon name="heart" size={18} /> এখনই দান করুন</a>
+          {members && <a class="button button--ghost" href="#members">জমি দাতা সদস্য হোন</a>}
+        </div>
+      </div>
+      <div class="lh__form">
+        <DonateForm funds={formFunds} fund={buy.slug} title="জমি ক্রয় তহবিলে দান" from="/land" error={error} />
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <SectionHead eyebrow="কেন এই দান" title="এমন এক বিনিয়োগ, যার সাওয়াব কবরে শুয়েও পেতে থাকবেন" lead="একটি দীনি প্রতিষ্ঠানের ভিত্তি স্থাপন করা মানে নিজের জন্য জান্নাতে একটি ঘর নিশ্চিত করার আশা। আমাদের মাদরাসার স্থায়ী ক্যাম্পাস নির্মাণের লক্ষ্যে জমি ক্রয় প্রজেক্ট চলমান রয়েছে।" />
+      <div class="why">
+        {
+          WHY.map((w) => (
+            <article class="why__card" data-reveal>
+              <span class="why__icon"><Icon name={w.icon} size={26} /></span>
+              <h3>{w.title}</h3>
+              <p>{w.text}</p>
+            </article>
+          ))
+        }
+      </div>
+      <figure class="quote" data-reveal>
+        <blockquote>“যে ব্যক্তি আল্লাহর সন্তুষ্টির জন্য একটি মসজিদ নির্মাণ করল, আল্লাহ তা‘আলা জান্নাতে তার জন্য একটি ঘর নির্মাণ করবেন।”</blockquote>
+        <figcaption>সহীহ মুসলিম</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="section section--tint">
+    <div class="container story">
+      <div class="story__img" data-reveal>
+        <img src="/images/students-outdoor-1280.webp" srcset="/images/students-outdoor-640.webp 640w, /images/students-outdoor-1280.webp 1280w" sizes="(max-width: 900px) 100vw, 45vw" alt="মাদরাসাতুল ইনসাফের শিক্ষার্থীরা" width="1280" height="853" loading="lazy" />
+      </div>
+      <div data-reveal>
+        <SectionHead align="start" eyebrow="ব্যয়ের খাত" title="জমি ক্রয়" />
+        {buy.storyText ? <div class="prose" set:html={storyHtml(buy)} /> : <p class="lead-text">মাদরাসার স্থায়ী ক্যাম্পাস নির্মাণের লক্ষ্যে জমি ক্রয়ের এই বিশেষ প্রজেক্ট। দীনি প্রতিষ্ঠান গড়ার এই মৌলিক কাজে অংশ নিয়ে জান্নাতে আপনার জন্য একটি স্থায়ী ঠিকানার আশা করুন। এই তহবিলের অর্থ শুধু স্থায়ী ক্যাম্পাসের জন্য সংরক্ষিত ও ব্যয় হয়।</p>}
+        <ul class="ticks">
+          <li><Icon name="check" size={18} /> লক্ষ্য {taka(goalMinor)}</li>
+          <li><Icon name="check" size={18} /> প্রতিটি দানের হিসাব আলাদা তহবিলে রাখা হয়</li>
+          <li><Icon name="check" size={18} /> শূরাভিত্তিক পরিচালনা ও জবাবদিহিমূলক ব্যবস্থাপনা</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  {
+    members && (
+      <section class="section" id="members">
+        <div class="container members" data-reveal>
+          <div>
+            <p class="members__eyebrow">বিশেষ আহ্বান</p>
+            <h2>জমি দাতা সদস্য হোন</h2>
+            <p>{members.summary || 'মাদরাসার জমি ক্রয়ে বিশেষ অংশীদার হিসেবে যুক্ত হোন।'}</p>
+            <FundProgress raisedMinor={members.raisedMinor} goalMinor={members.goalMinor} donors={members.donors} memberGoal={members.memberGoal} size="sm" />
+          </div>
+          <div class="members__side">
+            {members.memberGoal && (
+              <p class="members__count">
+                <strong>{bnDigits(members.donors)}</strong>
+                <span>/ {bnDigits(members.memberGoal)} জন সদস্য</span>
+              </p>
+            )}
+            <a class="button" href={`/donate/${members.slug}#donate-form`}>সদস্য হিসেবে দান করুন <Icon name="arrow" /></a>
+          </div>
+        </div>
+      </section>
+    )
+  }
+
+  <section class="section section--tint">
+    <div class="container progress-grid">
+      <div class="card" data-reveal>
+        <h2 class="card__title"><Icon name="chart" size={22} /> মাসভিত্তিক সংগ্রহ</h2>
+        {
+          monthRows.some((r) => (r.values[0] ?? 0) > 0) ? (
+            <BarChart caption="জমি প্রজেক্টে প্রতি মাসে কত টাকা এসেছে" series={[{ label: 'সংগ্রহ', color: 'var(--green-700)' }]} rows={monthRows} />
+          ) : (
+            <p class="muted">দান আসা শুরু হলে এখানে প্রতি মাসের সংগ্রহ গ্রাফে দেখা যাবে।</p>
+          )
+        }
+      </div>
+      <div class="card" data-reveal>
+        <h2 class="card__title"><Icon name="users" size={22} /> সাম্প্রতিক দাতাগণ</h2>
+        {
+          recent.length ? (
+            <ul class="donors">
+              {recent.map((g) => (
+                <li>
+                  <span class="donors__avatar" aria-hidden="true">{(g.name || 'আ').charAt(0)}</span>
+                  <span class="donors__who">
+                    <strong>{g.name || 'আল্লাহর এক বান্দা'}</strong>
+                    {g.onBehalf && <small>{g.onBehalf} এর পক্ষ থেকে</small>}
+                    <small>{dateBn(g.paidAt)}</small>
+                  </span>
+                  <span class="donors__amt">{taka(g.amountMinor)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p class="muted">প্রথম দাতা হোন। আপনার দান দিয়েই শুরু হোক।</p>
+          )
+        }
+      </div>
+    </div>
+  </section>
+
+  {
+    updates.length > 0 && (
+      <section class="section">
+        <div class="container">
+          <SectionHead eyebrow="প্রজেক্টের গল্প" title="অগ্রগতির খবর" />
+          <ol class="timeline">
+            {updates.map((u) => (
+              <li data-reveal>
+                <time>{dateBn(u.happenedOn)}</time>
+                <h3>{u.title}</h3>
+                {u.body && <p>{u.body}</p>}
+                {u.imageKey && <img src={mediaUrl(u.imageKey)} alt="" loading="lazy" />}
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+    )
+  }
+
+  <section class="section">
+    <div class="container final">
+      <div>
+        <SectionHead align="start" eyebrow="প্রশ্নোত্তর" title="দাতাদের সাধারণ প্রশ্ন" />
+        <div class="faq">
+          {
+            FAQ.map((f) => (
+              <details>
+                <summary>{f.q}</summary>
+                <p>{f.a}</p>
+              </details>
+            ))
+          }
+        </div>
+        <p class="ask">আরও জানতে: <a href={`tel:${SITE.phone.tel}`}>{bnDigits(SITE.phone.display)}</a> অথবা <a href={whatsappUrl('জমি ক্রয় প্রজেক্ট সম্পর্কে জানতে চাই')} rel="noopener">WhatsApp</a></p>
+      </div>
+      <BankCard />
+    </div>
+  </section>
+
+  <a class="sticky-cta button button--gold" href="#donate-form" data-sticky hidden><Icon name="heart" size={18} /> জমি ক্রয়ে দান করুন</a>
+</Base>
+
+<script>
+  // The phone's "give" button shows only while the form itself is out of sight.
+  const sticky = document.querySelector<HTMLElement>('[data-sticky]');
+  const formEl = document.getElementById('donate-form');
+  if (sticky && formEl) {
+    new IntersectionObserver(([e]) => (sticky.hidden = Boolean(e?.isIntersecting))).observe(formEl);
+  }
+</script>
+
+<style>
+  .lh {
+    padding-block: clamp(2rem, 1.5rem + 3vw, 4.5rem);
+    background-image:
+      radial-gradient(ellipse 55% 70% at 90% 0%, rgb(201 162 78 / 0.22), transparent 70%),
+      linear-gradient(180deg, rgb(16 42 32 / 0.92), rgb(16 42 32 / 0.97)),
+      url('/images/students-quran-1280.webp');
+    background-size: auto, auto, cover;
+    background-position: center;
+  }
+  .lh__grid {
+    display: grid;
+    gap: var(--space-8);
+    align-items: start;
+  }
+  @media (min-width: 960px) {
+    .lh__grid {
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: var(--space-12);
+    }
+  }
+  .lh__eyebrow {
+    display: inline-flex;
+    gap: var(--space-2);
+    align-items: center;
+    padding: var(--space-1) var(--space-3);
+    border-radius: 999px;
+    background: rgb(201 162 78 / 0.16);
+    color: var(--gold-300);
+    font: 600 var(--text-sm) / 1.5 var(--font-display);
+  }
+  h1 {
+    font-size: var(--text-3xl);
+    line-height: 1.2;
+    margin: var(--space-4) 0;
+    color: var(--white);
+  }
+  .lh__hadith {
+    margin: 0 0 var(--space-6);
+    padding: var(--space-4) var(--space-5);
+    border-inline-start: 3px solid var(--gold-300);
+    background: rgb(255 255 255 / 0.05);
+    border-radius: 0 var(--radius) var(--radius) 0;
+  }
+  .lh__hadith p {
+    margin: 0 0 var(--space-2);
+    color: var(--color-on-dark);
+    font-size: var(--text-lg);
+  }
+  .lh__hadith cite {
+    font-style: normal;
+    color: var(--gold-300);
+    font-size: var(--text-sm);
+  }
+  .lh__progress {
+    padding: var(--space-5);
+    border-radius: var(--radius-lg);
+    background: rgb(255 255 255 / 0.06);
+    border: 1px solid rgb(255 255 255 / 0.1);
+  }
+  .lh__cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-top: var(--space-6);
+  }
+  .section--tint {
+    background: var(--color-tint);
+    background-image: var(--pattern-light);
+  }
+  .why {
+    display: grid;
+    gap: var(--space-5);
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+  .why__card {
+    padding: var(--space-6);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--shadow-sm);
+  }
+  .why__icon {
+    display: inline-grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    background: var(--gold-100);
+    color: var(--gold-500);
+    margin-bottom: var(--space-3);
+  }
+  .why__card h3 {
+    margin: 0 0 var(--space-2);
+    font-size: var(--text-lg);
+  }
+  .why__card p {
+    margin: 0;
+    color: var(--color-text-muted);
+  }
+  .quote {
+    margin: var(--space-10) auto 0;
+    max-width: 760px;
+    text-align: center;
+  }
+  .quote blockquote {
+    margin: 0;
+    font: 600 var(--text-xl) / 1.6 var(--font-display);
+    color: var(--green-900);
+  }
+  .quote figcaption {
+    margin-top: var(--space-2);
+    color: var(--gold-500);
+  }
+  .story {
+    display: grid;
+    gap: var(--space-8);
+    align-items: center;
+  }
+  @media (min-width: 900px) {
+    .story {
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+  .story__img img {
+    width: 100%;
+    height: auto;
+    border-radius: var(--radius-arch);
+    box-shadow: var(--shadow-lg);
+  }
+  .lead-text {
+    font-size: var(--text-lg);
+    color: var(--color-text-muted);
+  }
+  .ticks {
+    list-style: none;
+    padding: 0;
+    margin: var(--space-5) 0 0;
+    display: grid;
+    gap: var(--space-2);
+  }
+  .ticks li {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .ticks :global(svg) {
+    color: var(--green-700);
+    flex: none;
+  }
+  .members {
+    display: grid;
+    gap: var(--space-6);
+    padding: clamp(1.5rem, 1rem + 2vw, 2.75rem);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(135deg, var(--gold-100), var(--white));
+    border: 1px solid color-mix(in srgb, var(--gold-500) 35%, transparent);
+    align-items: center;
+  }
+  @media (min-width: 860px) {
+    .members {
+      grid-template-columns: 1.4fr 1fr;
+    }
+  }
+  .members__eyebrow {
+    color: var(--gold-500);
+    font-weight: 700;
+    margin: 0;
+  }
+  .members h2 {
+    margin: var(--space-1) 0 var(--space-2);
+  }
+  .members__side {
+    display: grid;
+    gap: var(--space-4);
+    justify-items: start;
+  }
+  .members__count {
+    margin: 0;
+    font-family: var(--font-display);
+  }
+  .members__count strong {
+    font-size: var(--text-3xl);
+    color: var(--green-700);
+  }
+  .members__count span {
+    color: var(--color-text-muted);
+  }
+  .progress-grid {
+    display: grid;
+    gap: var(--space-6);
+  }
+  @media (min-width: 960px) {
+    .progress-grid {
+      grid-template-columns: 1.3fr 1fr;
+    }
+  }
+  .card {
+    padding: var(--space-6);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--shadow-sm);
+    min-width: 0;
+  }
+  .card__title {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    font-size: var(--text-lg);
+    margin: 0 0 var(--space-4);
+  }
+  .card__title :global(svg) {
+    color: var(--gold-500);
+  }
+  .donors {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .donors li {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: var(--space-3);
+    align-items: center;
+    padding-bottom: var(--space-3);
+    border-bottom: 1px dashed var(--color-line);
+  }
+  .donors__avatar {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--mint-100);
+    color: var(--green-700);
+    font-weight: 700;
+  }
+  .donors__who {
+    display: grid;
+    min-width: 0;
+  }
+  .donors__who small {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+  }
+  .donors__amt {
+    font-weight: 700;
+    color: var(--green-700);
+    white-space: nowrap;
+  }
+  .timeline {
+    list-style: none;
+    margin: 0 auto;
+    padding: 0;
+    max-width: 760px;
+    border-inline-start: 2px solid var(--leaf-200);
+  }
+  .timeline li {
+    position: relative;
+    padding: 0 0 var(--space-8) var(--space-6);
+  }
+  .timeline li::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: -8px;
+    top: 6px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--gold-500);
+    box-shadow: 0 0 0 4px var(--gold-100);
+  }
+  .timeline time {
+    color: var(--gold-500);
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+  .timeline h3 {
+    margin: var(--space-1) 0;
+  }
+  .timeline p {
+    margin: 0;
+    color: var(--color-text-muted);
+  }
+  .timeline img {
+    margin-top: var(--space-3);
+    max-width: 100%;
+    border-radius: var(--radius);
+  }
+  .final {
+    display: grid;
+    gap: var(--space-8);
+    align-items: start;
+  }
+  @media (min-width: 900px) {
+    .final {
+      grid-template-columns: 1.2fr 1fr;
+    }
+  }
+  .faq {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .faq details {
+    padding: var(--space-4) var(--space-5);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+  }
+  .faq summary {
+    cursor: pointer;
+    font-weight: 650;
+  }
+  .faq p {
+    margin: var(--space-2) 0 0;
+    color: var(--color-text-muted);
+  }
+  .ask {
+    margin-top: var(--space-5);
+  }
+  .sticky-cta {
+    position: fixed;
+    inset: auto 84px calc(14px + env(safe-area-inset-bottom)) var(--gutter);
+    z-index: 40;
+    box-shadow: var(--shadow-lg);
+    min-height: 54px;
+  }
+  @media (min-width: 960px) {
+    .sticky-cta {
+      display: none;
+    }
+  }
+</style>

@@ -1,0 +1,63 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../components/AccountShell.astro';
+import NotTeacher from '../../components/NotTeacher.astro';
+import Icon from '../../components/Icon.astro';
+import { payrollForTeacher } from '../../server/hr';
+import { teacherSession } from '../../server/panels';
+import { dayBn, monthBn } from '../../lib/offline';
+import { taka } from '../../lib/format';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const { me, teacher } = await teacherSession(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Fteacher%2Fsalary', 303);
+// Drafts are still being worked out by the office, so only final sheets are shown.
+const rows = teacher ? (await payrollForTeacher(env.DB, teacher.id)).filter((r) => r.status !== 'draft') : [];
+const paidTotal = rows.filter((r) => r.status === 'paid').reduce((a, r) => a + r.netMinor, 0);
+const basic = teacher ? await env.DB.prepare('SELECT basic_pay_minor AS b FROM teachers WHERE id = ?').bind(teacher.id).first<{ b: number }>() : null;
+---
+
+{
+  !teacher ? (
+    <NotTeacher me={me} />
+  ) : (
+    <AccountShell me={me} active="t-salary" title="বেতন ও পে স্লিপ" mode="teacher">
+      <div class="ui">
+        <header class="page-head"><div><h1>বেতন ও পে স্লিপ</h1><p>প্রতি মাসের বেতন, কাটা আর বোনাস। পে স্লিপ খুলে প্রিন্ট বা PDF করা যায়।</p></div></header>
+        <div class="kpis">
+          <div class="kpi"><span class="kpi__icon"><Icon name="wallet" /></span><span class="kpi__label">মাসিক মূল বেতন</span><strong class="kpi__value">{taka(basic?.b ?? 0)}</strong></div>
+          <div class="kpi kpi--info"><span class="kpi__icon"><Icon name="check" /></span><span class="kpi__label">এ পর্যন্ত পেয়েছেন</span><strong class="kpi__value">{taka(paidTotal)}</strong></div>
+        </div>
+        <section class="card block">
+          <div class="card__head"><h2>মাস অনুযায়ী</h2></div>
+          {rows.length === 0 ? <p class="muted">এখনো কোনো বেতন শিট চূড়ান্ত হয়নি।</p> : (
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>মাস</th><th class="num">মূল</th><th class="num">বোনাস</th><th class="num">কাটা</th><th class="num">প্রাপ্য</th><th>অবস্থা</th><th></th></tr></thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr>
+                      <td>{monthBn(r.month, true)}</td>
+                      <td class="num">{taka(r.basicMinor)}</td>
+                      <td class="num">{taka(r.bonusMinor)}</td>
+                      <td class="num">{taka(r.deductionMinor + r.otherDeductionMinor)}</td>
+                      <td class="num"><strong>{taka(r.netMinor)}</strong></td>
+                      <td>{r.status === 'paid' ? <span class="pill pill--paid">পেয়েছেন {dayBn(r.paidOn)}</span> : <span class="pill pill--info">অনুমোদিত</span>}</td>
+                      <td><a href={`/teacher/payslip/${r.id}`} target="_blank">পে স্লিপ</a></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
+    </AccountShell>
+  )
+}
+
+<style>
+  .block {
+    margin-top: var(--space-5);
+  }
+</style>

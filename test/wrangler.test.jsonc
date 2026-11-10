@@ -1,0 +1,9 @@
+// Bindings for tests only. No main entry: tests import modules directly.
+// Date is capped at what the test runner's bundled workerd supports.
+{
+  "name": "insaf-test",
+  "compatibility_date": "2026-08-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [{ "binding": "DB", "database_name": "insaf-test", "database_id": "test" }],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "insaf-test" }]
+}

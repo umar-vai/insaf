@@ -1,0 +1,129 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotOffline from '../../../components/NotOffline.astro';
+import Icon from '../../../components/Icon.astro';
+import { currentStudent } from '../../../server/students';
+import { offlineIdsForEmail } from '../../../server/panels';
+import { QUESTIONS, ratingTargets, submitRating } from '../../../server/ratings';
+import { getSettings } from '../../../server/settings';
+import { monthBn, todayDhaka } from '../../../lib/offline';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline%2Frate', 303);
+const ids = await offlineIdsForEmail(env.DB, me.email);
+const month = todayDhaka().slice(0, 7);
+const s = await getSettings(env.DB);
+if (Astro.request.method === 'POST' && ids.length && s.teacherRatings) {
+  const r = await submitRating(env.DB, me.email, ids, await Astro.request.formData(), month);
+  return Astro.redirect(`/account/offline/rate?r=${r}`, 303);
+}
+const targets = s.teacherRatings ? await ratingTargets(env.DB, ids, month) : [];
+const result = Astro.url.searchParams.get('r');
+---
+
+{
+  ids.length === 0 ? (
+    <NotOffline me={me} />
+  ) : (
+    <AccountShell me={me} active="offline-rate" title="শিক্ষক মূল্যায়ন">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <h1>শিক্ষক মূল্যায়ন</h1>
+            <p>{monthBn(month, true)} মাসে আপনার শিক্ষকদের কেমন লাগল জানান। আপনার নাম শিক্ষক জানবেন না, শুধু অফিস সব মিলিয়ে দেখবে।</p>
+          </div>
+        </header>
+        {result === 'saved' && <p class="note note--good" role="status">জাযাকাল্লাহু খাইরান, মূল্যায়ন জমা হয়েছে।</p>}
+        {result === 'already' && <p class="note note--warn" role="status">এই মাসে এই শিক্ষককে আগেই মূল্যায়ন করেছেন।</p>}
+        {result === 'invalid' && <p class="note note--bad" role="alert">প্রতিটি প্রশ্নে ১ থেকে ৫ এর মধ্যে একটি বাছুন।</p>}
+        {!s.teacherRatings && <p class="card muted">এখন মূল্যায়ন বন্ধ আছে।</p>}
+        {s.teacherRatings && targets.length === 0 && <p class="card muted">এখন মূল্যায়ন করার মতো কোনো শিক্ষক নেই।</p>}
+
+        {targets.map((t) =>
+          t.done ? (
+            <section class="card block done"><Icon name="check" /> <strong>{t.teacherName}</strong> <span class="muted">· {t.courseTitle} · এই মাসে মূল্যায়ন করেছেন</span></section>
+          ) : (
+            <form method="post" class="card block rate">
+              <input type="hidden" name="offlineStudentId" value={t.offlineStudentId} />
+              <input type="hidden" name="teacherId" value={t.teacherId} />
+              <div class="card__head"><div><h2>{t.teacherName}</h2><small class="muted">{t.courseTitle} · {t.batchName}{ids.length > 1 && ` · ${t.studentName}`}</small></div></div>
+              {QUESTIONS.map((q) => (
+                <fieldset class="q">
+                  <legend>{q.label}</legend>
+                  <div class="scale">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <label><input type="radio" name={q.key} value={n} required /><span>{'★'.repeat(n)}</span></label>
+                    ))}
+                  </div>
+                </fieldset>
+              ))}
+              <label class="field"><span>কিছু বলতে চাইলে (ঐচ্ছিক)</span><textarea name="comment" rows="3" maxlength="1000"></textarea></label>
+              <button class="button"><Icon name="check" /> জমা দিন</button>
+            </form>
+          ),
+        )}
+      </div>
+    </AccountShell>
+  )
+}
+
+<style>
+  .block {
+    margin-top: var(--space-4);
+  }
+  .done {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    color: var(--good-700);
+  }
+  .rate {
+    display: grid;
+    gap: var(--space-4);
+  }
+  .rate .button {
+    justify-self: start;
+  }
+  .q {
+    border: 0;
+    margin: 0;
+    padding: 0;
+  }
+  .q legend {
+    font-weight: 600;
+    margin-bottom: var(--space-2);
+  }
+  .scale {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  .scale label {
+    position: relative;
+    cursor: pointer;
+  }
+  .scale input {
+    position: absolute;
+    opacity: 0;
+    inset: 0;
+  }
+  .scale span {
+    display: block;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    color: var(--gold-500);
+    letter-spacing: 1px;
+    background: var(--white);
+  }
+  .scale input:checked + span {
+    background: var(--green-700);
+    border-color: var(--green-700);
+    color: var(--gold-300);
+  }
+  .scale input:focus-visible + span {
+    outline: 2px solid var(--leaf-500);
+  }
+</style>

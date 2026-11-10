@@ -1,0 +1,147 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../components/AccountShell.astro';
+import NotTeacher from '../../components/NotTeacher.astro';
+import Icon from '../../components/Icon.astro';
+import { classesOn, listBatches } from '../../server/office';
+import { nextClass, officeNotices, teacherSession } from '../../server/panels';
+import { DAY_BN, DAY_SHORT_BN, dayBn, parseDays, timeBn, todayDhaka, weekday } from '../../lib/offline';
+import { bnDigits, dateBn, taka } from '../../lib/format';
+import { examLine, masterRoutine, teacherExams } from '../../server/academic';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const { me, teacher } = await teacherSession(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Fteacher', 303);
+const today = todayDhaka();
+const batches = teacher ? await listBatches(env.DB, { teacherId: teacher.id, activeOnly: true }) : [];
+const [todays, notices, exams, routineFile] = teacher
+  ? await Promise.all([
+      classesOn(env.DB, today),
+      officeNotices(env.DB, 'teacher', batches.map((b) => b.id), 8, [], teacher.id),
+      teacherExams(env.DB, teacher.id, today),
+      masterRoutine(env.DB),
+    ])
+  : [[], [], [], null];
+const myBatchIds = new Set(batches.map((b) => b.id));
+const now = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+const next = nextClass(batches, today, now);
+const mine = todays.filter((b) => myBatchIds.has(b.id));
+const students = batches.reduce((a, b) => a + b.students, 0);
+---
+
+{
+  !teacher ? (
+    <NotTeacher me={me} />
+  ) : (
+    <AccountShell me={me} active="t-home" title="শিক্ষক প্যানেল" mode="teacher">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <p class="eyebrow">{DAY_BN[weekday(today)]}, {dayBn(today)}</p>
+            <h1>আসসালামু আলাইকুম, {teacher.name}</h1>
+            <p>{teacher.subject}</p>
+          </div>
+        </header>
+
+        <div class="cols">
+          <section class="card">
+            <div class="card__head"><h2>আজকের ক্লাস</h2></div>
+            {mine.length === 0 ? (
+              <div class="empty"><Icon name="calendar" size={28} /><p>আজ আপনার কোনো ক্লাস নেই।{next && <> পরের ক্লাস {next.day === today ? 'আজ' : DAY_BN[weekday(next.day)]} {timeBn(next.batch.startTime)}, {next.batch.name}।</>}</p></div>
+            ) : (
+              <ul class="list">
+                {mine.map((b) => (
+                  <li>
+                    <div><strong>{b.name}</strong> <span class="muted">· {b.courseTitle}</span><small>{[timeBn(b.startTime), b.room].filter(Boolean).join(' · ')} · {bnDigits(b.students)} জন</small></div>
+                    {b.marked > 0 ? <span class="pill pill--present">হাজিরা নেওয়া হয়েছে</span> : <a class="button" href={`/teacher/batch/${b.id}?day=${today}#attendance`}><Icon name="clipboard" /> হাজিরা নিন</a>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+          <section class="card">
+            <div class="card__head"><h2>নোটিশ</h2></div>
+            {notices.length === 0 ? (
+              <p class="muted">কোনো নোটিশ নেই।</p>
+            ) : (
+              <ul class="list">
+                {notices.map((n) => (
+                  <li><div><strong>{n.title}</strong><small>{n.targetName ? `${n.targetName} · ` : ''}{dateBn(n.createdAt)}</small>{n.body && <p class="body">{n.body}</p>}{n.fileName && <a class="attach" href={`/api/notice-file/${n.id}`} target="_blank"><Icon name="download" size={16} /> {n.fileName}</a>}</div></li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        <div class="kpis">
+          <div class="kpi kpi--info"><span class="kpi__icon"><Icon name="calendar" /></span><span class="kpi__label">আমার ব্যাচ</span><strong class="kpi__value">{bnDigits(batches.length)}</strong></div>
+          <div class="kpi"><span class="kpi__icon"><Icon name="users" /></span><span class="kpi__label">মোট ছাত্র</span><strong class="kpi__value">{bnDigits(students)}</strong></div>
+        </div>
+
+
+        <div class="cols">
+          <section class="card">
+            <div class="card__head"><h2>সামনের পরীক্ষা</h2></div>
+            {exams.length === 0 ? <p class="muted">সামনে কোনো পরীক্ষা নেই।</p> : (
+              <ul class="list">
+                {exams.map((x) => <li><div><strong>{dayBn(x.examDate)}</strong><small>{examLine(x)} · {x.batchName}</small></div>{x.feeMinor > 0 && <small class="muted">ফি {taka(x.feeMinor)}</small>}</li>)}
+              </ul>
+            )}
+          </section>
+          <section class="card">
+            <div class="card__head"><h2>রুটিন</h2></div>
+            {routineFile ? (
+              <p><a class="button button--ghost" href="/api/routine" target="_blank"><Icon name="download" /> পুরো প্রতিষ্ঠানের রুটিন নামান</a></p>
+            ) : (
+              <p class="muted">অফিস এখনো রুটিন ফাইল দেয়নি।</p>
+            )}
+            <p class="muted"><small>সমস্যা বা প্রশ্ন থাকলে <a href="/teacher/tickets">অফিসকে লিখুন</a>।</small></p>
+          </section>
+        </div>
+
+        <h2>আমার ব্যাচ</h2>
+        {batches.length === 0 ? (
+          <p class="card muted">এখনো আপনাকে কোনো ব্যাচ দেওয়া হয়নি।</p>
+        ) : (
+          <div class="grid">
+            {batches.map((b) => (
+              <a class="card batch" href={`/teacher/batch/${b.id}`}>
+                <strong>{b.name}</strong>
+                <span class="muted">{b.courseTitle}</span>
+                <small>{parseDays(b.days).map((d) => DAY_SHORT_BN[d]).join(', ')} · {timeBn(b.startTime)}</small>
+                <small>{bnDigits(b.students)} জন ছাত্র{b.room && ` · ${b.room}`}</small>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+    </AccountShell>
+  )
+}
+
+<style>
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+    gap: var(--space-3);
+  }
+  .batch {
+    display: grid;
+    gap: 2px;
+    color: inherit;
+    text-decoration: none;
+  }
+  .batch:hover {
+    border-color: var(--leaf-500);
+  }
+  .attach {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin-top: var(--space-1);
+  }
+  .body {
+    margin: var(--space-1) 0 0;
+    white-space: pre-line;
+  }
+</style>

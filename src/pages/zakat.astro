@@ -1,0 +1,331 @@
+---
+import Base from '../layouts/Base.astro';
+import PageHero from '../components/PageHero.astro';
+import Icon from '../components/Icon.astro';
+
+// The zakat worksheet from the old site (made by Team Fahad with Madrasatul
+// Insaf), worked out in the browser. Nothing typed here is sent anywhere;
+// "pay" only opens the zakat fund's form with the amount filled in.
+Astro.response.headers.set('Cache-Control', 'public, max-age=300, s-maxage=3600');
+
+type Row = { name: string; label: string; hint?: string };
+const MONEY: Row[] = [
+  { name: 'cash_hand', label: 'নগদ টাকা' },
+  { name: 'deposited_money', label: 'কারো কাছে গচ্ছিত আমানত' },
+  { name: 'receivable', label: 'অন্যের কাছে পাওনা টাকা' },
+  { name: 'received_salary', label: 'চলতি মাসে প্রাপ্ত বেতন', hint: 'যতটুকু অবশিষ্ট' },
+  { name: 'bank_balance', label: 'ব্যাংক অ্যাকাউন্টে জমা অর্থ', hint: 'নিজের জমাকৃত ব্যালেন্স (অতিরিক্ত ইন্টারেস্ট পুরোটাই সদকা করা জরুরি)' },
+  { name: 'special_savings', label: 'বিশেষ জমা অ্যাকাউন্ট', hint: 'হজ, বিয়ে ইত্যাদির জন্য সঞ্চয়কৃত টাকা' },
+  { name: 'insurance_refund', label: 'ইন্সুরেন্স রিফান্ড', hint: 'যদি রিফান্ড পাওয়ার নিশ্চয়তা থাকে' },
+  { name: 'prize_winning', label: 'পুরস্কারে প্রাপ্ত অর্থ', hint: 'ইনাম, হাদিয়া, মিরাস ইত্যাদি' },
+  { name: 'sale_proceeds', label: 'কোনো কিছু বিক্রির প্রাপ্ত অর্থ', hint: 'জমি, গাড়ি, ফ্ল্যাট ইত্যাদি' },
+  { name: 'dps_matured', label: 'ডিপিএস/এফডিআর ম্যাচিউরড বা হস্তগত টাকা', hint: 'নিজের জমাকৃত অর্থ' },
+  { name: 'provident_fund', label: 'প্রভিডেন্ট ফান্ড', hint: 'নিজের জমাকৃত অর্থ' },
+  { name: 'share_dividend', label: 'কোম্পানির শেয়ার (ডিভিডেন্ড)', hint: 'প্রাপ্ত ডিভিডেন্ডের উপর যাকাত' },
+  { name: 'company_shares', label: 'কোম্পানির শেয়ার (বিক্রির উদ্দেশ্যে)', hint: 'বর্তমান বাজার মূল্য' },
+];
+const BUSINESS: Row[] = [
+  { name: 'business_land', label: 'ব্যবসার উদ্দেশ্যে কেনা জমি, প্লট', hint: 'বিক্রির নিয়তে কেনা, বর্তমান বিক্রয়যোগ্য মূল্য' },
+  { name: 'building_for_sale', label: 'ব্যবসার উদ্দেশ্যে কেনা বিল্ডিং', hint: 'বর্তমান বিক্রয়যোগ্য মূল্য' },
+  { name: 'flat_for_sale', label: 'ব্যবসার উদ্দেশ্যে কেনা ফ্ল্যাট', hint: 'বর্তমান বিক্রয়যোগ্য মূল্য' },
+  { name: 'business_goods', label: 'ব্যবসায়িক পণ্যদ্রব্য', hint: 'দোকান, শোরুম, গুদামে রক্ষিত সকল পণ্যের বর্তমান বিক্রয়মূল্য' },
+  { name: 'business_cash', label: 'ব্যবসায়িক নগদ টাকা', hint: 'হাতে বা ব্যাংকে জমাকৃত ব্যবসায়িক অর্থ' },
+  { name: 'business_receivable', label: 'ব্যবসায়িক পাওনা', hint: 'পণ্য বিক্রয়ের বকেয়া পাওনা' },
+];
+const DEBTS: Row[] = [
+  { name: 'household_loan', label: 'সাংসারিক প্রয়োজনে নেওয়া ঋণ' },
+  { name: 'personal_loan', label: 'ব্যক্তিগত পর্যায়ের সকল ঋণ' },
+  { name: 'business_loan', label: 'এমন ব্যবসার সকল ঋণ যার উপর নিজের এবং সংসারের ব্যয় নির্ভরশীল' },
+  { name: 'credit_card_debt', label: 'ক্রেডিট কার্ডের বিল', hint: 'সুদ সহ নয়, শুধু মূল বিল' },
+  { name: 'utility_bills', label: 'ইউটিলিটি বিল', hint: 'বিদ্যুৎ, গ্যাস, পানি, ইন্টারনেট ইত্যাদির বকেয়া' },
+  { name: 'employee_salary', label: 'কর্মচারীদের বেতন', hint: 'যদি যাকাত বর্ষে পরিশোধের দায় থাকে' },
+  { name: 'development_loan', label: 'ডেভেলপমেন্ট ঋণের যে অংশ যাকাতযোগ্য সম্পদ কেনায় ব্যয় হয়েছে' },
+  { name: 'installment_loan', label: 'মেয়াদি ঋণের যে কিস্তি যাকাত বর্ষের মধ্যে দিতে হবে' },
+  { name: 'mahr_amount', label: 'স্ত্রীর মোহর', hint: 'যদি এই যাকাত বর্ষে আদায়ের নিয়ত করেন; নতুবা নয়' },
+];
+const bn = (n: number) => String(n).replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[+d]!);
+---
+
+<Base title="যাকাত ক্যালকুলেটর" description="সহজে হিসাব করুন আপনার যাকাত। স্বর্ণ-রূপা, টাকা-পয়সা, ব্যবসায়িক সম্পদ ও ঋণ দিয়ে ধাপে ধাপে যাকাতের হিসাব।">
+  <PageHero eyebrow="যাকাত ক্যালকুলেটর" title="সহজে হিসাব করুন আপনার যাকাত" lead="ঘরগুলো ধারাবাহিকভাবে পূরণ করুন। কোনো অংশ বুঝতে অসুবিধা হলে নির্ভরযোগ্য আলেমের সাথে আলোচনা করে নিন। এই ফর্মের কোনো তথ্য কোথাও পাঠানো বা সংরক্ষণ করা হয় না।" crumbs={[{ href: '/donate', label: 'দান' }, { href: '/zakat', label: 'যাকাত ক্যালকুলেটর' }]} />
+
+  <section class="section">
+    <form class="container zk" data-zakat onsubmit="return false">
+      <div class="zk__main">
+        <fieldset class="zk__group">
+          <legend><span>১</span> স্বর্ণ ও রূপা</legend>
+          <p class="hint">ব্যবহৃত অলংকার হোক বা ব্যবসার পণ্য, সব প্রকারের স্বর্ণ ও রূপা হিসাবযোগ্য।</p>
+          <div class="zk__metal">
+            <label>স্বর্ণ (গ্রাম)<input inputmode="decimal" name="gold_grams" placeholder="০" /></label>
+            <label>প্রতি গ্রাম স্বর্ণের দাম (টাকা)<input inputmode="decimal" name="gold_rate" placeholder="০" /></label>
+            <label>রূপা (গ্রাম)<input inputmode="decimal" name="silver_grams" placeholder="০" /></label>
+            <label>প্রতি গ্রাম রূপার দাম (টাকা)<input inputmode="decimal" name="silver_rate" placeholder="০" /></label>
+          </div>
+          <p class="sub">স্বর্ণ ও রূপার মোট মূল্য: <strong data-out="metal">০</strong> টাকা</p>
+        </fieldset>
+
+        {
+          [
+            { n: '২', title: 'টাকা-পয়সা', rows: MONEY, out: 'money' },
+            { n: '৩', title: 'ব্যবসায়িক সম্পদ', rows: BUSINESS, out: 'business' },
+            { n: '৪', title: 'যাকাত থেকে বিয়োগযোগ্য ঋণ ও দায়', rows: DEBTS, out: 'debts' },
+          ].map((g) => (
+            <fieldset class="zk__group">
+              <legend>
+                <span>{g.n}</span> {g.title}
+              </legend>
+              <div class="zk__rows">
+                {g.rows.map((r) => (
+                  <label class="zk__row">
+                    <span>
+                      {r.label}
+                      {r.hint && <small>{r.hint}</small>}
+                    </span>
+                    <input inputmode="decimal" name={r.name} data-sum={g.out} placeholder="০" />
+                  </label>
+                ))}
+              </div>
+              <p class="sub">
+                মোট: <strong data-out={g.out}>০</strong> টাকা
+              </p>
+            </fieldset>
+          ))
+        }
+      </div>
+
+      <aside class="zk__result">
+        <div class="zk__card">
+          <h2>চূড়ান্ত হিসাব</h2>
+          <dl>
+            <div><dt>মোট যাকাতযোগ্য সম্পদ (ক)</dt><dd data-out="assets">০</dd></div>
+            <div><dt>বিয়োগযোগ্য ঋণ (খ)</dt><dd data-out="debts2">০</dd></div>
+            <div><dt>নেট যাকাতযোগ্য সম্পদ (ক − খ)</dt><dd data-out="net">০</dd></div>
+          </dl>
+          <p class="zk__zakat">মোট যাকাত (২.৫%)<strong><span data-out="zakat">০</span> টাকা</strong></p>
+          <p class="zk__nisab" data-nisab hidden></p>
+          <a class="button button--gold button--block" href="/donate/zakat#donate-form" data-pay><Icon name="heart" size={18} /> মাদরাসার যাকাত তহবিলে দিন</a>
+          <button class="button button--ghost button--block" type="button" onclick="print()"><Icon name="printer" size={18} /> প্রিন্ট বা PDF</button>
+          <ul class="notes">
+            <li>ব্যক্তিগত ও সীমিত আকারের ব্যবসায়িক হিসাবের জন্য এই ফর্মই যথেষ্ট হবে ইন শা আল্লাহ। বড় বা একাধিক ব্যবসার হিসাব নির্ভরযোগ্য আলেমের তত্ত্বাবধানে করুন।</li>
+            <li>হিসাব প্রিন্ট বা PDF করে একজন আলেমকে দিয়ে নিরীক্ষণ করিয়ে নেওয়ার পরামর্শ রইল।</li>
+            <li>নিসাব রূপার হিসাবে ({bn(612.36)} গ্রাম রূপার দাম) দেখানো হয়, রূপার দাম দিলে।</li>
+          </ul>
+        </div>
+      </aside>
+    </form>
+  </section>
+</Base>
+
+<script>
+  const BN = '০১২৩৪৫৬৭৮৯';
+  const toAscii = (s: string) => s.replace(/[০-৯]/g, (d) => String(BN.indexOf(d))).replace(/[^\d.]/g, '');
+  const show = (n: number) => Math.round(n).toLocaleString('en-IN').replace(/\d/g, (d) => BN[+d]!);
+  const form = document.querySelector<HTMLFormElement>('[data-zakat]')!;
+  const num = (name: string) => Number(toAscii(form.querySelector<HTMLInputElement>(`[name=${name}]`)?.value ?? '')) || 0;
+  const sum = (group: string) => [...form.querySelectorAll<HTMLInputElement>(`[data-sum=${group}]`)].reduce((s, i) => s + (Number(toAscii(i.value)) || 0), 0);
+  const out = (key: string, v: number) => form.querySelectorAll(`[data-out=${key}]`).forEach((el) => (el.textContent = show(v)));
+  const pay = form.querySelector<HTMLAnchorElement>('[data-pay]')!;
+  const nisab = form.querySelector<HTMLElement>('[data-nisab]')!;
+  const run = () => {
+    const metal = num('gold_grams') * num('gold_rate') + num('silver_grams') * num('silver_rate');
+    const money = sum('money');
+    const business = sum('business');
+    const debts = sum('debts');
+    const assets = metal + money + business;
+    const net = Math.max(0, assets - debts);
+    const silverRate = num('silver_rate');
+    const threshold = silverRate ? 612.36 * silverRate : 0;
+    const below = threshold > 0 && net < threshold;
+    const zakat = below ? 0 : net * 0.025;
+    out('metal', metal);
+    out('money', money);
+    out('business', business);
+    out('debts', debts);
+    out('debts2', debts);
+    out('assets', assets);
+    out('net', net);
+    out('zakat', zakat);
+    nisab.hidden = !threshold;
+    nisab.textContent = below ? `নেট সম্পদ নিসাবের (${show(threshold)} টাকা) কম, তাই যাকাত ফরজ নয়।` : `নিসাব: ${show(threshold)} টাকা। আপনার সম্পদ নিসাবের সমান বা বেশি।`;
+    const amount = Math.ceil(zakat);
+    pay.href = amount >= 10 ? `/donate/zakat?amount=${amount}#donate-form` : '/donate/zakat#donate-form';
+  };
+  form.addEventListener('input', run);
+  run();
+</script>
+
+<style>
+  .zk {
+    display: grid;
+    gap: var(--space-8);
+    align-items: start;
+  }
+  @media (min-width: 1000px) {
+    .zk {
+      grid-template-columns: 1.5fr 1fr;
+    }
+    .zk__result {
+      position: sticky;
+      top: calc(var(--header-h) + var(--space-4));
+    }
+  }
+  .zk__main {
+    display: grid;
+    gap: var(--space-6);
+  }
+  .zk__group {
+    margin: 0;
+    padding: var(--space-6);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--color-line);
+    background: var(--color-surface);
+    min-width: 0;
+  }
+  legend {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    padding: 0 var(--space-2);
+    font: 700 var(--text-lg) / 1.3 var(--font-display);
+    color: var(--green-900);
+  }
+  legend span {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--gold-100);
+    color: var(--gold-500);
+    font-size: var(--text-sm);
+  }
+  .hint {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+  .zk__metal {
+    display: grid;
+    gap: var(--space-3);
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+  .zk__metal label {
+    display: grid;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+  .zk__rows {
+    display: grid;
+    gap: var(--space-2);
+  }
+  .zk__row {
+    display: grid;
+    grid-template-columns: 1fr minmax(120px, 170px);
+    gap: var(--space-3);
+    align-items: center;
+    padding: var(--space-2) 0;
+    border-bottom: 1px dashed var(--color-line);
+  }
+  .zk__row span {
+    display: grid;
+    font-size: var(--text-sm);
+  }
+  .zk__row small {
+    color: var(--color-text-muted);
+    font-size: var(--text-xs);
+  }
+  input {
+    width: 100%;
+    min-height: 44px;
+    padding: var(--space-2) var(--space-3);
+    border: 1.5px solid var(--color-line);
+    border-radius: var(--radius-sm);
+    background: var(--ivory);
+    font: 600 var(--text-base) / 1.3 var(--font-body);
+    text-align: end;
+  }
+  input:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--gold-300) 50%, transparent);
+    border-color: var(--green-700);
+  }
+  .sub {
+    margin: var(--space-3) 0 0;
+    text-align: end;
+    color: var(--color-text-muted);
+  }
+  .sub strong {
+    color: var(--green-700);
+  }
+  .zk__card {
+    display: grid;
+    gap: var(--space-4);
+    padding: var(--space-6);
+    border-radius: var(--radius-lg);
+    background: var(--green-900);
+    color: var(--color-on-dark);
+    background-image: var(--pattern-dark);
+    box-shadow: var(--shadow-lg);
+  }
+  .zk__card h2 {
+    margin: 0;
+    color: var(--white);
+  }
+  dl {
+    display: grid;
+    gap: var(--space-2);
+    margin: 0;
+  }
+  dl div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-3);
+    font-size: var(--text-sm);
+  }
+  dd {
+    margin: 0;
+    font-weight: 700;
+  }
+  .zk__zakat {
+    display: grid;
+    margin: 0;
+    padding: var(--space-4);
+    border-radius: var(--radius);
+    background: rgb(255 255 255 / 0.07);
+    color: var(--color-on-dark-muted);
+  }
+  .zk__zakat strong {
+    font: 750 var(--text-2xl) / 1.2 var(--font-display);
+    color: var(--gold-300);
+  }
+  .zk__nisab {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--gold-300);
+  }
+  .zk__card .button--ghost {
+    color: var(--color-on-dark);
+    border-color: rgb(255 255 255 / 0.35);
+  }
+  .notes {
+    margin: 0;
+    padding-inline-start: 1.1em;
+    display: grid;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+    color: var(--color-on-dark-muted);
+  }
+  @media (max-width: 520px) {
+    .zk__row {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media print {
+    :global(header),
+    :global(footer),
+    :global(.bnav),
+    :global(.page-hero),
+    .button {
+      display: none !important;
+    }
+  }
+</style>

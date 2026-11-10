@@ -1,0 +1,150 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import BarChart from '../../../components/admin/BarChart.astro';
+import { monthlyFigures, profitAndLoss } from '../../../server/office';
+import { addMonths, dayBn, isYmd, monthBn, todayDhaka } from '../../../lib/offline';
+import { bnDigits, taka } from '../../../lib/format';
+
+// The owner's view: online and offline income together, all expenses, and
+// what is left, for any range of dates.
+const today = todayDhaka();
+const p = Astro.url.searchParams;
+const monthStart = `${today.slice(0, 7)}-01`;
+const presets = {
+  month: [monthStart, today],
+  last: [addMonths(monthStart, -1), `${addMonths(monthStart, -1).slice(0, 7)}-31`],
+  quarter: [addMonths(monthStart, -2), today],
+  year: [`${today.slice(0, 4)}-01-01`, today],
+} as const;
+const preset = p.get('p') as keyof typeof presets | null;
+const [from, to] = preset && presets[preset] ? presets[preset] : [isYmd(p.get('from') ?? '') ? p.get('from')! : monthStart, isYmd(p.get('to') ?? '') ? p.get('to')! : today];
+const lastMonth = today.slice(0, 7);
+const firstYear = Number(today.slice(0, 4)) - 4;
+const [r, sixty] = await Promise.all([
+  profitAndLoss(env.DB, from, to),
+  monthlyFigures(env.DB, `${firstYear}-01`, lastMonth, { online: true, offline: true }),
+]);
+const year = sixty.slice(-12);
+// Five calendar years, this one so far.
+const years = Array.from({ length: 5 }, (_, i) => String(firstYear + i)).map((y) => {
+  const ms = sixty.filter((m) => m.month.startsWith(y));
+  const income = ms.reduce((a, m) => a + m.onlineMinor + m.offlineMinor, 0);
+  const expense = ms.reduce((a, m) => a + m.expenseMinor, 0);
+  return { year: y, income, expense, net: income - expense };
+});
+const income = r.onlineMinor + r.offlineMinor;
+const net = income - r.expenseMinor;
+const margin = income ? Math.round((net / income) * 100) : null;
+const share = (v: number) => (income ? Math.round((v / income) * 100) : 0);
+const range = `from=${from}&to=${to}`;
+---
+
+<Admin title="মোট আয় ব্যয়">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">প্রতিষ্ঠান</p>
+      <h1>মোট আয় ব্যয়</h1>
+      <p>দান আর ছাত্রদের ফি মিলিয়ে মোট আয়, সব খরচ, আর লাভ। শুধু যাঁদের দুই অংশেরই অনুমতি আছে তাঁরা দেখেন।</p>
+    </div>
+    <div class="actions" data-noprint>
+      <a class="button button--ghost" href={`/admin/finance/pnl.csv?${range}`}><Icon name="download" /> আয় ব্যয় বিবরণী (Excel)</a>
+      <button type="button" class="button button--ghost" data-print><Icon name="printer" /> PDF বা প্রিন্ট</button>
+    </div>
+  </header>
+
+  <form class="card range" method="get" data-noprint>
+    <nav class="tabs" aria-label="সময়">
+      <a href="?p=month" aria-current={preset === 'month' || (!preset && !p.get('from')) ? 'page' : undefined}>এই মাস</a>
+      <a href="?p=last" aria-current={preset === 'last' ? 'page' : undefined}>গত মাস</a>
+      <a href="?p=quarter" aria-current={preset === 'quarter' ? 'page' : undefined}>শেষ ৩ মাস</a>
+      <a href="?p=year" aria-current={preset === 'year' ? 'page' : undefined}>এই বছর</a>
+    </nav>
+    <label class="field"><span>থেকে</span><input type="date" name="from" value={from} /></label>
+    <label class="field"><span>পর্যন্ত</span><input type="date" name="to" value={to} /></label>
+    <button class="button">দেখুন</button>
+  </form>
+  <p class="muted"><small>{dayBn(from)} থেকে {dayBn(to)}</small></p>
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__icon"><Icon name="coins" /></span><span class="kpi__label">মোট আয়</span><strong class="kpi__value">{taka(income)}</strong><span class="kpi__hint">অনলাইন {taka(r.onlineMinor)} · অফলাইন {taka(r.offlineMinor)}</span></div>
+    <div class="kpi kpi--warn"><span class="kpi__icon"><Icon name="wallet" /></span><span class="kpi__label">মোট খরচ</span><strong class="kpi__value">{taka(r.expenseMinor)}</strong></div>
+    <div class={`kpi ${net < 0 ? 'kpi--bad' : 'kpi--info'}`}><span class="kpi__icon"><Icon name="chart" /></span><span class="kpi__label">{net < 0 ? 'নিট ঘাটতি' : 'নিট লাভ'}</span><strong class="kpi__value">{taka(Math.abs(net))}</strong><span class="kpi__hint">{margin === null ? '' : `আয়ের ${bnDigits(Math.abs(margin))}%`}</span></div>
+  </div>
+
+  <section class="card block">
+    <div class="card__head"><h2>শেষ ১২ মাস: মোট আয় ও খরচ</h2></div>
+    <BarChart
+      caption="শেষ বারো মাসের মোট আয় ও খরচ"
+      series={[{ label: 'আয়', color: 'var(--chart-income)' }, { label: 'খরচ', color: 'var(--chart-expense)' }]}
+      rows={year.map((m) => ({ label: monthBn(m.month), values: [m.onlineMinor + m.offlineMinor, m.expenseMinor] }))}
+    />
+  </section>
+
+  <section class="card block">
+    <div class="card__head"><h2>বছর অনুযায়ী: আয়, খরচ ও লাভ</h2></div>
+    <BarChart
+      caption="শেষ পাঁচ বছরের মোট আয় ও খরচ"
+      series={[{ label: 'আয়', color: 'var(--chart-income)' }, { label: 'খরচ', color: 'var(--chart-expense)' }]}
+      rows={years.map((y) => ({ label: bnDigits(y.year), values: [y.income, y.expense] }))}
+    />
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>বছর</th><th class="num">মোট আয়</th><th class="num">মোট খরচ</th><th class="num">লাভ বা ঘাটতি</th></tr></thead>
+        <tbody>
+          {years.map((y) => (
+            <tr><td>{bnDigits(y.year)}{y.year === today.slice(0, 4) && <small class="muted"> (এ পর্যন্ত)</small>}</td><td class="num">{taka(y.income)}</td><td class="num">{taka(y.expense)}</td><td class={`num ${y.net < 0 ? 'bad' : ''}`}>{y.net < 0 ? '−' : ''}{taka(Math.abs(y.net))}</td></tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>আয় কোথা থেকে</h2></div>
+      <ul class="list">
+        <li><span>অনলাইন কোর্স বিক্রি<small>{bnDigits(r.onlineCount)}টি অর্ডার · {bnDigits(share(r.onlineMinor))}%</small></span><strong class="num">{taka(r.onlineMinor)}</strong></li>
+        <li><span>ছাত্রদের ফি<small>{bnDigits(r.offlineCount)}টি রসিদ · {bnDigits(share(r.offlineMinor))}%</small></span><strong class="num">{taka(r.offlineMinor)}</strong></li>
+      </ul>
+      <h3 class="sub">কোর্স অনুযায়ী</h3>
+      <ul class="list">
+        {[...r.onlineByCourse.map((c) => ({ ...c, kind: 'দান' })), ...r.offlineByCourse.map((c) => ({ ...c, kind: 'ফি' }))]
+          .sort((a, b) => b.totalMinor - a.totalMinor)
+          .slice(0, 12)
+          .map((c) => <li><span>{c.label}<small>{c.kind} · {bnDigits(c.count)}টি</small></span><span class="num">{taka(c.totalMinor)}</span></li>)}
+      </ul>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>খরচ কোথায়</h2><a href="/admin/offline/expenses">খরচ লিখুন</a></div>
+      {r.expensesByCategory.length === 0 ? <p class="muted">এই সময়ে কোনো খরচ লেখা হয়নি।</p> : (
+        <ul class="list">{r.expensesByCategory.map((c) => <li><span>{c.label}</span><strong class="num">{taka(c.totalMinor)}</strong></li>)}</ul>
+      )}
+    </section>
+  </div>
+</Admin>
+
+<style>
+  .range {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+  .range .tabs {
+    margin: 0;
+  }
+  .range .field {
+    width: 170px;
+  }
+  .block {
+    margin-top: var(--space-5);
+  }
+  .sub {
+    margin: var(--space-5) 0 var(--space-1);
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+  }
+</style>

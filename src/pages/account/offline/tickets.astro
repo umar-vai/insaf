@@ -1,0 +1,55 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotOffline from '../../../components/NotOffline.astro';
+import TicketDesk from '../../../components/tickets/TicketDesk.astro';
+import { currentStudent } from '../../../server/students';
+import { offlineIdsForEmail } from '../../../server/panels';
+import { closeTicket, getTicket, listTickets, openTicket, ownsTicket, parseReply, parseTicketForm, replyTicket } from '../../../server/tickets';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline%2Ftickets', 303);
+const ids = await offlineIdsForEmail(env.DB, me.email);
+const base = '/account/offline/tickets';
+
+if (Astro.request.method === 'POST' && ids.length) {
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+  if (action === 'new') {
+    const v = parseTicketForm(form);
+    const studentId = String(form.get('studentId') ?? ids[0]);
+    if (!v.ok || !ids.includes(studentId)) return Astro.redirect(`${base}?error=${v.ok ? 'student' : v.error}`, 303);
+    const id = await openTicket(env.DB, me.email, { kind: 'student', offlineStudentId: studentId }, v.value);
+    return Astro.redirect(`${base}?t=${id}&saved=1`, 303);
+  }
+  const ticketId = String(form.get('ticketId') ?? '');
+  const t = await getTicket(env.DB, ticketId);
+  if (!t || !ownsTicket(t.ticket, { offlineStudentIds: ids })) return Astro.redirect(base, 303);
+  if (action === 'reply') await replyTicket(env.DB, me.email, ticketId, 'student', parseReply(form));
+  if (action === 'close') await closeTicket(env.DB, me.email, ticketId);
+  return Astro.redirect(`${base}?t=${ticketId}`, 303);
+}
+
+const tickets = await listTickets(env.DB, { offlineStudentIds: ids });
+const wanted = Astro.url.searchParams.get('t');
+const loaded = wanted ? await getTicket(env.DB, wanted) : null;
+const open = loaded && ownsTicket(loaded.ticket, { offlineStudentIds: ids }) ? loaded : null;
+const people = ids.length
+  ? (await env.DB.prepare(`SELECT id, name FROM offline_students WHERE id IN (${ids.map(() => '?').join(',')})`).bind(...ids).all<{ id: string; name: string }>()).results
+  : [];
+---
+
+{
+  ids.length === 0 ? (
+    <NotOffline me={me} />
+  ) : (
+    <AccountShell me={me} active="offline-tickets" title="অফিসকে লিখুন">
+      <div class="ui">
+        <header class="page-head"><div><h1>অফিসকে লিখুন</h1><p>ফি, ক্লাস, উপকরণ বা নিজের তথ্য নিয়ে কোনো প্রশ্ন বা সমস্যা থাকলে এখানে লিখুন।</p></div></header>
+        {Astro.url.searchParams.has('saved') && <p class="note note--good" role="status">পাঠানো হয়েছে। অফিস উত্তর দিলে এখানে দেখবেন।</p>}
+        <TicketDesk tickets={tickets} open={open} base={base} side="asker" people={people} />
+      </div>
+    </AccountShell>
+  )
+}

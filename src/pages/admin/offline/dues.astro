@@ -1,0 +1,236 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { allEnrollments, listOfflineCourses } from '../../../server/offline';
+import { listBatches } from '../../../server/office';
+import { getSettings } from '../../../server/settings';
+import { dayBn, studentCode, todayDhaka, waNumber } from '../../../lib/offline';
+import { bnDigits, taka } from '../../../lib/format';
+import { MAX_PER_SEND, sendReminders, smsReady, type Channel, type DueKind } from '../../../server/reminders';
+
+// Who owes money. Reminders go three ways: WhatsApp (each button opens
+// WhatsApp with the message filled in, nothing sent by the site), email to
+// everyone ticked (free), or SMS to everyone ticked (paid, only once the
+// owner saves an SMS key on the system page).
+const today = todayDhaka();
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const channel = (form.get('channel') === 'sms' ? 'sms' : 'email') as Channel;
+  const k = String(form.get('kind') ?? 'overdue');
+  const back = new URLSearchParams(String(form.get('back') ?? ''));
+  const r = await sendReminders(env.DB, env, Astro.locals.staff!, {
+    enrollmentIds: form.getAll('pick').map(String).slice(0, MAX_PER_SEND + 1),
+    template: String(form.get('template') ?? ''),
+    channel,
+    kind: (['overdue', 'month', 'all'].includes(k) ? k : 'overdue') as DueKind,
+    today,
+  });
+  if ('error' in r) back.set('error', r.error);
+  else for (const [key, v] of Object.entries({ ch: channel, sent: r.sent, skipped: r.skipped, failed: r.failed })) back.set(key, String(v));
+  return Astro.redirect(`/admin/offline/dues?${back}`, 303);
+}
+const endOfMonth = `${today.slice(0, 7)}-31`;
+const p = Astro.url.searchParams;
+const kind = p.get('kind') === 'month' ? 'month' : p.get('kind') === 'all' ? 'all' : 'overdue';
+const courseId = p.get('course') ?? '';
+const batchId = p.get('batch') ?? '';
+const [all, courses, batches, canSms] = await Promise.all([
+  allEnrollments(env.DB, today),
+  listOfflineCourses(env.DB),
+  listBatches(env.DB, { activeOnly: true }),
+  smsReady(env.DB, env),
+]);
+const canEmail = Boolean((env as { EMAIL?: unknown }).EMAIL);
+const result = p.has('sent') ? { ch: p.get('ch') === 'sms' ? 'SMS' : 'ইমেইল', sent: Number(p.get('sent')), skipped: Number(p.get('skipped')), failed: Number(p.get('failed')) } : null;
+const SEND_ERR: Record<string, string> = {
+  none: 'কাউকে টিক দেওয়া হয়নি।',
+  too_many: `একবারে ${bnDigits(MAX_PER_SEND)} জনের বেশি পাঠানো যায় না। ফিল্টার দিয়ে ভাগ করে পাঠান।`,
+  sms_off: 'SMS চালু নেই। মালিক সিস্টেম সেটিংসে SMS এর কী দিলে চালু হবে।',
+  email_off: 'এই সাইটে ইমেইল পাঠানো চালু নেই।',
+  template: 'মেসেজ খালি রাখা যাবে না।',
+};
+const sendError = SEND_ERR[p.get('error') ?? ''];
+const rows = all
+  .filter((e) => e.status === 'active' && e.ledger.dueMinor > 0)
+  .filter((e) => (kind === 'overdue' ? e.ledger.overdueMinor > 0 : kind === 'month' ? (e.ledger.next?.dueDate ?? '9999') <= endOfMonth : true))
+  .filter((e) => (!courseId || e.courseId === courseId) && (!batchId || e.batchId === batchId))
+  .sort((a, b) => (a.ledger.next?.dueDate ?? '').localeCompare(b.ledger.next?.dueDate ?? ''));
+const sum = rows.reduce((a, e) => a + (kind === 'overdue' ? e.ledger.overdueMinor : e.ledger.dueMinor), 0);
+const DEFAULT = (await getSettings(env.DB)).dueTemplate;
+const link = (k: string) => `?${new URLSearchParams({ kind: k, ...(courseId ? { course: courseId } : {}), ...(batchId ? { batch: batchId } : {}) })}`;
+---
+
+<Admin title="বকেয়া ও রিমাইন্ডার">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">ছাত্র ও ফি</p>
+      <h1>বকেয়া ও রিমাইন্ডার</h1>
+      <p>মেসেজ একবার লিখে রাখুন। WhatsApp বোতামে, ইমেইলে আর SMS এ ছাত্রের নাম, কোর্স আর টাকা নিজে বসে যাবে। WhatsApp আর ইমেইলে খরচ নেই, SMS এ প্রতি মেসেজে খরচ আছে।</p>
+    </div>
+  </header>
+  {result && (
+    <p class="note note--good" role="status">
+      {result.ch}: {bnDigits(result.sent)} জনকে পাঠানো হয়েছে।{result.skipped > 0 && ` ${bnDigits(result.skipped)} জনকে পাঠানো যায়নি (${result.ch === 'SMS' ? 'মোবাইল নম্বর ঠিক নেই' : 'Gmail দেওয়া নেই'} বা আর বাকি নেই)।`}{result.failed > 0 && ` ${bnDigits(result.failed)}টি পাঠাতে সমস্যা হয়েছে।`}
+    </p>
+  )}
+  {sendError && <p class="note note--bad" role="alert">{sendError}</p>}
+
+  <div class="kpis">
+    <div class="kpi kpi--bad"><span class="kpi__icon"><Icon name="alert" /></span><span class="kpi__label">{kind === 'overdue' ? 'তারিখ পার হওয়া টাকা' : 'মোট বাকি'}</span><strong class="kpi__value">{taka(sum)}</strong><span class="kpi__hint">{bnDigits(rows.length)}টি ভর্তি</span></div>
+  </div>
+
+  <form class="toolbar filters" method="get">
+    <input type="hidden" name="kind" value={kind} />
+    <select name="course" aria-label="কোর্স">
+      <option value="">সব কোর্স</option>
+      {courses.map((c) => <option value={c.id} selected={c.id === courseId}>{c.title}</option>)}
+    </select>
+    <select name="batch" aria-label="ব্যাচ">
+      <option value="">সব ব্যাচ</option>
+      {batches.map((b) => <option value={b.id} selected={b.id === batchId}>{b.name} · {b.courseTitle}</option>)}
+    </select>
+    <button class="button button--ghost">দেখুন</button>
+  </form>
+  <nav class="tabs" aria-label="কোন বকেয়া">
+    <a href={link('overdue')} aria-current={kind === 'overdue' ? 'page' : undefined}>তারিখ পার হয়ে গেছে</a>
+    <a href={link('month')} aria-current={kind === 'month' ? 'page' : undefined}>এই মাসের মধ্যে দেওয়ার কথা</a>
+    <a href={link('all')} aria-current={kind === 'all' ? 'page' : undefined}>সব বাকি</a>
+  </nav>
+
+  <form method="post" id="send" data-confirm="টিক দেওয়া সবাইকে মেসেজ পাঠাবেন?">
+  <input type="hidden" name="kind" value={kind} />
+  <input type="hidden" name="back" value={link(kind).slice(1)} />
+  <section class="card tpl">
+    <label class="field">
+      <span>মেসেজ। এগুলো নিজে বসে যাবে: {'{name}'} নাম, {'{course}'} কোর্স, {'{amount}'} টাকা, {'{date}'} তারিখ, {'{id}'} আইডি</span>
+      <textarea name="template" data-template rows="3" maxlength="1000">{DEFAULT}</textarea>
+    </label>
+    <div class="actions">
+      <button type="button" class="button button--sm button--ghost" data-reset>সেটিংসের মেসেজে ফিরুন</button>
+      <button type="button" class="button button--sm button--wa" data-next><Icon name="whatsapp" /> টিক দেওয়াদের একে একে WhatsApp</button>
+      <button class="button button--sm" name="channel" value="email" disabled={!canEmail}><Icon name="mail" /> টিক দেওয়া সবাইকে ইমেইল</button>
+      <button class="button button--sm" name="channel" value="sms" disabled={!canSms}><Icon name="phone" /> টিক দেওয়া সবাইকে SMS</button>
+      <span class="muted" data-progress></span>
+    </div>
+    <p class="muted"><small>
+      ইমেইল যায় যাদের Gmail দেওয়া আছে তাদের। {canSms ? 'SMS এ প্রতি মেসেজের খরচ SMS কোম্পানির অ্যাকাউন্ট থেকে কাটবে।' : 'SMS বন্ধ আছে। মালিক সিস্টেম সেটিংসে SMS কোম্পানির কী দিলে চালু হবে।'}
+      {!canEmail && ' এই সাইটে ইমেইল পাঠানো চালু নেই।'} একবারে {bnDigits(MAX_PER_SEND)} জন পর্যন্ত।
+    </small></p>
+  </section>
+
+  {
+    rows.length === 0 ? (
+      <div class="card empty"><Icon name="check" size={28} /><p>এই তালিকায় কারও বকেয়া নেই।</p></div>
+    ) : (
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th><input type="checkbox" data-all aria-label="সবাইকে বাছুন" checked /></th>
+              <th>ছাত্র</th><th>কোর্স ও ব্যাচ</th><th>যে তারিখে দেওয়ার কথা</th><th class="num">{kind === 'overdue' ? 'তারিখ পার' : 'বাকি'}</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((e) => {
+              const wa = waNumber(e.studentPhone);
+              const amount = kind === 'overdue' ? e.ledger.overdueMinor : e.ledger.next?.amountMinor ?? e.ledger.dueMinor;
+              return (
+                <tr class={e.ledger.overdueMinor ? 'late' : ''}>
+                  <td><input type="checkbox" name="pick" value={e.id} data-pick checked aria-label={`${e.studentName} কে বাছুন`} /></td>
+                  <td>
+                    <a href={`/admin/offline/students/${e.studentId}`}><strong>{e.studentName}</strong></a> <span class="id">{studentCode(e.studentNo)}</span>
+                    <br /><a class="muted" href={`tel:${e.studentPhone}`}>{bnDigits(e.studentPhone)}</a>
+                  </td>
+                  <td>{e.courseTitle}{e.batch && <small class="muted"><br />{e.batch}</small>}</td>
+                  <td>{dayBn(e.ledger.next?.dueDate)}</td>
+                  <td class="num"><strong>{taka(amount)}</strong>{kind !== 'all' && <small class="muted"><br />মোট বাকি {taka(e.ledger.dueMinor)}</small>}</td>
+                  <td>
+                    {wa ? (
+                      <a
+                        class="button button--sm button--wa"
+                        target="_blank"
+                        rel="noopener"
+                        data-wa={wa}
+                        data-name={e.studentName}
+                        data-course={e.courseTitle}
+                        data-amount={taka(amount)}
+                        data-date={dayBn(e.ledger.next?.dueDate)}
+                        data-id={studentCode(e.studentNo)}
+                        href={`https://wa.me/${wa}`}
+                      >
+                        <Icon name="whatsapp" /> পাঠান
+                      </a>
+                    ) : (
+                      <small class="muted">মোবাইল নম্বর ঠিক নেই</small>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+  </form>
+</Admin>
+
+<script>
+  const KEY = 'tm_due_template';
+  const box = document.querySelector<HTMLTextAreaElement>('[data-template]')!;
+  const original = box.value;
+  try {
+    const saved = localStorage.getItem(KEY);
+    if (saved) box.value = saved;
+  } catch {}
+  const links = [...document.querySelectorAll<HTMLAnchorElement>('[data-wa]')];
+  const fill = () => {
+    for (const a of links) {
+      const msg = box.value.replace(/\{(\w+)\}/g, (all, k: string) => a.dataset[k] ?? all);
+      a.href = `https://wa.me/${a.dataset.wa}?text=${encodeURIComponent(msg)}`;
+    }
+  };
+  box.addEventListener('input', () => {
+    fill();
+    try {
+      localStorage.setItem(KEY, box.value);
+    } catch {}
+  });
+  document.querySelector('[data-reset]')!.addEventListener('click', () => {
+    box.value = original;
+    box.dispatchEvent(new Event('input'));
+  });
+  fill();
+
+  const picks = [...document.querySelectorAll<HTMLInputElement>('[data-pick]')];
+  document.querySelector<HTMLInputElement>('[data-all]')?.addEventListener('change', (e) => {
+    for (const p of picks) p.checked = (e.target as HTMLInputElement).checked;
+  });
+  // Browsers allow one new tab per click, so each click opens the next person.
+  let at = 0;
+  const progress = document.querySelector<HTMLElement>('[data-progress]')!;
+  document.querySelector('[data-next]')!.addEventListener('click', () => {
+    const chosen = picks
+      .filter((p) => p.checked)
+      .map((p) => p.closest('tr')!.querySelector<HTMLAnchorElement>('[data-wa]'))
+      .filter((a): a is HTMLAnchorElement => Boolean(a));
+    if (!chosen.length) return;
+    if (at >= chosen.length) at = 0;
+    window.open(chosen[at]!.href, '_blank', 'noopener');
+    at += 1;
+    progress.textContent = `${at} / ${chosen.length} পাঠানো হয়েছে। পরের জনের জন্য আবার চাপুন।`;
+  });
+</script>
+
+<style>
+  .kpis {
+    max-width: 320px;
+    margin-bottom: var(--space-5);
+  }
+  .tpl {
+    display: grid;
+    gap: var(--space-3);
+    margin-bottom: var(--space-4);
+  }
+</style>

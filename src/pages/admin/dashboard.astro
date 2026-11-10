@@ -1,0 +1,163 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../layouts/Admin.astro';
+import Icon from '../../components/Icon.astro';
+import BarChart from '../../components/admin/BarChart.astro';
+import FundProgress from '../../components/donate/FundProgress.astro';
+import { bySource, donationSummary, listDonations, listFunds, monthlyTotals } from '../../server/donations';
+import { recentActivity } from '../../server/admin';
+import { bnDigits, dateBn, taka } from '../../lib/format';
+import { addMonths, monthBn, todayDhaka } from '../../lib/offline';
+
+const today = todayDhaka();
+const since90 = `${addMonths(today, -3)}T00:00:00.000Z`;
+const [summary, funds, months, review, recent, sources, activity] = await Promise.all([
+  donationSummary(env.DB, today),
+  listFunds(env.DB, { all: true }),
+  monthlyTotals(env.DB, null, 12, today),
+  listDonations(env.DB, { status: 'review' }, 20),
+  listDonations(env.DB, { status: 'counted' }, 10),
+  bySource(env.DB, since90),
+  recentActivity(env.DB, 8),
+]);
+const SOURCE_BN: Record<string, string> = { direct: 'সরাসরি সাইটে', office: 'অফিসে পাওয়া', facebook: 'Facebook' };
+---
+
+<Admin title="দানের ড্যাশবোর্ড">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">দান CRM</p>
+      <h1>দানের ড্যাশবোর্ড</h1>
+      <p>শুধু নিশ্চিত হওয়া দান হিসাবে ধরা হয়: অনলাইনে SSLCommerz যাচাই করলে, অথবা অফিসে রেকর্ড করলে।</p>
+    </div>
+    <div class="actions">
+      <a class="button" href="/admin/donations/record"><Icon name="plus" /> অফিসে পাওয়া দান</a>
+    </div>
+  </header>
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__icon"><Icon name="coins" /></span><span class="kpi__label">মোট সংগ্রহ</span><strong class="kpi__value">{taka(summary.totalMinor)}</strong><span class="kpi__hint">{bnDigits(summary.gifts)}টি দান</span></div>
+    <div class="kpi"><span class="kpi__icon"><Icon name="calendar" /></span><span class="kpi__label">এই মাসে</span><strong class="kpi__value">{taka(summary.monthMinor)}</strong><span class="kpi__hint">আজ {taka(summary.todayMinor)}</span></div>
+    <a class="kpi" href="/admin/donors"><span class="kpi__icon"><Icon name="users" /></span><span class="kpi__label">দাতা</span><strong class="kpi__value">{bnDigits(summary.donors)}</strong><span class="kpi__hint">ফোন নম্বর অনুযায়ী আলাদা</span></a>
+    <a class:list={['kpi', summary.reviews > 0 && 'kpi--warn']} href="/admin/donations?status=review"><span class="kpi__icon"><Icon name="alert" /></span><span class="kpi__label">যাচাই বাকি</span><strong class="kpi__value">{bnDigits(summary.reviews)}</strong><span class="kpi__hint">টাকা এসেছে কিন্তু মেলেনি</span></a>
+  </div>
+
+  {
+    review.rows.length > 0 && (
+      <section class="card warn">
+        <div class="card__head"><h2><Icon name="alert" /> যাচাইয়ের অপেক্ষায়</h2><a href="/admin/donations?status=review">সব দেখুন</a></div>
+        <ul class="list">
+          {review.rows.map((d) => (
+            <li><span><strong>{d.donorName}</strong> · {d.fundTitle} · {taka(d.amountMinor)}</span><small class="muted">{d.reference} · {d.reviewReason}</small></li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
+
+  <div class="cols cols--wide">
+    <section class="card">
+      <div class="card__head"><h2>মাসভিত্তিক সংগ্রহ (১২ মাস)</h2></div>
+      <BarChart caption="প্রতি মাসে মোট দান" series={[{ label: 'দান', color: 'var(--chart-income)' }]} rows={months.map((m) => ({ label: monthBn(m.month), values: [m.minor] }))} />
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>কোথা থেকে এসেছে (৩ মাস)</h2></div>
+      {
+        sources.length === 0 ? (
+          <p class="muted">এখনো কিছু নেই। অ্যাডের লিংকে utm_source ও utm_campaign দিলে এখানে আলাদা দেখাবে।</p>
+        ) : (
+          <table>
+            <thead><tr><th>উৎস</th><th class="num">দান</th><th class="num">টাকা</th></tr></thead>
+            <tbody>
+              {sources.map((s) => (
+                <tr><td>{SOURCE_BN[s.source] ?? s.source}{s.campaign && <small class="muted"><br />{s.campaign}</small>}</td><td class="num">{bnDigits(s.gifts)}</td><td class="num">{taka(s.minor)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      }
+    </section>
+  </div>
+
+  <section class="card">
+    <div class="card__head"><h2>তহবিল অনুযায়ী</h2><a href="/admin/funds">তহবিল সম্পাদনা</a></div>
+    <div class="funds">
+      {
+        funds.map((f) => (
+          <a class="fund" href={`/admin/donations?fund=${f.id}`}>
+            <strong>{f.title}{f.status === 'hidden' && <span class="pill pill--hidden">লুকানো</span>}</strong>
+            <FundProgress raisedMinor={f.raisedMinor} goalMinor={f.goalMinor} donors={f.donors} gifts={f.gifts} memberGoal={f.memberGoal} size="sm" />
+          </a>
+        ))
+      }
+    </div>
+  </section>
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>সর্বশেষ দান</h2><a href="/admin/donations">সব দান</a></div>
+      <ul class="list">
+        {recent.rows.map((d) => (
+          <li>
+            <span><strong>{d.donorName}</strong> {taka(d.amountMinor)}</span>
+            <small class="muted">{d.fundTitle} · {dateBn(d.paidAt, true)} · {d.gateway === 'manual' ? 'অফিসে' : 'অনলাইনে'}</small>
+          </li>
+        ))}
+      </ul>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>টিমের সাম্প্রতিক কাজ</h2><a href="/admin/audit">সব</a></div>
+      <ul class="list">
+        {activity.map((a) => (
+          <li><span>{a.action}</span><small class="muted">{a.actor} · {dateBn(a.createdAt, true)}</small></li>
+        ))}
+      </ul>
+    </section>
+  </div>
+</Admin>
+
+<style>
+  .warn {
+    border-color: var(--warn-700);
+    margin-bottom: var(--space-5);
+  }
+  .list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .list li {
+    display: grid;
+    gap: 2px;
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--color-line);
+  }
+  .funds {
+    display: grid;
+    gap: var(--space-4);
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  }
+  .fund {
+    display: grid;
+    gap: var(--space-3);
+    padding: var(--space-4);
+    border-radius: var(--radius);
+    border: 1px solid var(--color-line);
+    color: inherit !important;
+    text-decoration: none;
+  }
+  .fund:hover {
+    border-color: var(--green-700);
+  }
+  .fund strong {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+  }
+  .card + .cols,
+  .cols + .card {
+    margin-top: var(--space-5);
+  }
+</style>

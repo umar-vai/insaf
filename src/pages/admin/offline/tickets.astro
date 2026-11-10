@@ -1,0 +1,35 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import TicketDesk from '../../../components/tickets/TicketDesk.astro';
+import { closeTicket, getTicket, listTickets, parseReply, replyTicket, type TicketStatus } from '../../../server/tickets';
+
+const base = '/admin/offline/tickets';
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const ticketId = String(form.get('ticketId') ?? '');
+  if (form.get('action') === 'reply') await replyTicket(env.DB, Astro.locals.staff!, ticketId, 'staff', parseReply(form));
+  if (form.get('action') === 'close') await closeTicket(env.DB, Astro.locals.staff!, ticketId);
+  return Astro.redirect(`${base}?t=${ticketId}&saved=1`, 303);
+}
+const FILTERS = { active: 'চালু', open: 'উত্তরের অপেক্ষায়', answered: 'উত্তর দেওয়া', closed: 'বন্ধ' } as const;
+const f = (Astro.url.searchParams.get('status') ?? 'active') as keyof typeof FILTERS;
+const status = (f in FILTERS ? f : 'active') as TicketStatus | 'active';
+const tickets = await listTickets(env.DB, { status });
+const wanted = Astro.url.searchParams.get('t');
+const open = wanted ? await getTicket(env.DB, wanted) : null;
+---
+
+<Admin title="টিকেট">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">ছাত্র ও শিক্ষক</p>
+      <h1>টিকেট</h1>
+      <p>ছাত্র আর শিক্ষকরা নিজের প্যানেল থেকে যা লিখেছেন। উত্তর দিন, সমাধান হলে বন্ধ করুন।</p>
+    </div>
+  </header>
+  <nav class="tabs" aria-label="ছাঁকুন">
+    {Object.entries(FILTERS).map(([k, label]) => <a href={`?status=${k}`} aria-current={k === status ? 'page' : undefined}>{label}</a>)}
+  </nav>
+  <TicketDesk tickets={tickets} open={open} base={`${base}?status=${status}`.replace(/\?status=active$/, '')} side="office" />
+</Admin>
