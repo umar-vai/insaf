@@ -1,0 +1,51 @@
+name: Deploy Madrasatul Insaf production
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/deploy-production.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: insaf-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out approved production source
+        uses: actions/checkout@v4
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.4
+          cache: npm
+      - name: Verify deployment credential exists
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "::error title=Cloudflare token missing::Configure GitHub Actions secret CLOUDFLARE_API_TOKEN for this repository before deployment."
+            exit 1
+          fi
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Static checks
+        run: npm run check
+      - name: Automated tests
+        run: npm test
+      - name: Build Cloudflare production worker
+        env:
+          CLOUDFLARE_ENV: production
+        run: npm run build
+      - name: Deploy production worker (never migrate database)
+        env:
+          CLOUDFLARE_ENV: production
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx wrangler deploy --env production
