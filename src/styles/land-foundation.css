@@ -409,6 +409,10 @@ body.foundation-theme {
   .foundation-hero h1 {font-size:clamp(2.15rem,3vw,2.85rem);}
   .foundation-hero__goal {right:30px;}
 }
+/* On desktop keep the complete Foundation signboard inside the viewport. */
+@media (min-width:901px) {
+  .foundation-landscape > img {object-position:right center;}
+}
 @media (max-width:900px) {
   .foundation-landscape > img {object-position:65% center;}
 }
