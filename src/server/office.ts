@@ -150,7 +150,10 @@ export function parseBatchForm(form: FormData): Result<BatchInput> {
 
 const BATCH_SELECT = `SELECT b.id, b.course_id AS courseId, c.title AS courseTitle, b.name, b.kind, b.days, b.start_time AS startTime, b.end_time AS endTime,
   b.teacher_id AS teacherId, t.name AS teacherName, t.phone AS teacherPhone, b.room, b.start_date AS startDate, b.status, b.note,
-  (SELECT count(*) FROM offline_enrollments e WHERE e.batch_id = b.id AND e.status = 'active') AS students
+  (SELECT count(*) FROM offline_enrollments e WHERE e.status='active' AND
+     coalesce((SELECT p.to_batch_id FROM academic_promotions p JOIN academic_sessions ses
+       ON ses.id=p.to_session_id AND ses.status='active' WHERE p.enrollment_id=e.id LIMIT 1), e.batch_id)=b.id
+   ) AS students
   FROM offline_batches b JOIN offline_courses c ON c.id = b.course_id LEFT JOIN teachers t ON t.id = b.teacher_id`;
 
 export async function listBatches(db: D1Database, opts: { activeOnly?: boolean; teacherId?: string } = {}): Promise<Batch[]> {
@@ -221,11 +224,16 @@ export type RosterRow = { enrollmentId: string; studentId: string; studentNo: nu
 export async function roster(db: D1Database, batchId: string, ymd: string): Promise<RosterRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT e.id AS enrollmentId, s.id AS studentId, s.student_no AS studentNo, s.name, s.phone, e.roll, a.status
-       FROM offline_enrollments e JOIN offline_students s ON s.id = e.student_id
-       LEFT JOIN offline_attendance a ON a.enrollment_id = e.id AND a.day = ?2
-       WHERE e.batch_id = ?1 AND (e.status = 'active' OR a.id IS NOT NULL)
-       ORDER BY CASE WHEN e.roll GLOB '[0-9]*' THEN CAST(e.roll AS INTEGER) ELSE 99999 END, e.roll, s.name`,
+      `SELECT e.id AS enrollmentId, s.id AS studentId, s.student_no AS studentNo, s.name, s.phone,
+          coalesce(nullif(p.next_roll,''),e.roll) AS roll, a.status
+        FROM offline_enrollments e JOIN offline_students s ON s.id = e.student_id
+        LEFT JOIN academic_promotions p ON p.enrollment_id=e.id AND p.to_session_id=
+            (SELECT id FROM academic_sessions WHERE status='active' LIMIT 1)
+        LEFT JOIN offline_attendance a ON a.enrollment_id=e.id AND a.day=?2 AND a.batch_id=?1
+        WHERE (coalesce(p.to_batch_id,e.batch_id)=?1 AND e.status='active') OR a.id IS NOT NULL
+        ORDER BY CASE WHEN coalesce(nullif(p.next_roll,''),e.roll) GLOB '[0-9]*'
+          THEN CAST(coalesce(nullif(p.next_roll,''),e.roll) AS INTEGER) ELSE 99999 END,
+          coalesce(nullif(p.next_roll,''),e.roll), s.name`,
     )
     .bind(batchId, ymd)
     .all<RosterRow>();
@@ -269,12 +277,16 @@ export async function attendanceMonth(db: D1Database, batchId: string, month: st
     db.prepare('SELECT DISTINCT day FROM offline_attendance WHERE batch_id = ? AND day LIKE ? ORDER BY day').bind(batchId, `${month}-%`),
     db
       .prepare(
-        `SELECT e.id AS enrollmentId, s.id AS studentId, s.name, e.roll,
+        `SELECT e.id AS enrollmentId, s.id AS studentId, s.name, coalesce(nullif(p.next_roll,''),e.roll) AS roll,
            sum(a.status = 'present') AS present, sum(a.status = 'late') AS late, sum(a.status = 'absent') AS absent, sum(a.status = 'leave') AS leave,
            count(a.id) AS days
          FROM offline_enrollments e JOIN offline_students s ON s.id = e.student_id
+         LEFT JOIN academic_promotions p ON p.enrollment_id=e.id AND p.to_session_id =
+           (SELECT id FROM academic_sessions WHERE status='active' LIMIT 1)
          LEFT JOIN offline_attendance a ON a.enrollment_id = e.id AND a.batch_id = ?1 AND a.day LIKE ?2
-         WHERE e.batch_id = ?1 GROUP BY e.id ORDER BY CASE WHEN e.roll GLOB '[0-9]*' THEN CAST(e.roll AS INTEGER) ELSE 99999 END, s.name`,
+         WHERE coalesce(p.to_batch_id,e.batch_id)=?1 OR a.id IS NOT NULL
+         GROUP BY e.id ORDER BY CASE WHEN coalesce(nullif(p.next_roll,''),e.roll) GLOB '[0-9]*'
+           THEN CAST(coalesce(nullif(p.next_roll,''),e.roll) AS INTEGER) ELSE 99999 END, s.name`,
       )
       .bind(batchId, `${month}-%`),
   ]);

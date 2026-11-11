@@ -32,7 +32,12 @@ export async function teacherForEmail(db: D1Database, email: string): Promise<Te
 export async function offlineIdsForEmail(db: D1Database, email: string): Promise<string[]> {
   if (!email) return [];
   const { results } = await db
-    .prepare(`SELECT id FROM offline_students WHERE lower(email) = lower(?) AND status = 'active' ORDER BY student_no`)
+    .prepare(`SELECT s.id FROM offline_students s WHERE s.status='active' AND (
+      lower(s.email) = lower(?1) OR EXISTS (
+        SELECT 1 FROM academic_guardian_links g JOIN students a ON lower(a.email)=lower(g.guardian_email)
+        WHERE g.student_id=s.id AND g.status='active' AND lower(g.guardian_email)=lower(?1) AND a.google_sub IS NOT NULL
+      )
+    ) ORDER BY s.student_no`)
     .bind(email)
     .all<{ id: string }>();
   return results.map((r) => r.id);
@@ -57,7 +62,24 @@ export async function batchForTeacher(db: D1Database, teacherId: string, batchId
 export async function studentPanel(db: D1Database, email: string, today: string) {
   const ids = await offlineIdsForEmail(db, email);
   const people = (await Promise.all(ids.map((id) => getOfflineStudent(db, id, today)))).filter((p): p is NonNullable<typeof p> => Boolean(p));
-  const enrollments = people.flatMap((p) => p.enrollments.map((e) => ({ ...e, studentName: p.student.name })));
+  const raw = people.flatMap((p) => p.enrollments.map((e) => ({ ...e, studentName: p.student.name })));
+  // Promotions override only academic placement in the active session;
+  // every original enrollment and its financial ledger remain unchanged.
+  const placementRows: {enrollmentId:string;batchId:string;nextRoll:string;batchName:string}[] = [];
+  // Read only this signed-in family's placements, not every student in the school.
+  for(let i=0;i<raw.length;i+=90){
+    const ids=raw.slice(i,i+90).map(e=>e.id);
+    if(!ids.length)continue;
+    const placeholders=ids.map(()=>'?').join(',');
+    const {results}=await db.prepare(`SELECT p.enrollment_id AS enrollmentId, p.to_batch_id AS batchId,
+      p.next_roll AS nextRoll, b.name AS batchName
+      FROM academic_promotions p JOIN academic_sessions s ON s.id=p.to_session_id AND s.status='active'
+      JOIN offline_batches b ON b.id=p.to_batch_id WHERE p.enrollment_id IN (${placeholders})`)
+      .bind(...ids).all<{enrollmentId:string;batchId:string;nextRoll:string;batchName:string}>();
+    placementRows.push(...results);
+  }
+  const overrides = new Map(placementRows.map(p => [p.enrollmentId,p]));
+  const enrollments = raw.map(e => { const p=overrides.get(e.id);return p?{...e,batchId:p.batchId,batch:p.batchName,roll:p.nextRoll||e.roll}:e; });
   const batchIds = [...new Set(enrollments.filter((e) => e.status === 'active' && e.batchId).map((e) => e.batchId!))];
   const batches = (await Promise.all(batchIds.map((id) => getBatch(db, id)))).filter((b): b is Batch => Boolean(b));
   return {

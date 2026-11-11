@@ -23,6 +23,7 @@ import {
   voidPayment,
 } from '../../../../server/offline';
 import { localsMayDo } from '../../../../server/staff';
+import { guardianLinks, linkGuardian, parseGuardianForm, relationBn, revokeGuardian } from '../../../../server/school-academic';
 import { listBatches, studentAttendance } from '../../../../server/office';
 import { ATTENDANCE_BN, ITEM_KIND_BN, dayBn, durationBn, METHOD_BN, OFFLINE_ENROLL_STATUS_BN, PAY_METHODS, PLAN_MONTHS, planBn, studentCode, todayDhaka, waNumber } from '../../../../lib/offline';
 import { bnDigits, dateBn, taka } from '../../../../lib/format';
@@ -43,7 +44,17 @@ if (Astro.request.method === 'POST') {
   const mine = current.enrollments.some((e) => e.id === enrollmentId);
   const fail = (e: string) => Astro.redirect(`${here}?error=${e}`, 303);
 
-  if (action === 'profile') {
+  if (action === 'guardian-link') {
+    if (!owner) return new Response('Guardian changes require office full permission', { status: 403 });
+    const checked=parseGuardianForm(form);
+    if(!checked.ok) return fail(checked.error);
+    const r=await linkGuardian(env.DB,actor,id,checked.value);
+    if(!r.ok) return fail(r.error);
+  } else if(action === 'guardian-revoke') {
+    if(!owner) return new Response('Guardian changes require office full permission',{status:403});
+    const ok=await revokeGuardian(env.DB,actor,id,String(form.get('linkId')??''));
+    if(!ok) return fail('guardian');
+  } else if (action === 'profile') {
     const v = parseOfflineStudentForm(form);
     if (!v.ok) return fail(v.error);
     await updateOfflineStudent(env.DB, actor, id, v.value);
@@ -86,11 +97,12 @@ const data = await getOfflineStudent(env.DB, id, today);
 if (!data) return new Response('Not found', { status: 404 });
 const { student, enrollments, payments } = data;
 const hasPassword = student.email ? Boolean(await env.DB.prepare('SELECT 1 AS x FROM students WHERE lower(email) = lower(?) AND password_hash IS NOT NULL').bind(student.email).first()) : false;
-const [courses, batches, attendance, charges] = await Promise.all([
+const [courses, batches, attendance, charges, guardians] = await Promise.all([
   listOfflineCourses(env.DB, false),
   listBatches(env.DB),
   studentAttendance(env.DB, id, 40),
   chargesOfStudent(env.DB, id),
+  guardianLinks(env.DB, id),
 ]);
 const wa = waNumber(student.phone);
 const totals = enrollments.reduce(
@@ -135,6 +147,33 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
   }
   {tooMuch && <p class="note note--bad" role="alert">যত টাকা বাকি আছে তার চেয়ে বেশি লেখা হয়েছে। টাকার অঙ্ক আবার দেখুন।</p>}
 
+  <section class="card" id="guardian-access">
+    <div class="card__head"><h2>অনুমোদিত অভিভাবক অ্যাকাউন্ট</h2></div>
+    <p class="muted">যাঁর Google-এ যাচাইকৃত Gmail অ্যাকাউন্ট আছে এবং পরিচয় অফিস যাচাই করেছে, কেবল তাঁকেই ছাত্র প্যানেলের অনুমতি দেওয়া যাবে। শুধু ফোন নম্বর দিয়ে নতুন অ্যাক্সেস দেওয়া হয় না। অভিভাবক নিজের Gmail দিয়ে লগইন করবেন।</p>
+    {guardians.filter(g=>g.status==='active').length?(
+      <ul class="list">
+        {guardians.filter(g=>g.status==='active').map(g=><li>
+          <span><strong>{g.guardianName}</strong> · {relationBn[g.relation]}<small>{g.guardianEmail}</small></span>
+          {owner && <form method="post" data-confirm={`${g.guardianName}-এর এই শিক্ষার্থীর প্যানেল অ্যাক্সেস বন্ধ করবেন?`}>
+            <input type="hidden" name="action" value="guardian-revoke"/><input type="hidden" name="linkId" value={g.id}/>
+            <button class="button button--sm button--ghost" type="submit">অ্যাক্সেস বন্ধ করুন</button>
+          </form>}
+        </li>)}
+      </ul>
+    ):<p class="muted">এই শিক্ষার্থীর কোনো অনুমোদিত অভিভাবক অ্যাকাউন্ট নেই।</p>}
+    {owner && <details>
+      <summary>অভিভাবককে অনুমতি দিন</summary>
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="guardian-link"/>
+        <label class="field"><span>অভিভাবকের নাম</span><input name="guardianName" required minlength="2" maxlength="120"/></label>
+        <label class="field"><span>যাচাইকৃত Google Gmail</span><input type="email" name="email" required placeholder="parent@gmail.com"/></label>
+        <label class="field"><span>সম্পর্ক</span><select name="relation" required><option value="father">বাবা</option><option value="mother">মা</option><option value="guardian">অভিভাবক</option><option value="other">অন্যান্য</option></select></label>
+        <label class="check wide"><input type="checkbox" name="verifiedRelationship" value="yes" required/> অভিভাবকের পরিচয়, এই শিক্ষার্থীর সঙ্গে সম্পর্ক এবং তথ্য দেখার অনুমতি যাচাই করেছি।</label>
+        <p class="wide muted">অভিভাবককে আগে এই ওয়েবসাইটে Google দিয়ে একবার লগইন করতে হবে। তারপর এই Gmail দিয়ে তাঁকে যুক্ত করা যাবে।</p>
+        <button class="button" type="submit">অভিভাবক অ্যাক্সেস দিন</button>
+      </form>
+    </details>}
+  </section>
   <div class="kpis">
     <div class="kpi"><span class="kpi__icon"><Icon name="receipt" /></span><span class="kpi__label">মোট দেবে</span><strong class="kpi__value">{taka(totals.total)}</strong><span class="kpi__hint">{bnDigits(enrollments.length)}টি ভর্তি</span></div>
     <div class="kpi"><span class="kpi__icon"><Icon name="coins" /></span><span class="kpi__label">দিয়েছে</span><strong class="kpi__value">{taka(totals.paid)}</strong></div>

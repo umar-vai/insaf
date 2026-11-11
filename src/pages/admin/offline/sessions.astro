@@ -1,0 +1,178 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { localsMayDo } from '../../../server/staff';
+import { listBatches } from '../../../server/office';
+import {
+  activateAcademicSession, assignBatchToSession, createAcademicSession, listAcademicSessions,
+  listPromotions, listSessionBatches, parseAcademicSession, promoteEnrollment, promotionCandidates,
+} from '../../../server/school-academic';
+import { dayBn, todayDhaka } from '../../../lib/offline';
+import { bnDigits } from '../../../lib/format';
+
+const actor=Astro.locals.staff!;
+const canManage=localsMayDo(Astro.locals,'academic','full');
+const here='/admin/offline/sessions';
+if (Astro.request.method==='POST') {
+  if (!canManage) return new Response('Owner or academic full access required',{status:403});
+  const form=await Astro.request.formData();
+  const action=String(form.get('action')??'');
+  let ok=false;let error='action';
+  if(action==='create'){
+    const parsed=parseAcademicSession(form);
+    if(parsed.ok){const r=await createAcademicSession(env.DB,actor,parsed.value);ok=r.ok;if(!r.ok)error=r.error;}
+    else error=parsed.error;
+  } else if(action==='activate'){
+    if(form.get('confirm')!=='yes')error='confirm';
+    else {ok=await activateAcademicSession(env.DB,actor,String(form.get('sessionId')??''));error='activate';}
+  } else if(action==='assign'){
+    const r=await assignBatchToSession(env.DB,actor,String(form.get('batchId')??''),String(form.get('sessionId')??''));
+    ok=r.ok;if(!r.ok)error=r.error;
+  } else if(action==='promote'){
+    if(form.get('confirm')!=='yes')error='confirm';
+    else {
+      const r=await promoteEnrollment(env.DB,actor,String(form.get('enrollmentId')??''),
+        String(form.get('batchId')??''),String(form.get('sessionId')??''),String(form.get('roll')??''));
+      ok=r.ok;if(!r.ok)error=r.error;
+    }
+  }
+  return Astro.redirect(`${here}?${ok?'saved=1':`error=${encodeURIComponent(error)}`}&session=${encodeURIComponent(String(form.get('sessionId')??''))}`,303);
+}
+const [sessions,batches,linked]=await Promise.all([listAcademicSessions(env.DB),listBatches(env.DB),listSessionBatches(env.DB)]);
+const requested=Astro.url.searchParams.get('session');
+const selected=sessions.find(s=>s.id===requested)??sessions.find(s=>s.status==='planned')??sessions.find(s=>s.status==='active')??sessions[0];
+const [candidates,promotions]=selected?await Promise.all([promotionCandidates(env.DB,selected.id,300),listPromotions(env.DB,selected.id)]):[[],[]];
+const candidatesById=new Map(candidates.map(c=>[c.enrollmentId,c]));
+const source=Astro.url.searchParams.get('enrollment');
+const target=Astro.url.searchParams.get('target');
+const selectedCandidate=source?candidatesById.get(source):undefined;
+const targetBatch=target?batches.find(b=>b.id===target):undefined;
+const eligible=Boolean(selected && selected.status==='planned' && selectedCandidate && !selectedCandidate.alreadyPromoted &&
+  targetBatch && targetBatch.status==='active' && targetBatch.courseId===selectedCandidate.courseId &&
+  targetBatch.id!==selectedCandidate.sourceBatchId && linked.some(x=>x.batchId===targetBatch.id && x.sessionId===selected.id));
+const nextRoll=String(Astro.url.searchParams.get('roll')??'').slice(0,20);
+const assignedIds=new Set(linked.map(x=>x.batchId));
+const targetBatches=selected?batches.filter(b=>b.status==='active' && linked.some(x=>x.sessionId===selected.id && x.batchId===b.id)):[];
+const errors:Record<string,string>={
+ name:'সেশনের নাম সঠিকভাবে দিন।',dates:'শুরু ও শেষ তারিখ সঠিকভাবে দিন।',duplicate:'এই নামে সেশন ইতিমধ্যে আছে।',
+ invalid:'চালু ব্যাচ ও সঠিক সেশন বাছুন।',used:'এই ব্যাচে প্রমোশন আছে; সেশন বদলানো যাবে না।',
+ confirm:'অনুমোদনের টিক দিন।',ineligible:'এই ছাত্রকে বাছাই করা ব্যাচে প্রমোশন করা যাচ্ছে না।',
+ already:'এই সেশনে ছাত্রটির প্রমোশন আগেই হয়েছে।',roll:'রোল সর্বোচ্চ ২০ অক্ষর দিন।',activate:'সেশন চালু করা যায়নি।',
+ action:'কাজটি করা যায়নি।'
+};
+---
+<Admin title="সেশন ও প্রমোশন">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">একাডেমিক ব্যবস্থাপনা</p>
+      <h1>শিক্ষাবর্ষ, ব্যাচ ও প্রমোশন</h1>
+      <p>পরবর্তী সেশন আগে পরিকল্পনা করুন, ব্যাচ যুক্ত করুন, ছাত্রদের তালিকা দেখে প্রমোশন অনুমোদন করুন। কোনো পুরোনো ফি, রসিদ বা ভর্তি পরিবর্তন হয় না।</p>
+    </div>
+  </header>
+  {Astro.url.searchParams.has('error') && <p class="note note--bad" role="alert">{errors[Astro.url.searchParams.get('error')??'']??'কাজটি করা যায়নি।'}</p>}
+  {sessions.length===0 && <p class="note">এখন কোনো একাডেমিক সেশন নেই। নিচে প্রথম সেশন তৈরি করুন। পুরোনো ক্লাস, ভর্তি ও ফি ঠিক যেমন ছিল তেমনই থাকবে।</p>}
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>সব শিক্ষাবর্ষ</h2></div>
+      {sessions.length===0?<p class="muted">এখনো কোনো সেশন তৈরি হয়নি।</p>:(
+        <ul class="list">
+          {sessions.map(s=><li>
+            <div>
+              <a href={`?session=${encodeURIComponent(s.id)}`}><strong>{s.name}</strong></a>
+              <small>{dayBn(s.startsOn)} – {dayBn(s.endsOn)} · {s.status==='active'?'চলমান':s.status==='planned'?'পরিকল্পিত':'পূর্ববর্তী'}</small>
+            </div>
+            {canManage && s.status==='planned' && <form method="post" data-confirm={`${s.name} চলমান সেশন করবেন? আগের চলমান সেশন সংরক্ষিত ইতিহাসে চলে যাবে।`}>
+              <input type="hidden" name="action" value="activate"/><input type="hidden" name="sessionId" value={s.id}/>
+              <input type="hidden" name="confirm" value="yes"/>
+              <button type="submit" class="button button--sm button--ghost">চালু করুন</button>
+            </form>}
+          </li>)}
+        </ul>
+      )}
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>নতুন শিক্ষাবর্ষ তৈরি</h2></div>
+      {canManage?<form method="post" class="form-grid">
+        <input type="hidden" name="action" value="create"/>
+        <label class="field wide"><span>সেশনের নাম</span><input name="name" required minlength="2" maxlength="80" placeholder="যেমন ২০২৭ শিক্ষাবর্ষ"/></label>
+        <label class="field"><span>শুরু</span><input name="startsOn" type="date" required value={`${Number(todayDhaka().slice(0,4))+1}-01-01`}/></label>
+        <label class="field"><span>শেষ</span><input name="endsOn" type="date" required value={`${Number(todayDhaka().slice(0,4))+1}-12-31`}/></label>
+        <button class="button">সেশন তৈরি করুন</button>
+      </form>:<p class="muted">শুধু Academic Full অনুমতিপ্রাপ্ত অ্যাডমিন নতুন সেশন তৈরি করতে পারবেন।</p>}
+    </section>
+  </div>
+  {selected && <>
+    <section class="card section-block" id="assign">
+      <div class="card__head"><h2>{selected.name}: ব্যাচ নির্ধারণ</h2><span class="pill pill--info">{bnDigits(linked.filter(x=>x.sessionId===selected.id).length)}টি ব্যাচ</span></div>
+      {canManage && selected.status!=='archived' && (
+        <form method="post" class="form-grid">
+          <input type="hidden" name="action" value="assign"/><input type="hidden" name="sessionId" value={selected.id}/>
+          <label class="field wide"><span>সেশনে একটি চালু ব্যাচ যুক্ত করুন</span>
+            <select name="batchId" required><option value="">ব্যাচ নির্বাচন করুন</option>
+              {batches.filter(b=>b.status==='active' && !assignedIds.has(b.id)).map(b=><option value={b.id}>{b.courseTitle} — {b.name}</option>)}
+            </select>
+          </label>
+          <p class="wide muted">যে ব্যাচ একবার প্রমোশনে ব্যবহৃত হয়েছে, তার সেশন বদলানো যাবে না। নতুন শিক্ষাবর্ষের জন্য আলাদা ব্যাচ তৈরি করুন।</p>
+          <button class="button">ব্যাচ যুক্ত করুন</button>
+        </form>
+      )}
+      {linked.filter(x=>x.sessionId===selected.id).length?(
+        <ul class="list">{linked.filter(x=>x.sessionId===selected.id).map(b=><li>
+          <span>{b.courseTitle} · <strong>{b.batchName}</strong></span><small>{b.status==='active'?'চালু':'বন্ধ'}</small>
+        </li>)}</ul>
+      ):<p class="muted">এখনো কোনো ব্যাচ যুক্ত হয়নি। আগে <a href="/admin/offline/batches?new=1#new">নতুন ব্যাচ</a> তৈরি করে এখানে নির্বাচন করুন।</p>}
+    </section>
+    <section class="card section-block" id="promotions">
+      <div class="card__head"><h2>প্রমোশন — {selected.name}</h2></div>
+      <p class="muted">প্রমোশনের তালিকা আগে দেখুন। নতুন সেশন 'পরিকল্পিত' থাকতেই প্রমোশন রেকর্ড করুন। সেশন চালু হলে শিক্ষক ও শিক্ষার্থী প্যানেলে নতুন ব্যাচ দেখা যাবে। ফি, পূর্ববর্তী ভর্তি এবং রসিদ অক্ষত থাকবে।</p>
+      {canManage && selected.status==='planned' && targetBatches.length>0 && (
+        <form method="get" action={here} class="form-grid">
+          <input type="hidden" name="session" value={selected.id}/>
+          <label class="field wide"><span>শিক্ষার্থী ও চলমান ভর্তি (সর্বোচ্চ প্রথম ৩০০ জন)</span>
+            <select name="enrollment" required><option value="">একজন নির্বাচন করুন</option>
+            {candidates.filter(c=>!c.alreadyPromoted).map(c=><option value={c.enrollmentId} selected={source===c.enrollmentId}>{c.studentName} (MI-{c.studentNo??'?'}) — {c.courseTitle} · {c.sourceBatchName}</option>)}
+            </select>
+          </label>
+          <label class="field wide"><span>পরবর্তী ব্যাচ (শুধু একই কোর্স অনুমোদিত)</span>
+            <select name="target" required><option value="">ব্যাচ নির্বাচন করুন</option>
+            {targetBatches.map(b=><option value={b.id} selected={target===b.id}>{b.courseTitle} — {b.name}</option>)}</select>
+          </label>
+          <label class="field"><span>নতুন রোল (ঐচ্ছিক)</span><input name="roll" maxlength="20" value={nextRoll}/></label>
+          <button class="button button--ghost"><Icon name="search"/> আগে প্রিভিউ দেখুন</button>
+        </form>
+      )}
+      {source && target && (
+        eligible?<div class="preview">
+          <h3>প্রমোশন নিশ্চিত করার আগে যাচাই করুন</h3>
+          <p><strong>{selectedCandidate!.studentName}</strong> · {selectedCandidate!.courseTitle}</p>
+          <p>{selectedCandidate!.sourceBatchName} → {targetBatch!.name} ({selected.name})</p>
+          <p class="muted">এই কাজ পূর্ববর্তী ফি বা হাজিরা মুছবে না। পরিকল্পিত সেশন চালু করার পরে নতুন ক্লাসে ছাত্রটি দেখা যাবে।</p>
+          <form method="post" data-confirm="এই ছাত্রের প্রমোশন রেকর্ড করবেন?">
+            <input type="hidden" name="action" value="promote"/>
+            <input type="hidden" name="enrollmentId" value={selectedCandidate!.enrollmentId}/>
+            <input type="hidden" name="batchId" value={targetBatch!.id}/>
+            <input type="hidden" name="sessionId" value={selected.id}/>
+            <input type="hidden" name="roll" value={nextRoll}/>
+            <label class="check"><input type="checkbox" name="confirm" value="yes" required/> যাচাই করেছি; প্রমোশন সংরক্ষণ করুন</label>
+            <button class="button">প্রমোশন সম্পন্ন করুন</button>
+          </form>
+        </div>:<p class="note note--bad">ব্যাচ ও কোর্স মিলছে না, ছাত্রটি আগেই প্রমোট হয়েছে, অথবা সেশন পরিকল্পিত নয়। নতুন করে বাছুন।</p>
+      )}
+      <h3>এই সেশনের প্রমোশন তালিকা</h3>
+      {promotions.length?(
+        <div class="table-wrap"><table><thead><tr><th>শিক্ষার্থী</th><th>কোর্স</th><th>আগের ব্যাচ</th><th>নতুন ব্যাচ</th></tr></thead>
+        <tbody>{promotions.map(p=><tr><td><a href={`/admin/offline/students/${p.studentId}`}>{p.studentName} (MI-{p.studentNo??'?'})</a></td><td>{p.courseTitle}</td><td>{p.fromBatchName}</td><td>{p.toBatchName}</td></tr>)}</tbody></table></div>
+      ):<p class="muted">এখনো কাউকে প্রমোট করা হয়নি।</p>}
+    </section>
+  </>}
+</Admin>
+<style>
+.section-block { margin-top:var(--space-5); }
+.preview { border:1px solid var(--leaf-500); border-radius:var(--radius-lg); padding:var(--space-5); margin-block:var(--space-5); background:var(--mint-50);}
+.preview h3 { margin-top:0; }
+.preview form { display:grid; gap:var(--space-3); justify-items:start; }
+.preview p { margin:var(--space-2) 0; }
+.table-wrap { overflow:auto; }
+</style>
