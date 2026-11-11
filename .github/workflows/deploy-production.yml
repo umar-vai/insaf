@@ -60,3 +60,4 @@ jobs:
 # Production deploy: integrated Tamrin Foundation hero image e5673ea44f3ac5cc54391551209ef31606c8ced4
 # Deploy wide Tamrin land hero and compact desktop design: e549f509f2227a700be08948a6ef9aa9b6e02609
 # Final release: whole Tamrin Foundation signboard visible at desktop bd6aa757d5ea0bdbb101dff7f7b5b600e6fa6c55
+# Deploy mobile signboard crop alignment fix (PR13): a5495122c05a71c765fe0f9dc00c866f3365f450
