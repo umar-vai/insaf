@@ -56,4 +56,5 @@ Confirm the exact old paid plugin name/version (purchase receipt, module screens
 ### Implementation status
 - [x] 2026-11-12: inspected repo modules, portals, permission mapping, D1 schema and tests; made provisional public reference comparison.
 - [ ] Navigation search improvement: tracked as a companion source change in this branch pending CI.
-- [ ] Later phases: not yet implemented; each requires separate scoped PR and test gate.
+- [x] Phase 2: additive academic session/batch placement, preview/confirm same-course promotions, audited verified guardian links (see docs/school-erp-academic-phase2.md).
+- [ ] Later phases: marks/gradebook, homework, library, cross-course enrollment promotion, bulk fees, certificates; each requires separate scoped PR and test gate.
