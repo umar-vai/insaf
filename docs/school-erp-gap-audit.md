@@ -84,7 +84,7 @@ The new admin menu entry is **মাদরাসা → একাডেমিক
 - Staff with Academic Full role configures a gradebook (total marks and *institution-approved* pass marks), explicitly confirms the current exam roster snapshot, and publishes only after **every** enrolled examinee has marks or is marked absent. Publishing locks the gradebook; already published exams cannot be cancelled. Teachers assigned to the exam's batch can record or correct draft marks only.
 - No letter grades are automatically assumed. Reports show obtained/maximum, percent, and pass/fail based on admin-selected passing marks. If an A+/A grade policy is required, approve a separate grading-policy configuration before using official grade labels.
 - Student and explicitly authorized guardian accounts can see only their own **published** results at `/account/offline/results`; browser print/PDF is supported. Unpublished exam marks never appear in the student portal. The admin result index and individual gradebook live under `/admin/offline/results` and `/admin/offline/gradebook/:examId`.
-- Staff must confirm the roster snapshot carefully, particularly for exams created before academic-session promotions. A first-release gradebook locks that roster at configuration time rather than dynamically adding later enrollees.
+- Staff must confirm the roster snapshot carefully, particularly for exams created before academic-session promotions. A first-release gradebook locks that roster and pass-mark policy at configuration time rather than dynamically adding later enrollees. Up to 1,000 examinees can be configured in one exam; larger cohorts need a pagination/bulk design.
 - Cancelled or already published exams reject edit/publish operations.
 
 ### Homework and lesson plan workflow
