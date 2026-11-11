@@ -55,6 +55,23 @@ Confirm the exact old paid plugin name/version (purchase receipt, module screens
 
 ### Implementation status
 - [x] 2026-11-12: inspected repo modules, portals, permission mapping, D1 schema and tests; made provisional public reference comparison.
-- [ ] Navigation search improvement: tracked as a companion source change in this branch pending CI.
-- [x] Phase 2: additive academic session/batch placement, preview/confirm same-course promotions, audited verified guardian links (see docs/school-erp-academic-phase2.md).
+- [x] Phase 1 navigation search: tested and deployed in PR #19.
+- [x] Phase 2: additive academic session/batch placement, preview/confirm same-course promotions, audited verified guardian links (see the Phase 2 operations section below).
 - [ ] Later phases: marks/gradebook, homework, library, cross-course enrollment promotion, bulk fees, certificates; each requires separate scoped PR and test gate.
+
+
+## Phase 2 operations, privacy and release (2026-11-12)
+
+The new admin menu entry is **মাদরাসা → একাডেমিক → সেশন ও প্রমোশন** (`/admin/offline/sessions`).
+
+- Create a session with a name and start/end dates. Only one session can be active.
+- Create a new batch in **ক্লাস ও রুটিন** and associate it with a planned session.
+- Preview an active student's current enrollment, select an active target batch of the same course, then confirm the promotion. The record is in `academic_promotions`. Only when the planned session is activated does the teacher roster and student dashboard use that new placement.
+- Original `offline_enrollments`, fee terms, payment records, receipts, and historic attendance are never rewritten by a promotion. Attendance in a previous batch remains accessible in historic reporting.
+- A promotion between different fee-bearing courses is **not** automatic because it requires a fresh enrollment and signed fee policy.
+- Student/guardian integration: the guardian signs in to the site once via Google, then Office Full staff verifies their relationship, explicitly confirms approval and links the verified Gmail on that student's admin page. The student portal only reads active linked students; links can be revoked. There is no blind access by phone alone.
+- Only Academic Full may create/activate sessions or promote students; only Office Full may link/revoke guardians. These operations are logged in `admin_events`.
+- Four additive tables with a new D1 migration `0001_academic_sessions.sql`: academic_sessions, academic_batch_sessions, academic_promotions and academic_guardian_links. Existing fee and student records are untouched.
+- The production GitHub Actions workflow applies the migration only on a merge commit explicitly marked `[approve-insaf-academic-0001]`; Wrangler backs up D1 when applying. Before the release, inspect `d1_migrations` and preserve a Time Travel bookmark. Do not restore D1 automatically.
+- Authenticated smoke tests must be carried out by an authorised school admin; do not pull live pupil PII into the coding context.
+- For the first release the promotion preview lists up to 300 active enrollments, and supports same-course batch changes only. Paginated search, cross-course fee renewals, and bulk promotions are later iterations.
