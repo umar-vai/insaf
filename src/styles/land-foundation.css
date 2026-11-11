@@ -313,3 +313,77 @@ body.foundation-theme {
     margin-left:9px;
   }
 }
+
+/* On the land-project page, center mobile campaign messaging without
+   changing the desktop presentation or payment/bank-detail forms. */
+@media (max-width:900px) {
+  .foundation-theme .foundation-hero__copy,
+  .foundation-theme .foundation-donate__copy,
+  .foundation-theme .foundation-family__card,
+  .foundation-theme .foundation-founder__copy,
+  .foundation-theme .why__card,
+  .foundation-theme .story > [data-reveal]:not(.story__img),
+  .foundation-theme .members > div:first-child,
+  .foundation-theme .timeline li,
+  .foundation-theme .final > div:first-child,
+  .foundation-theme .head.head--start {
+    text-align:center;
+  }
+
+  .foundation-theme .foundation-hero h1,
+  .foundation-theme .foundation-hero__lead,
+  .foundation-theme .foundation-donate__copy h2,
+  .foundation-theme .foundation-donate__copy > p,
+  .foundation-theme .foundation-founder__copy h2,
+  .foundation-theme .foundation-founder__copy > p,
+  .foundation-theme .story .lead-text,
+  .foundation-theme .head.head--start {
+    margin-inline:auto;
+  }
+
+  .foundation-theme .foundation-hero h1 .foundation-hero__first-line {
+    margin-inline:auto;
+  }
+  .foundation-theme .foundation-hero__eyebrow {
+    justify-content:center;
+  }
+  .foundation-theme .foundation-hero__actions,
+  .foundation-theme .foundation-hero__micro {
+    justify-content:center;
+  }
+  .foundation-theme .foundation-hero__micro > span {
+    justify-content:center;
+  }
+  .foundation-theme .foundation-donate__progress {
+    margin-inline:auto;
+  }
+  .foundation-theme .story .ticks {
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding-left:0;
+    text-align:center;
+  }
+  .foundation-theme .story .ticks li {
+    justify-content:center;
+  }
+  .foundation-theme .foundation-founder__name {
+    border-left:0;
+    border-top:3px solid #78c3da;
+    padding:14px 0 0;
+    width:fit-content;
+    max-width:100%;
+    margin-inline:auto;
+  }
+  .foundation-theme .progress-grid .card__title,
+  .foundation-theme .progress-grid .card > .muted,
+  .foundation-theme .faq details > summary,
+  .foundation-theme .faq details > p,
+  .foundation-theme .final .ask {
+    text-align:center;
+  }
+  .foundation-theme .members__side {
+    justify-items:center;
+    text-align:center;
+  }
+}
