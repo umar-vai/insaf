@@ -6,7 +6,7 @@ import {
   parseGuardianForm, promoteEnrollment, promotionCandidates, revokeGuardian,
 } from '../src/server/school-academic';
 import { offlineIdsForEmail, studentPanel } from '../src/server/panels';
-import { roster } from '../src/server/office';
+import { roster, attendanceMonth } from '../src/server/office';
 import { adminModule } from '../src/server/staff';
 
 const db=env.DB;
@@ -63,10 +63,14 @@ describe('academic promotion does not alter fee/attendance history',()=>{
     // Before activation, the old batch continues to appear.
     expect((await roster(db,'old','2026-11-11')).map(r=>r.studentId)).toEqual(['s1']);
     expect((await studentPanel(db,'student@example.org','2026-11-11')).batches.map(b=>b.id)).toEqual(['old']);
+    await db.prepare("INSERT INTO offline_attendance(id,batch_id,enrollment_id,day,status,marked_by) VALUES('att1','old','e1','2026-11-11','present','teacher@example.org')").run();
     await activateAcademicSession(db,actor,s.value);
     expect((await roster(db,'old','2027-01-10')).length).toBe(0);
+    expect((await roster(db,'old','2026-11-11')).map(r=>r.status)).toEqual(['present']);
     expect((await roster(db,'next','2027-01-10')).map(r=>[r.studentId,r.roll])).toEqual([['s1','3']]);
     expect((await studentPanel(db,'student@example.org','2027-01-10')).batches.map(b=>b.id)).toEqual(['next']);
+    expect((await attendanceMonth(db,'old','2026-11')).rows[0]?.present).toBe(1);
+    expect((await attendanceMonth(db,'next','2027-01')).rows.map(r=>r.studentId)).toEqual(['s1']);
     const finance=await db.prepare('SELECT fee_minor AS fee,batch_id AS batchId,roll FROM offline_enrollments WHERE id=?').bind('e1').first<{fee:number;batchId:string;roll:string}>();
     expect(finance).toEqual({fee:120000,batchId:'old',roll:'7'});
     expect((await db.prepare('SELECT count(*) AS n FROM offline_payments').first<{n:number}>())!.n).toBe(0);
