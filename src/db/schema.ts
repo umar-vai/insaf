@@ -732,3 +732,51 @@ export const siteActivity = sqliteTable(
   },
   (t) => [index('site_activity_day_idx').on(t.day, t.studentId)],
 );
+
+
+// ---- Academic sessions, promotions and verified guardian access (2026-11) ----
+export const academicSessions = sqliteTable('academic_sessions', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  startsOn: text('starts_on').notNull(),
+  endsOn: text('ends_on').notNull(),
+  status: text('status', { enum: ['planned','active','archived'] }).notNull().default('planned'),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [uniqueIndex('academic_sessions_single_active_idx').on(t.status).where(sql`${t.status} = 'active'`)]);
+export const academicBatchSessions = sqliteTable('academic_batch_sessions', {
+  batchId: text('batch_id').primaryKey().references(() => offlineBatches.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id').notNull().references(() => academicSessions.id),
+  addedBy: text('added_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [index('academic_batch_sessions_session_idx').on(t.sessionId)]);
+export const academicPromotions = sqliteTable('academic_promotions', {
+  id: text('id').primaryKey(),
+  enrollmentId: text('enrollment_id').notNull().references(() => offlineEnrollments.id),
+  studentId: text('student_id').notNull().references(() => offlineStudents.id),
+  fromBatchId: text('from_batch_id').references(() => offlineBatches.id),
+  toBatchId: text('to_batch_id').notNull().references(() => offlineBatches.id),
+  toSessionId: text('to_session_id').notNull().references(() => academicSessions.id),
+  nextRoll: text('next_roll').notNull().default(''),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [
+  uniqueIndex('academic_promotions_enrollment_session_unique').on(t.enrollmentId,t.toSessionId),
+  index('academic_promotions_student_idx').on(t.studentId,t.toSessionId),
+  index('academic_promotions_batch_idx').on(t.toBatchId,t.toSessionId),
+]);
+export const academicGuardianLinks = sqliteTable('academic_guardian_links', {
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull().references(() => offlineStudents.id, { onDelete: 'cascade' }),
+  guardianEmail: text('guardian_email').notNull(),
+  guardianName: text('guardian_name').notNull(),
+  relation: text('relation', { enum: ['father','mother','guardian','other'] }).notNull(),
+  status: text('status', { enum: ['active','revoked'] }).notNull().default('active'),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+  revokedBy: text('revoked_by'),
+  revokedAt: text('revoked_at'),
+}, (t) => [
+  uniqueIndex('academic_guardian_student_email_idx').on(t.studentId,sql`lower(${t.guardianEmail})`),
+  index('academic_guardian_email_status_idx').on(sql`lower(${t.guardianEmail})`,t.status),
+]);

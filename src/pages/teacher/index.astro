@@ -8,11 +8,13 @@ import { nextClass, officeNotices, teacherSession } from '../../server/panels';
 import { DAY_BN, DAY_SHORT_BN, dayBn, parseDays, timeBn, todayDhaka, weekday } from '../../lib/offline';
 import { bnDigits, dateBn, taka } from '../../lib/format';
 import { examLine, masterRoutine, teacherExams } from '../../server/academic';
+import { listAcademicSessions } from '../../server/school-academic';
 
 Astro.response.headers.set('Cache-Control', 'no-store');
 const { me, teacher } = await teacherSession(env.DB, env, Astro.request.headers.get('Cookie'));
 if (!me) return Astro.redirect('/account?return=%2Fteacher', 303);
 const today = todayDhaka();
+const currentAcademicSession=(await listAcademicSessions(env.DB)).find(s=>s.status==='active');
 const batches = teacher ? await listBatches(env.DB, { teacherId: teacher.id, activeOnly: true }) : [];
 const [todays, notices, exams, routineFile] = teacher
   ? await Promise.all([
@@ -40,6 +42,7 @@ const students = batches.reduce((a, b) => a + b.students, 0);
             <p class="eyebrow">{DAY_BN[weekday(today)]}, {dayBn(today)}</p>
             <h1>আসসালামু আলাইকুম, {teacher.name}</h1>
             <p>{teacher.subject}</p>
+            {currentAcademicSession && <p>বর্তমান শিক্ষাবর্ষ: {currentAcademicSession.name}</p>}
           </div>
         </header>
 

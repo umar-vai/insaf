@@ -9,12 +9,14 @@ import { listMaterials, nextClass, officeNotices, studentPanel } from '../../../
 import { DAY_BN, dayBn, parseDays, studentCode, timeBn, todayDhaka, waNumber, weekday } from '../../../lib/offline';
 import { bnDigits, dateBn, taka } from '../../../lib/format';
 import { batchTeachers, examLine, listExams, masterRoutine } from '../../../server/academic';
+import { listAcademicSessions } from '../../../server/school-academic';
 
 Astro.response.headers.set('Cache-Control', 'no-store');
 const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
 if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline', 303);
 const today = todayDhaka();
 const panel = await studentPanel(env.DB, me.email, today);
+const currentAcademicSession=(await listAcademicSessions(env.DB)).find(s=>s.status==='active');
 const batchIds = panel.batches.map((b) => b.id);
 const offlineIds = panel.people.map((p) => p.student.id);
 const [notices, materials, subjectTeachers, exams, routineFile] = await Promise.all([
@@ -41,6 +43,7 @@ const totals = active.reduce((a, e) => ({ paid: a.paid + e.ledger.paidMinor, due
             <p class="eyebrow">আমার মাদরাসা</p>
             <h1>{panel.people.map((p) => p.student.name).join(', ')}</h1>
             <p>{panel.people.map((p) => <span class="id">{studentCode(p.student.studentNo)}</span>)}</p>
+            {currentAcademicSession && <p class="muted">বর্তমান শিক্ষাবর্ষ: {currentAcademicSession.name}</p>}
           </div>
         </header>
 
