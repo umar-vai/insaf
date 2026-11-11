@@ -44,11 +44,12 @@ export async function configureAssessment(db:D1Database,actor:string,examId:stri
  if(!confirm)return fail('confirm');
  const x=await examAssessment(db,examId);
  if(!x||x.examStatus!=='scheduled'||x.status==='published')return fail('exam');
- if(x.status&&x.completed)return fail('already_marked');
+ if(x.status)return fail('already_configured');
  // Save the list at configuration time, explicitly shown to staff for review before marks.
  const rows=await roster(db,x.batchId,x.examDate);
  const ids=[...new Set(rows.filter(r=>r.studentId).map(r=>r.enrollmentId))];
  if(!ids.length)return fail('empty_roster');
+ if(ids.length>1000)return fail('roster_too_large');
  const statements=[
    db.prepare(`INSERT INTO assessment_policies(exam_id,max_marks,pass_marks,status,updated_by) VALUES(?,?,?,'draft',?)
     ON CONFLICT(exam_id) DO UPDATE SET max_marks=excluded.max_marks,pass_marks=excluded.pass_marks,updated_by=excluded.updated_by
