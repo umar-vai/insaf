@@ -239,6 +239,9 @@ body.foundation-theme {
 
 /* The photo and verified Foundation logo share one fixed SVG viewBox:
    scaling or cropping cannot reveal the retired signboard identity. */
+.foundation-landscape {
+  background: #b5dbe4 url('/images/land-campaign-scene.webp') center center / cover no-repeat;
+}
 .foundation-landscape__scene {
   display:block;
   position:absolute;
