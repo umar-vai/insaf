@@ -71,6 +71,17 @@ describe('academic promotion does not alter fee/attendance history',()=>{
     expect((await studentPanel(db,'student@example.org','2027-01-10')).batches.map(b=>b.id)).toEqual(['next']);
     expect((await attendanceMonth(db,'old','2026-11')).rows[0]?.present).toBe(1);
     expect((await attendanceMonth(db,'next','2027-01')).rows.map(r=>r.studentId)).toEqual(['s1']);
+    // Next session's source must use the active academic placement, not legacy enrollment.batch_id.
+    await db.prepare("INSERT INTO offline_batches(id,course_id,name) VALUES('next2','co1','Third Class')").run();
+    const later=await createAcademicSession(db,actor,{name:'2028',startsOn:'2028-01-01',endsOn:'2028-12-31'});
+    if(!later.ok)throw Error('missing third session');
+    expect((await assignBatchToSession(db,actor,'next2',later.value)).ok).toBe(true);
+    expect((await promoteEnrollment(db,actor,'e1','next',later.value,'4')).ok).toBe(false);
+    expect((await promotionCandidates(db,later.value))[0]?.sourceBatchName).toBe('New Class');
+    expect((await promoteEnrollment(db,actor,'e1','next2',later.value,'4')).ok).toBe(true);
+    expect((await listPromotions(db,later.value))[0]?.fromBatchName).toBe('New Class');
+    await activateAcademicSession(db,actor,later.value);
+    expect((await studentPanel(db,'student@example.org','2028-01-12')).batches.map(b=>b.id)).toEqual(['next2']);
     const finance=await db.prepare('SELECT fee_minor AS fee,batch_id AS batchId,roll FROM offline_enrollments WHERE id=?').bind('e1').first<{fee:number;batchId:string;roll:string}>();
     expect(finance).toEqual({fee:120000,batchId:'old',roll:'7'});
     expect((await db.prepare('SELECT count(*) AS n FROM offline_payments').first<{n:number}>())!.n).toBe(0);
