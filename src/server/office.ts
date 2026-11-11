@@ -230,7 +230,7 @@ export async function roster(db: D1Database, batchId: string, ymd: string): Prom
         LEFT JOIN academic_promotions p ON p.enrollment_id=e.id AND p.to_session_id=
             (SELECT id FROM academic_sessions WHERE status='active' LIMIT 1)
         LEFT JOIN offline_attendance a ON a.enrollment_id=e.id AND a.day=?2 AND a.batch_id=?1
-        WHERE coalesce(p.to_batch_id,e.batch_id)=?1 AND (e.status='active' OR a.id IS NOT NULL)
+        WHERE (coalesce(p.to_batch_id,e.batch_id)=?1 AND e.status='active') OR a.id IS NOT NULL
         ORDER BY CASE WHEN coalesce(nullif(p.next_roll,''),e.roll) GLOB '[0-9]*'
           THEN CAST(coalesce(nullif(p.next_roll,''),e.roll) AS INTEGER) ELSE 99999 END,
           coalesce(nullif(p.next_roll,''),e.roll), s.name`,
@@ -277,12 +277,16 @@ export async function attendanceMonth(db: D1Database, batchId: string, month: st
     db.prepare('SELECT DISTINCT day FROM offline_attendance WHERE batch_id = ? AND day LIKE ? ORDER BY day').bind(batchId, `${month}-%`),
     db
       .prepare(
-        `SELECT e.id AS enrollmentId, s.id AS studentId, s.name, e.roll,
+        `SELECT e.id AS enrollmentId, s.id AS studentId, s.name, coalesce(nullif(p.next_roll,''),e.roll) AS roll,
            sum(a.status = 'present') AS present, sum(a.status = 'late') AS late, sum(a.status = 'absent') AS absent, sum(a.status = 'leave') AS leave,
            count(a.id) AS days
          FROM offline_enrollments e JOIN offline_students s ON s.id = e.student_id
+         LEFT JOIN academic_promotions p ON p.enrollment_id=e.id AND p.to_session_id =
+           (SELECT id FROM academic_sessions WHERE status='active' LIMIT 1)
          LEFT JOIN offline_attendance a ON a.enrollment_id = e.id AND a.batch_id = ?1 AND a.day LIKE ?2
-         WHERE e.batch_id = ?1 GROUP BY e.id ORDER BY CASE WHEN e.roll GLOB '[0-9]*' THEN CAST(e.roll AS INTEGER) ELSE 99999 END, s.name`,
+         WHERE coalesce(p.to_batch_id,e.batch_id)=?1 OR a.id IS NOT NULL
+         GROUP BY e.id ORDER BY CASE WHEN coalesce(nullif(p.next_roll,''),e.roll) GLOB '[0-9]*'
+           THEN CAST(coalesce(nullif(p.next_roll,''),e.roll) AS INTEGER) ELSE 99999 END, s.name`,
       )
       .bind(batchId, `${month}-%`),
   ]);
