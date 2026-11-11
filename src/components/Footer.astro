@@ -2,6 +2,8 @@
 import Icon from './Icon.astro';
 import { SITE, whatsappUrl } from '../lib/site';
 import { bnDigits } from '../lib/format';
+interface Props { foundationTheme?: boolean; }
+const { foundationTheme = false } = Astro.props;
 ---
 
 <footer class="footer on-dark">
@@ -13,8 +15,8 @@ import { bnDigits } from '../lib/format';
       <p class="muted">{SITE.tagline}</p>
       <div class="social">
         <a href={SITE.facebook} rel="noopener" aria-label="Facebook"><Icon name="facebook" /></a>
-        <a href={SITE.youtube} rel="noopener" aria-label="YouTube"><Icon name="youtube" /></a>
-        <a href={whatsappUrl()} rel="noopener" aria-label="WhatsApp"><Icon name="whatsapp" /></a>
+        <a href={foundationTheme ? 'https://youtu.be/3Af1wPgcbm0' : SITE.youtube} rel="noopener" aria-label="YouTube"><Icon name="youtube" /></a>
+        {!foundationTheme && <a href={whatsappUrl()} rel="noopener" aria-label="WhatsApp"><Icon name="whatsapp" /></a>}
       </div>
     </div>
 
@@ -24,7 +26,7 @@ import { bnDigits } from '../lib/format';
         <li><a href="/land">জমি ক্রয় প্রজেক্ট</a></li>
         <li><a href="/donate">সকল তহবিল</a></li>
         <li><a href="/zakat">যাকাত ক্যালকুলেটর</a></li>
-        <li><a href="/donate#bank">ব্যাংকে দান</a></li>
+        <li><a href={foundationTheme ? '#foundation-payment-methods' : '/donate#bank'}>{foundationTheme ? 'ফাউন্ডেশনের ব্যাংক ও MFS' : 'ব্যাংকে দান'}</a></li>
       </ul>
     </div>
 
@@ -45,13 +47,23 @@ import { bnDigits } from '../lib/format';
     <div>
       <p class="footer__head">যোগাযোগ</p>
       <ul class="contact">
-        <li><Icon name="phone" size={18} /><a href={`tel:${SITE.phone.tel}`}>{bnDigits(SITE.phone.display)}</a></li>
-        <li><Icon name="mail" size={18} /><a href={`mailto:${SITE.email}`}>{SITE.email}</a></li>
-        <li><Icon name="pin" size={18} /><a href={SITE.mapUrl} rel="noopener">{SITE.address}</a></li>
+        {foundationTheme ? (
+          <>
+            <li><Icon name="phone" size={18} /><a href="tel:+8801334950777">01334950777 (হটলাইন)</a></li>
+            <li><Icon name="phone" size={18} /><a href="tel:+8801612505599">01612505599 (যোগাযোগ)</a></li>
+            <li><Icon name="pin" size={18} />27/A/3, Moneshwar 1st Lane, Hazaribagh, Dhaka-1209</li>
+          </>
+        ) : (
+          <>
+            <li><Icon name="phone" size={18} /><a href={`tel:${SITE.phone.tel}`}>{bnDigits(SITE.phone.display)}</a></li>
+            <li><Icon name="mail" size={18} /><a href={`mailto:${SITE.email}`}>{SITE.email}</a></li>
+            <li><Icon name="pin" size={18} /><a href={SITE.mapUrl} rel="noopener">{SITE.address}</a></li>
+          </>
+        )}
       </ul>
       <p class="footer__head footer__head--pay">পেমেন্ট করা যায়</p>
       <ul class="pay">
-        {SITE.payments.map((p) => <li>{p}</li>)}
+        {(foundationTheme ? ['Islami Bank', 'bKash', 'Nagad', 'CellFin'] : SITE.payments).map((p) => <li>{p}</li>)}
       </ul>
     </div>
   </div>
