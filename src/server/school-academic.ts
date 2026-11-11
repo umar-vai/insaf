@@ -66,10 +66,14 @@ export async function assignBatchToSession(db:D1Database,actor:string,batchId:st
 export type PromotionCandidate = { enrollmentId:string; studentId:string; studentName:string; studentNo:number|null; sourceBatchId:string|null; sourceBatchName:string; courseId:string; courseTitle:string; status:string; alreadyPromoted:number };
 export async function promotionCandidates(db:D1Database,toSessionId:string,limit=300):Promise<PromotionCandidate[]> {
  const {results}=await db.prepare(`SELECT e.id AS enrollmentId, e.student_id AS studentId,s.name AS studentName,s.student_no AS studentNo,
- e.batch_id AS sourceBatchId,coalesce(b.name,'ব্যাচ নেই') AS sourceBatchName,e.course_id AS courseId,
+ coalesce(currentPlace.to_batch_id,e.batch_id) AS sourceBatchId,
+ coalesce(bCurrent.name,b.name,'ব্যাচ নেই') AS sourceBatchName,e.course_id AS courseId,
  c.title AS courseTitle,e.status,EXISTS(SELECT 1 FROM academic_promotions p WHERE p.enrollment_id=e.id AND p.to_session_id=?1) AS alreadyPromoted
  FROM offline_enrollments e JOIN offline_students s ON s.id=e.student_id JOIN offline_courses c ON c.id=e.course_id
  LEFT JOIN offline_batches b ON b.id=e.batch_id
+ LEFT JOIN academic_promotions currentPlace ON currentPlace.enrollment_id=e.id AND currentPlace.to_session_id =
+   (SELECT id FROM academic_sessions WHERE status='active' LIMIT 1)
+ LEFT JOIN offline_batches bCurrent ON bCurrent.id=currentPlace.to_batch_id
  WHERE e.status='active' AND s.status='active' ORDER BY s.student_no,e.start_date DESC LIMIT ?2`)
  .bind(toSessionId,Math.max(1,Math.min(1000,limit))).all<PromotionCandidate>();
  return results;
@@ -90,11 +94,14 @@ export async function listPromotions(db:D1Database,sessionId:string):Promise<Aca
 export async function promoteEnrollment(db:D1Database,actor:string,enrollmentId:string,toBatchId:string,toSessionId:string,nextRoll:string):Promise<Result<string>> {
  const roll=nextRoll.trim();
  if(roll.length>20||!/^[-\w\u0980-\u09ff ]*$/.test(roll))return{ok:false,error:'roll'};
- const row=await db.prepare(`SELECT e.student_id AS studentId,e.course_id AS courseId,e.batch_id AS fromBatchId,e.status AS enrollmentStatus,
+ const row=await db.prepare(`SELECT e.student_id AS studentId,e.course_id AS courseId,
+ coalesce(currentPlace.to_batch_id,e.batch_id) AS fromBatchId,e.status AS enrollmentStatus,
  s.status AS studentStatus,b.course_id AS targetCourse,b.status AS targetStatus,
  bs.session_id AS targetSession,ss.status AS sessionStatus,
  (SELECT count(*) FROM academic_promotions p WHERE p.enrollment_id=e.id AND p.to_session_id=?3) AS duplicate
  FROM offline_enrollments e JOIN offline_students s ON s.id=e.student_id
+ LEFT JOIN academic_promotions currentPlace ON currentPlace.enrollment_id=e.id AND currentPlace.to_session_id=
+   (SELECT id FROM academic_sessions WHERE status='active' LIMIT 1)
  JOIN offline_batches b ON b.id=?2 LEFT JOIN academic_batch_sessions bs ON bs.batch_id=b.id
  LEFT JOIN academic_sessions ss ON ss.id=bs.session_id WHERE e.id=?1`)
  .bind(enrollmentId,toBatchId,toSessionId).first<{studentId:string;courseId:string;fromBatchId:string|null;enrollmentStatus:string;studentStatus:string;targetCourse:string;targetStatus:string;targetSession:string|null;sessionStatus:string|null;duplicate:number}>();
