@@ -1,0 +1,55 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import { teacherSession, batchForTeacher } from '../../../server/panels';
+import { sameOrigin } from '../../../server/session';
+import { examAssessment, examMarks, recordExamMark, resultLabel } from '../../../server/assessment';
+import { bnDigits } from '../../../lib/format';
+import { dayBn } from '../../../lib/offline';
+Astro.response.headers.set('Cache-Control','no-store');
+const id=Astro.params.id!;
+const here=`/teacher/exam/${encodeURIComponent(id)}`;
+const {me,teacher}=await teacherSession(env.DB,env,Astro.request.headers.get('Cookie'));
+if(!me)return Astro.redirect(`/account?return=${encodeURIComponent(here)}`,303);
+if(!teacher)return new Response('Teacher access only',{status:403});
+const exam=await examAssessment(env.DB,id);
+if(!exam)return new Response('Exam not found',{status:404});
+if(!(await batchForTeacher(env.DB,teacher.id,exam.batchId)))return new Response('Not your exam',{status:403});
+if(Astro.request.method==='POST'){
+ if(!sameOrigin(Astro.request))return new Response('Bad origin',{status:403});
+ const form=await Astro.request.formData();
+ const r=await recordExamMark(env.DB,me.email,id,String(form.get('enrollmentId')??''),
+  form.get('obtained'),form.get('absent')==='yes',form.get('comment'));
+ return Astro.redirect(`${here}?${r.ok?'saved=1':`error=${encodeURIComponent(r.error)}`}`,303);
+}
+const rows=await examMarks(env.DB,id);
+const canEdit=exam.status==='draft'&&exam.examStatus==='scheduled';
+---
+<AccountShell me={me} active="t-home" title="পরীক্ষার নম্বর" mode="teacher">
+ <div class="ui">
+  <header class="page-head"><div>
+   <p class="eyebrow"><a href={`/teacher/batch/${exam.batchId}`}>আমার ব্যাচ</a></p>
+   <h1>{exam.title} — নম্বর প্রদান</h1>
+   <p>{exam.batchName} · {dayBn(exam.examDate)} · {exam.subject}</p>
+  </div></header>
+  {Astro.url.searchParams.has('saved')&&<p class="note note--good">নম্বর সংরক্ষিত হয়েছে।</p>}
+  {Astro.url.searchParams.has('error')&&<p class="note note--bad">নম্বর দেওয়া যায়নি; তালিকা ও সীমা যাচাই করুন।</p>}
+  {!exam.status?<p class="note">অ্যাডমিন পরীক্ষার্থীর তালিকা ও পূর্ণমান নিশ্চিত করলে নম্বর দেওয়া যাবে।</p>:(
+  <section class="card">
+   <h2>পরীক্ষার্থী {bnDigits(rows.length)} জন — পূর্ণমান {bnDigits(exam.maxMarks!)} · পাস {bnDigits(exam.passMarks!)}</h2>
+   {exam.status==='published'&&<p class="note note--good">ফলাফল প্রকাশিত; আর পরিবর্তন করা যাবে না।</p>}
+   <div class="marks">
+    {rows.map(r=><form method="post" class="mark">
+      <input type="hidden" name="enrollmentId" value={r.enrollmentId}/>
+      <div><strong>{r.studentName}</strong><small>রোল {r.roll||'—'} · MI-{r.studentNo??'—'}</small></div>
+      {canEdit?<><label class="field"><span>নম্বর</span><input name="obtained" inputmode="numeric" type="number" min="0" max={exam.maxMarks!} value={r.obtained??''}/></label>
+      <label class="check"><input name="absent" type="checkbox" value="yes" checked={r.attendance==='absent'}/> অনুপস্থিত</label>
+      <label class="field"><span>মন্তব্য</span><input name="comment" maxlength="500" value={r.comment??''}/></label>
+      <button class="button button--sm">সংরক্ষণ</button></>:<span>{r.attendance==='absent'?'অনুপস্থিত':r.obtained===null?'নম্বর বাকি':bnDigits(r.obtained)} · {r.attendance?resultLabel(r.obtained,exam.passMarks!,r.attendance):'অপ্রস্তুত'}</span>}
+    </form>)}
+   </div>
+   <p class="muted">শিক্ষক নম্বর দিতে পারবেন; চূড়ান্ত ফল প্রকাশ করবেন একাডেমিক Full অ্যাডমিন।</p>
+  </section>)}
+ </div>
+</AccountShell>
+<style>.marks{display:grid;gap:var(--space-3)}.mark{padding:var(--space-3);border:1px solid var(--color-line);border-radius:var(--radius-md);display:grid;grid-template-columns:1fr 100px auto 1fr auto;gap:var(--space-3);align-items:end}.mark small{display:block}.mark .field{min-width:0}@media(max-width:760px){.mark{grid-template-columns:1fr 1fr}.mark>div:first-of-type{grid-column:1/-1}.mark button{grid-column:1/-1}}</style>

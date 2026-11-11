@@ -1,0 +1,29 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import { listExams } from '../../../server/academic';
+import { listBatches } from '../../../server/office';
+import { listBatchAssessments } from '../../../server/assessment';
+import { dayBn } from '../../../lib/offline';
+
+const batches=await listBatches(env.DB);
+const examList=await listExams(env.DB,{includeCancelled:true,limit:150});
+const unique=[...new Set(examList.map(x=>x.batchId))];
+const details=(await Promise.all(unique.map(id=>listBatchAssessments(env.DB,id)))).flat();
+const assessmentById=new Map(details.map(x=>[x.examId,x]));
+---
+<Admin title="পরীক্ষার ফল ও গ্রেডবুক">
+ <header class="page-head"><div><p class="eyebrow">একাডেমিক</p><h1>পরীক্ষার ফল ও গ্রেডবুক</h1>
+ <p>পরীক্ষা, পরীক্ষার্থীর তালিকা, নম্বর, পাস নম্বর এবং প্রকাশিত রিপোর্ট কার্ড নিয়ন্ত্রণ করুন।</p></div></header>
+ <section class="card">
+  <div class="card__head"><h2>সব পরীক্ষা (সর্বশেষ ১৫০টি)</h2></div>
+  {examList.length===0?<p class="muted">এখনো কোনো পরীক্ষা নেই। <a href="/admin/offline/batches">ব্যাচ</a> থেকে পরীক্ষা যোগ করুন।</p>:
+   <ul class="list">{examList.slice().sort((a,b)=>b.examDate.localeCompare(a.examDate)).map(x=>{
+    const a=assessmentById.get(x.id);
+    return <li><div><strong>{x.title}</strong><small>{x.batchName} · {dayBn(x.examDate)} · {x.subject||'সাধারণ'}</small>
+    <small>{x.status==='cancelled'?'বাতিল':a?.status==='published'?'ফল প্রকাশিত':a?.status==='draft'?'নম্বর প্রস্তুত হচ্ছে':'গ্রেডবুক তৈরি বাকি'}</small></div>
+    <a class="button button--ghost button--sm" href={`/admin/offline/gradebook/${x.id}`}>গ্রেডবুক</a></li>;
+   })}</ul>}
+ </section>
+ <p class="muted">নতুন পরীক্ষা যোগ করতে <a href="/admin/offline/batches">ব্যাচ ও রুটিন</a> অংশে যান। পরীক্ষা ফি ও প্রকাশিত ফল আলাদা সিস্টেমে সংরক্ষিত।</p>
+</Admin>

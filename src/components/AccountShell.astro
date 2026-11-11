@@ -12,7 +12,7 @@ import { loginLabel } from '../server/password';
 
 interface Props {
   me: Student;
-  active: 'home' | 'profile' | 'offline' | 'offline-fees' | 'offline-attendance' | 'offline-rate' | 'offline-id' | 'offline-tickets' | 't-home' | 't-leave' | 't-salary' | 't-tickets';
+  active: 'home' | 'profile' | 'offline' | 'offline-fees' | 'offline-attendance' | 'offline-results' | 'offline-homework' | 'offline-rate' | 'offline-id' | 'offline-tickets' | 't-home' | 't-leave' | 't-salary' | 't-tickets';
   title: string;
   /** The teacher panel uses the same frame with its own menu. */
   mode?: 'student' | 'teacher';
@@ -28,6 +28,8 @@ const OFFLINE_NAV = [
   { key: 'offline', href: '/account/offline', label: 'ড্যাশবোর্ড', icon: 'home' },
   { key: 'offline-fees', href: '/account/offline/fees', label: 'ফি ও রসিদ', icon: 'coins' },
   { key: 'offline-attendance', href: '/account/offline/attendance', label: 'হাজিরা', icon: 'clipboard' },
+  { key: 'offline-results', href: '/account/offline/results', label: 'পরীক্ষার ফল', icon: 'chart' },
+  { key: 'offline-homework', href: '/account/offline/homework', label: 'হোমওয়ার্ক ও পাঠ', icon: 'book' },
   { key: 'offline-id', href: '/account/offline/id-card', label: 'আইডি কার্ড', icon: 'user' },
   { key: 'offline-rate', href: '/account/offline/rate', label: 'শিক্ষক মূল্যায়ন', icon: 'star' },
   { key: 'offline-tickets', href: '/account/offline/tickets', label: 'অফিসকে লিখুন', icon: 'mail' },

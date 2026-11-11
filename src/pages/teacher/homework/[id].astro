@@ -1,0 +1,63 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import { teacherSession, batchForTeacher } from '../../../server/panels';
+import { sameOrigin } from '../../../server/session';
+import { assignmentsForBatch, assignmentSubmissions, closeAssignment, homeworkKindBn, publishAssignment, reviewHomework } from '../../../server/assessment';
+import { dayBn } from '../../../lib/offline';
+Astro.response.headers.set('Cache-Control','no-store');
+const id=Astro.params.id!;
+const here=`/teacher/homework/${encodeURIComponent(id)}`;
+const {me,teacher}=await teacherSession(env.DB,env,Astro.request.headers.get('Cookie'));
+if(!me)return Astro.redirect(`/account?return=${encodeURIComponent(here)}`,303);
+if(!teacher)return new Response('Teacher access only',{status:403});
+const assignment=await env.DB.prepare("SELECT batch_id AS batchId FROM homework_assignments WHERE id=?").bind(id).first<{batchId:string}>();
+if(!assignment)return new Response('Assignment not found',{status:404});
+const b=await batchForTeacher(env.DB,teacher.id,assignment.batchId);
+if(!b)return new Response('Not your class',{status:403});
+const item=(await assignmentsForBatch(env.DB,b.id,true)).find(a=>a.id===id);
+if(!item)return new Response('Assignment not found',{status:404});
+if(Astro.request.method==='POST'){
+ if(!sameOrigin(Astro.request))return new Response('Bad origin',{status:403});
+ const form=await Astro.request.formData();
+ const action=String(form.get('action')??'');
+ const r=action==='publish'&&form.get('confirm')==='yes'
+   ?await publishAssignment(env.DB,me.email,id,b.id)
+   :action==='close'&&form.get('confirm')==='yes'
+   ?await closeAssignment(env.DB,me.email,id,b.id)
+   :action==='review'?await reviewHomework(env.DB,me.email,id,String(form.get('enrollmentId')??''),
+     form.get('feedback'),form.get('score')):{ok:false,error:'action'};
+ return Astro.redirect(`${here}?${r.ok?'saved=1':`error=${encodeURIComponent(r.error)}`}`,303);
+}
+const submissions=await assignmentSubmissions(env.DB,id,b.id);
+---
+<AccountShell me={me} mode="teacher" active="t-home" title={item.title}>
+ <header class="page-head"><div><p class="eyebrow"><a href={`/teacher/batch/${b.id}#homework`}>আমার ব্যাচ</a></p><h1>{item.title}</h1>
+ <p>{homeworkKindBn(item.kind)} · {b.name} · শেষ সময় {dayBn(item.dueOn)} · {item.status==='draft'?'খসড়া':item.status==='published'?'প্রকাশিত':'বন্ধ'}</p></div></header>
+ {Astro.url.searchParams.has('saved')&&<p class="note note--good">পরিবর্তন সংরক্ষিত হয়েছে।</p>}
+ {Astro.url.searchParams.has('error')&&<p class="note note--bad">কাজটি করা যায়নি। আবার যাচাই করুন।</p>}
+ <section class="panel"><h2>পাঠ ও নির্দেশনা</h2><p class="body">{item.details||'বিস্তারিত নেই।'}</p>
+ <div class="actions">
+  {item.status==='draft'&&<form method="post" data-confirm="এই কাজ শিক্ষার্থীদের জন্য প্রকাশ করবেন?">
+    <input type="hidden" name="action" value="publish"/><input type="hidden" name="confirm" value="yes"/>
+    <button class="button">প্রকাশ করুন</button></form>}
+  {item.status==='published'&&<form method="post" data-confirm="এই কাজ বন্ধ করলে নতুন সাবমিশন আসবে না।">
+    <input type="hidden" name="action" value="close"/><input type="hidden" name="confirm" value="yes"/>
+    <button class="button button--ghost">সাবমিশন বন্ধ করুন</button></form>}
+ </div></section>
+ <section class="panel"><h2>জমা দেওয়া উত্তর ({item.submissions} জন) · মূল্যায়িত {item.reviewed} জন</h2>
+ {item.kind==='lesson'?<p class="muted">পাঠ পরিকল্পনায় শিক্ষার্থীকে উত্তর জমা দিতে হয় না।</p>:
+ submissions.length===0?<p class="muted">এখনো কেউ উত্তর জমা দেয়নি।</p>:<div class="submissions">
+ {submissions.map(s=><article class="submission">
+  <h3>{s.studentName} · MI-{s.studentNo??'—'}</h3><p class="body">{s.body}</p>
+  {s.state==='reviewed'?<p class="note note--good">মূল্যায়ন সম্পন্ন {s.score===null?'':`— ${s.score}/১০০`} · {s.feedback}</p>:
+   <form method="post" class="form-grid"><input type="hidden" name="action" value="review"/>
+    <input type="hidden" name="enrollmentId" value={s.enrollmentId}/>
+    <label class="field"><span>মূল্যায়ন (০–১০০, ঐচ্ছিক)</span><input name="score" type="number" min="0" max="100"/></label>
+    <label class="field wide"><span>শিক্ষকের মতামত</span><textarea name="feedback" rows="3" maxlength="1200"></textarea></label>
+    <button class="button">মূল্যায়ন সংরক্ষণ করুন</button>
+   </form>}
+ </article>)}</div>}
+ </section>
+</AccountShell>
+<style>.body{white-space:pre-wrap}.submissions{display:grid;gap:var(--space-4)}.submission{border:1px solid var(--color-line);border-radius:var(--radius-md);padding:var(--space-4)}.actions{display:flex;gap:var(--space-3);margin-top:var(--space-3)}</style>

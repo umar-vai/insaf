@@ -72,6 +72,7 @@ const [courses, teachers, students, materials, extraTeachers, exams] = await Pro
     <div class="actions">
       <a class="button" href={`/admin/offline/attendance?batch=${id}`}><Icon name="clipboard" /> হাজিরা নিন</a>
       <a class="button button--ghost" href={`/admin/offline/dues?kind=all&batch=${id}`}><Icon name="alert" /> এই ব্যাচের বকেয়া</a>
+      <a class="button button--ghost" href={`/admin/offline/homework/${id}`}><Icon name="book" /> হোমওয়ার্ক ও পাঠ</a>
     </div>
   </header>
 
@@ -142,7 +143,7 @@ const [courses, teachers, students, materials, extraTeachers, exams] = await Pro
         <ul class="list">
           {exams.map((x) => (
             <li class={x.status === 'cancelled' ? 'void' : ''}>
-              <span><strong>{dayBn(x.examDate)}</strong> · {examLine(x)}{x.feeMinor > 0 && <small class="muted"> · ফি {bnDigits(x.feeMinor / 100)} টাকা</small>}{x.status === 'cancelled' && <small class="bad"> · বাতিল</small>}</span>
+              <span><strong><a href={`/admin/offline/gradebook/${x.id}`}>{dayBn(x.examDate)} · {examLine(x)}</a></strong>{x.feeMinor > 0 && <small class="muted"> · ফি {bnDigits(x.feeMinor / 100)} টাকা</small>}{x.status === 'cancelled' && <small class="bad"> · বাতিল</small>}</span>
               {x.status === 'scheduled' && (
                 <form method="post" data-confirm={`${x.title} বাতিল করবেন? এর ফি যাদের এখনো বসানো আছে তাদের মাফ হয়ে যাবে।`}>
                   <input type="hidden" name="action" value="cancel-exam" />

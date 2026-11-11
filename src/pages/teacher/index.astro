@@ -87,7 +87,7 @@ const students = batches.reduce((a, b) => a + b.students, 0);
             <div class="card__head"><h2>সামনের পরীক্ষা</h2></div>
             {exams.length === 0 ? <p class="muted">সামনে কোনো পরীক্ষা নেই।</p> : (
               <ul class="list">
-                {exams.map((x) => <li><div><strong>{dayBn(x.examDate)}</strong><small>{examLine(x)} · {x.batchName}</small></div>{x.feeMinor > 0 && <small class="muted">ফি {taka(x.feeMinor)}</small>}</li>)}
+                {exams.map((x) => <li><div><strong>{dayBn(x.examDate)}</strong><small>{examLine(x)} · {x.batchName}</small></div><a class="button button--ghost button--sm" href={`/teacher/exam/${x.id}`}>গ্রেডবুক</a></li>)}
               </ul>
             )}
           </section>

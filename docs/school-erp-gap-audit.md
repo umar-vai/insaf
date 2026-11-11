@@ -57,7 +57,8 @@ Confirm the exact old paid plugin name/version (purchase receipt, module screens
 - [x] 2026-11-12: inspected repo modules, portals, permission mapping, D1 schema and tests; made provisional public reference comparison.
 - [x] Phase 1 navigation search: tested and deployed in PR #19.
 - [x] Phase 2: additive academic session/batch placement, preview/confirm same-course promotions, audited verified guardian links (see the Phase 2 operations section below).
-- [ ] Later phases: marks/gradebook, homework, library, cross-course enrollment promotion, bulk fees, certificates; each requires separate scoped PR and test gate.
+- [x] Phase 3: assessment gradebook, staff-reviewed result publication, printable student reports, teacher homework/lesson plans, direct student submissions and reviewed feedback (PR #21).
+- [ ] Later phases: library, cross-course fee renewal, bulk invoices, formal grading scale approval, certificates; each requires separate scoped PR and test gate.
 
 
 ## Phase 2 operations, privacy and release (2026-11-12)
@@ -75,3 +76,27 @@ The new admin menu entry is **মাদরাসা → একাডেমিক
 - The production GitHub Actions workflow applies the migration only on a merge commit explicitly marked `[approve-insaf-academic-0001]`; Wrangler backs up D1 when applying. Before the release, inspect `d1_migrations` and preserve a Time Travel bookmark. Do not restore D1 automatically.
 - Authenticated smoke tests must be carried out by an authorised school admin; do not pull live pupil PII into the coding context.
 - For the first release the promotion preview lists up to 300 active enrollments, and supports same-course batch changes only. Paginated search, cross-course fee renewals, and bulk promotions are later iterations.
+
+## Phase 3: exam assessments + assignment workflow (2026-11-12)
+
+### Exam workflow
+- Existing `offline_exams` remain the exam schedule and fee source. New `assessment_policies`, `assessment_examinees`, and `assessment_marks` store marks independently. Payments/fees/receipts are never updated by grades.
+- Staff with Academic Full role configures a gradebook (total marks and *institution-approved* pass marks), explicitly confirms the current exam roster snapshot, and publishes only after **every** enrolled examinee has marks or is marked absent. Publishing locks the gradebook; already published exams cannot be cancelled. Teachers assigned to the exam's batch can record or correct draft marks only.
+- No letter grades are automatically assumed. Reports show obtained/maximum, percent, and pass/fail based on admin-selected passing marks. If an A+/A grade policy is required, approve a separate grading-policy configuration before using official grade labels.
+- Student and explicitly authorized guardian accounts can see only their own **published** results at `/account/offline/results`; browser print/PDF is supported. Unpublished exam marks never appear in the student portal. The admin result index and individual gradebook live under `/admin/offline/results` and `/admin/offline/gradebook/:examId`.
+- Staff must confirm the roster snapshot carefully, particularly for exams created before academic-session promotions. A first-release gradebook locks that roster at configuration time rather than dynamically adding later enrollees.
+- Cancelled or already published exams reject edit/publish operations.
+
+### Homework and lesson plan workflow
+- Teachers work from `/teacher/batch/:id`, create dated homework or lesson plan as **draft**, then publish, close, and review submitted responses under `/teacher/homework/:id`. Server-side teacher/batch authorization is required for every action.
+- Admin Academic Edit staff can oversee assignments and review submissions at `/admin/offline/homework` and `/admin/offline/homework/:batchId`. The admin nav and task search include these modules.
+- Students see only published or closed assignments for their *current active enrollment* at `/account/offline/homework`. Only the direct student-linked email account can submit text answers; a separately linked guardian can view but cannot impersonate the student to submit. Submissions are limited to one editable text answer per enrollment/assignment before the due day, and lock upon review or closure. Homework score (optional) uses 0–100 plus teacher feedback.
+- A lesson plan is read-only and does not accept submissions. No external file uploads are introduced in this release; students may continue to access existing course material downloads separately.
+- Teachers can see submitted answers for only a batch they teach. School-admin roles are enforced by existing no-cache/same-origin middleware.
+- New tables: `homework_assignments`, `homework_submissions`, and the three `assessment_*` tables. Migration `0002_assessments_homework.sql` is additive.
+- First-release limits: up to 1,000 exam participants per gradebook and 400 newest submission rows per assignment; future cohorts require pagination. Scores after publication and reviewed homework are immutable without separately audited correction workflows.
+
+### Release and safety
+- Migration step is conditional on release marker `[approve-insaf-academic-0002]`; checks/tests/build run first; Wrangler applies only the approved pending migration before deploying Worker.
+- Preserve D1 Time Travel bookmark before migration, verify applied migration history and five table names after, and validate zero cross-user visibility in integration tests. Never copy any purchased WordPress plugin source code.
+- Do not copy live child/guardian PII into test fixtures; test with synthetic records only.

@@ -1,0 +1,42 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotOffline from '../../../components/NotOffline.astro';
+import { currentStudent } from '../../../server/students';
+import { offlineIdsForEmail } from '../../../server/panels';
+import { publishedResultsForEmail, resultLabel, percentScore } from '../../../server/assessment';
+import { bnDigits } from '../../../lib/format';
+import { dayBn } from '../../../lib/offline';
+Astro.response.headers.set('Cache-Control','no-store');
+const me=await currentStudent(env.DB,env,Astro.request.headers.get('Cookie'));
+if(!me)return Astro.redirect('/account?return=%2Faccount%2Foffline%2Fresults',303);
+const ids=await offlineIdsForEmail(env.DB,me.email);
+const data=ids.length?await publishedResultsForEmail(env.DB,me.email):[];
+---
+{ids.length===0?<NotOffline me={me}/>:<AccountShell me={me} active="offline-results" title="আমার পরীক্ষার ফল">
+ <header class="page-head"><div><p class="eyebrow">মাদরাসাতুল ইনসাফ</p><h1>পরীক্ষার ফল ও রিপোর্ট কার্ড</h1>
+ <p>শুধু অনুমোদিত প্রকাশিত ফল দেখানো হচ্ছে।</p></div>
+ <button class="button button--ghost print-button" type="button" onclick="window.print()">রিপোর্ট কার্ড প্রিন্ট / PDF</button>
+ </header>
+ {data.length===0?<p class="panel muted">এখনো কোনো পরীক্ষার ফল প্রকাশিত হয়নি।</p>:(
+ <div class="report-list">{data.map(r=><article class="panel report">
+   <header class="report-heading"><div><small>মাদরাসাতুল ইনসাফ · পরীক্ষার রিপোর্ট</small>
+   <h2>{r.studentName} <span class="id">MI-{r.studentNo??'—'}</span></h2>
+   <p>{r.title} · {r.subject||'সাধারণ'} · {r.batchName}</p></div>
+   <span class="pill pill--info">{resultLabel(r.obtained,r.passMarks,r.attendance)}</span></header>
+   <dl class="result-grid">
+    <div><dt>তারিখ</dt><dd>{dayBn(r.examDate)}</dd></div>
+    <div><dt>পূর্ণমান</dt><dd>{bnDigits(r.maxMarks)}</dd></div>
+    <div><dt>পাস নম্বর</dt><dd>{bnDigits(r.passMarks)}</dd></div>
+    <div><dt>প্রাপ্ত নম্বর</dt><dd>{r.attendance==='absent'?'অনুপস্থিত':bnDigits(r.obtained??0)}</dd></div>
+    <div><dt>শতকরা</dt><dd>{r.attendance==='absent'?'—':`${bnDigits(percentScore(r.obtained??0,r.maxMarks))}%`}</dd></div>
+   </dl>
+   {r.comment&&<p class="muted">শিক্ষকের মন্তব্য: {r.comment}</p>}
+   <p class="muted"><small>এই রিপোর্ট নির্ধারিত পরীক্ষার পূর্ণমান ও পাস নম্বর অনুযায়ী। প্রতিষ্ঠানের স্বীকৃত গ্রেডিং স্কেল নির্ধারিত না হওয়া পর্যন্ত A+/A-এর মতো লেটার গ্রেড দেখানো হচ্ছে না।</small></p>
+ </article>)}</div>)}
+</AccountShell>}
+<style>
+.report-list{display:grid;gap:var(--space-5)}.report-heading{display:flex;justify-content:space-between;gap:var(--space-3);align-items:start;flex-wrap:wrap}.report-heading h2{margin-block:var(--space-2)}
+.result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:var(--space-3)}.result-grid>div{border-top:1px solid var(--color-line);padding-top:var(--space-2)}.result-grid dt{color:var(--color-muted)}.result-grid dd{font-weight:750;font-size:1.1rem;margin:0}
+@media print{.acc-nav,.acc-hero,.print-button,header.site-header,footer{display:none!important}.report{break-inside:avoid;box-shadow:none;border:1px solid #bbb}.report-list{gap:20px}}
+</style>

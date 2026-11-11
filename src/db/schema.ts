@@ -780,3 +780,58 @@ export const academicGuardianLinks = sqliteTable('academic_guardian_links', {
   uniqueIndex('academic_guardian_student_email_idx').on(t.studentId,sql`lower(${t.guardianEmail})`),
   index('academic_guardian_email_status_idx').on(sql`lower(${t.guardianEmail})`,t.status),
 ]);
+
+// Phase 3: exam grading and classroom assignments (all financial rows remain independent).
+export const assessmentPolicies = sqliteTable('assessment_policies', {
+  examId: text('exam_id').primaryKey().references(() => offlineExams.id),
+  maxMarks: integer('max_marks').notNull(),
+  passMarks: integer('pass_marks').notNull(),
+  status: text('status', { enum: ['draft','published'] }).notNull().default('draft'),
+  publishedBy: text('published_by'),
+  publishedAt: text('published_at'),
+  updatedBy: text('updated_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, t=>[check('assessment_max_positive',sql`${t.maxMarks} BETWEEN 1 AND 1000`),
+check('assessment_pass_range',sql`${t.passMarks} >= 0 AND ${t.passMarks} <= ${t.maxMarks}`)]);
+export const assessmentExaminees = sqliteTable('assessment_examinees', {
+  examId: text('exam_id').notNull().references(()=>offlineExams.id),
+  enrollmentId: text('enrollment_id').notNull().references(()=>offlineEnrollments.id),
+  capturedBy: text('captured_by').notNull(),
+  capturedAt: timestamp('captured_at'),
+},t=>[primaryKey({columns:[t.examId,t.enrollmentId]}),index('assessment_examinees_enrollment_idx').on(t.enrollmentId)]);
+export const assessmentMarks = sqliteTable('assessment_marks',{
+  examId:text('exam_id').notNull(),
+  enrollmentId:text('enrollment_id').notNull(),
+  obtained:integer('obtained'),
+  attendance:text('attendance',{enum:['present','absent']}).notNull(),
+  comment:text('comment').notNull().default(''),
+  markedBy:text('marked_by').notNull(),
+  updatedAt:timestamp('updated_at'),
+},t=>[
+  primaryKey({columns:[t.examId,t.enrollmentId]}),
+  check('assessment_marks_attendance_valid',sql`(${t.attendance} = 'absent' AND ${t.obtained} IS NULL) OR (${t.attendance} = 'present' AND ${t.obtained} IS NOT NULL AND ${t.obtained} >= 0)`)
+]);
+export const homeworkAssignments=sqliteTable('homework_assignments',{
+  id:text('id').primaryKey(),
+  batchId:text('batch_id').notNull().references(()=>offlineBatches.id),
+  title:text('title').notNull(),
+  details:text('details').notNull().default(''),
+  kind:text('kind',{enum:['homework','lesson']}).notNull(),
+  dueOn:text('due_on').notNull(),
+  status:text('status',{enum:['draft','published','closed']}).notNull().default('draft'),
+  createdBy:text('created_by').notNull(),
+  publishedAt:text('published_at'),
+  createdAt:timestamp('created_at'),
+},t=>[index('homework_assignments_batch_idx').on(t.batchId,t.status,t.dueOn)]);
+export const homeworkSubmissions=sqliteTable('homework_submissions',{
+  assignmentId:text('assignment_id').notNull().references(()=>homeworkAssignments.id),
+  enrollmentId:text('enrollment_id').notNull().references(()=>offlineEnrollments.id),
+  body:text('body').notNull(),
+  state:text('state',{enum:['submitted','reviewed']}).notNull().default('submitted'),
+  feedback:text('feedback').notNull().default(''),
+  score:integer('score'),
+  submittedBy:text('submitted_by').notNull(),
+  submittedAt:timestamp('submitted_at'),
+  reviewedBy:text('reviewed_by'),
+  reviewedAt:text('reviewed_at'),
+},t=>[primaryKey({columns:[t.assignmentId,t.enrollmentId]}),index('homework_submissions_enrollment_idx').on(t.enrollmentId,t.state)]);

@@ -1,0 +1,94 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import { localsMayDo } from '../../../../server/staff';
+import { configureAssessment, examAssessment, examMarks, publishAssessment, recordExamMark, percentScore, resultLabel } from '../../../../server/assessment';
+import { bnDigits } from '../../../../lib/format';
+import { dayBn } from '../../../../lib/offline';
+
+const id=Astro.params.id!;
+const url=`/admin/offline/gradebook/${encodeURIComponent(id)}`;
+const actor=Astro.locals.staff!;
+const edit=localsMayDo(Astro.locals,'academic','edit');
+const full=localsMayDo(Astro.locals,'academic','full');
+if(Astro.request.method==='POST'){
+ if(!edit)return new Response('Not permitted',{status:403});
+ const form=await Astro.request.formData();
+ const action=String(form.get('action')??'');
+ let result:{ok:boolean;error?:string};
+ if(action==='configure'&&full){
+   result=await configureAssessment(env.DB,actor,id,form.get('max'),form.get('pass'),form.get('confirm')==='yes');
+ }else if(action==='mark'){
+   result=await recordExamMark(env.DB,actor,id,String(form.get('enrollmentId')??''),form.get('obtained'),form.get('absent')==='yes',form.get('comment'));
+ }else if(action==='publish'&&full){
+   result=form.get('confirm')==='yes'?await publishAssessment(env.DB,actor,id):{ok:false,error:'confirm'};
+ }else result={ok:false,error:'permission'};
+ return Astro.redirect(`${url}?${result.ok?'saved=1':`error=${encodeURIComponent(result.error??'invalid')}`}`,303);
+}
+const exam=await examAssessment(env.DB,id);
+if(!exam)return new Response('Exam not found',{status:404});
+const rows=await examMarks(env.DB,id);
+const ready=exam.status==='draft'&&exam.examinees>0&&exam.completed===exam.examinees&&exam.examStatus==='scheduled';
+const errors:Record<string,string>={marks:'পূর্ণমান ও পাস নম্বর ঠিক করে লিখুন।',confirm:'অনুমোদন দিন।',
+ exam:'পরীক্ষা বাতিল বা ফল প্রকাশিত হয়েছে।',empty_roster:'পরীক্ষার্থীর তালিকা খালি। আগে ব্যাচে শিক্ষার্থী যুক্ত করুন।',
+ already_marked:'নম্বর দেওয়ার পরে পরীক্ষার নিয়ম বদলানো যাবে না।',locked:'প্রকাশিত ফল পরিবর্তন করা যাবে না।',
+ not_eligible:'এই পরীক্ষায় শিক্ষার্থী নেই অথবা নম্বর দেওয়া বন্ধ।',incomplete:'সবার নম্বর বা অনুপস্থিতি না দেওয়া পর্যন্ত প্রকাশ সম্ভব নয়।',
+ permission:'এই কাজের অনুমতি নেই।'};
+---
+<Admin title={`পরীক্ষার ফল — ${exam.title}`}>
+ <header class="page-head"><div>
+  <p class="eyebrow"><a href={`/admin/offline/batches/${exam.batchId}#exams`}>ব্যাচ ও পরীক্ষা</a></p>
+  <h1>{exam.title} — নম্বর ও ফলাফল</h1>
+  <p>{exam.batchName} · {exam.subject||'বিষয় নির্ধারিত নয়'} · {dayBn(exam.examDate)}</p>
+ </div></header>
+ {Astro.url.searchParams.has('saved')&&<p class="note note--good" role="status">পরিবর্তন সংরক্ষিত হয়েছে।</p>}
+ {Astro.url.searchParams.has('error')&&<p class="note note--bad" role="alert">{errors[Astro.url.searchParams.get('error')??'']??'পরিবর্তন করা যায়নি।'}</p>}
+ {exam.examStatus==='cancelled'&&<p class="note note--bad">বাতিল পরীক্ষার নম্বর বা ফল প্রকাশ করা যাবে না।</p>}
+ <div class="kpis">
+  <div class="kpi"><span class="kpi__label">পরীক্ষার্থী</span><strong class="kpi__value">{bnDigits(exam.examinees)}</strong></div>
+  <div class="kpi"><span class="kpi__label">নম্বর জমা</span><strong class="kpi__value">{bnDigits(exam.completed)}</strong></div>
+  <div class="kpi"><span class="kpi__label">ফল</span><strong class="kpi__value small">{exam.status==='published'?'প্রকাশিত':'অপ্রকাশিত'}</strong></div>
+ </div>
+ {!exam.status&&exam.examStatus==='scheduled'&&<section class="card">
+  <h2>পরীক্ষার নম্বর ব্যবস্থা চালু করুন</h2>
+  <p class="muted">এই মুহূর্তের ব্যাচ তালিকা পরীক্ষার্থী হিসেবে সংরক্ষিত হবে। পরবর্তীতে ভর্তি বা প্রমোশন হলেও এই পরীক্ষার পরীক্ষার্থী তালিকা বদলাবে না। আগে শিক্ষার্থী ও ব্যাচ যাচাই করুন।</p>
+  {full?<form method="post" class="form-grid" data-confirm="এই পরীক্ষার পরীক্ষার্থী তালিকা নিশ্চিত করবেন?">
+   <input type="hidden" name="action" value="configure"/>
+   <label class="field"><span>পূর্ণমান</span><input name="max" type="number" min="1" max="1000" required value="100"/></label>
+   <label class="field"><span>পাস নম্বর (প্রতিষ্ঠানের নিয়ম অনুযায়ী)</span><input name="pass" type="number" min="0" max="1000" required/></label>
+   <label class="check wide"><input name="confirm" type="checkbox" value="yes" required/> পরীক্ষার্থী তালিকা ও নম্বরের নীতিমালা যাচাই করেছি।</label>
+   <button class="button">গ্রেডবুক তৈরি করুন</button>
+  </form>:<p>একাডেমিক Full অনুমতিপ্রাপ্ত কর্মকর্তা গ্রেডবুক চালু করবেন।</p>}
+ </section>}
+ {exam.status&&<section class="card">
+  <div class="card__head"><h2>পরীক্ষার নম্বর তালিকা</h2><small>পূর্ণমান {bnDigits(exam.maxMarks!)} · পাস নম্বর {bnDigits(exam.passMarks!)}</small></div>
+  <p class="muted">সঠিক নম্বর বা অনুপস্থিতির অবস্থা লিখে সংরক্ষণ করুন। ফল প্রকাশের আগে শিক্ষার্থী বা অভিভাবক নম্বর দেখতে পারবেন না।</p>
+  {rows.length===0?<p>পরীক্ষার্থী নেই।</p>:<div class="grade-list">
+   {rows.map(r=><form method="post" class="grade-row">
+    <input type="hidden" name="action" value="mark"/>
+    <input type="hidden" name="enrollmentId" value={r.enrollmentId}/>
+    <div><strong>{r.studentName}</strong><small>MI-{r.studentNo??'—'} · রোল {r.roll||'—'}</small></div>
+    {exam.status==='draft'&&edit&&exam.examStatus==='scheduled'?<>
+     <label class="field"><span>প্রাপ্ত নম্বর</span><input name="obtained" type="number" min="0" max={exam.maxMarks!} value={r.obtained??''}/></label>
+     <label class="check"><input name="absent" type="checkbox" value="yes" checked={r.attendance==='absent'}/> অনুপস্থিত</label>
+     <label class="field"><span>মন্তব্য</span><input name="comment" value={r.comment??''} maxlength="500"/></label>
+     <button class="button button--sm">সংরক্ষণ</button>
+    </>:<div><strong>{r.attendance==='absent'?'অনুপস্থিত':r.obtained===null?'—':bnDigits(r.obtained)}</strong>
+     <small>{r.attendance?resultLabel(r.obtained,exam.passMarks!,r.attendance):'নম্বর বাকি'}</small></div>}
+   </form>)}
+  </div>}
+  {full&&ready&&<form method="post" class="publish" data-confirm="সব পরীক্ষার্থীর নম্বর যাচাই করেছেন? প্রকাশের পরে নম্বর পরিবর্তন করা যাবে না।">
+   <input type="hidden" name="action" value="publish"/>
+   <label class="check"><input type="checkbox" name="confirm" value="yes" required/> সব নম্বর ও অনুপস্থিতি যাচাই করে শিক্ষার্থী ও অভিভাবকের জন্য ফল প্রকাশ করছি।</label>
+   <button class="button">ফলাফল প্রকাশ করুন</button>
+  </form>}
+  {exam.status==='draft'&&!ready&&<p class="note">সব {bnDigits(exam.examinees)} জনের নম্বর/অনুপস্থিতি সম্পন্ন হলে প্রকাশের অপশন আসবে।</p>}
+  {exam.status==='published'&&<p class="note note--good">ফলাফল প্রকাশিত। এটি এখন সংশ্লিষ্ট শিক্ষার্থী ও অনুমোদিত অভিভাবকের রিপোর্ট কার্ডে দেখা যাবে।</p>}
+ </section>}
+</Admin>
+<style>
+.grade-list{display:grid;gap:var(--space-3)}.grade-row{display:grid;grid-template-columns:minmax(160px,1fr) minmax(90px,130px) auto minmax(120px,1fr) auto;align-items:end;gap:var(--space-3);padding:var(--space-3);border:1px solid var(--color-line);border-radius:var(--radius-md)}
+.grade-row small{display:block;color:var(--color-muted)}.grade-row .field{min-width:0}.publish{display:grid;gap:var(--space-3);margin-top:var(--space-5);justify-items:start}.small{font-size:var(--text-lg)}
+@media(max-width:800px){.grade-row{grid-template-columns:1fr 1fr}.grade-row>div:first-of-type{grid-column:1/-1}.grade-row>.button{grid-column:1/-1}}
+@media(max-width:420px){.grade-row{grid-template-columns:1fr}}
+</style>

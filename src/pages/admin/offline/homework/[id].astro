@@ -1,0 +1,99 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import { localsMayDo } from '../../../../server/staff';
+import { getBatch } from '../../../../server/office';
+import { assignmentsForBatch, assignmentSubmissions, createAssignment, closeAssignment, homeworkKindBn, publishAssignment, reviewHomework } from '../../../../server/assessment';
+import { dayBn, todayDhaka } from '../../../../lib/offline';
+
+const id=Astro.params.id!;
+const here=`/admin/offline/homework/${encodeURIComponent(id)}`;
+const batch=await getBatch(env.DB,id);
+if(!batch)return new Response('Batch not found',{status:404});
+const actor=Astro.locals.staff!;
+const edit=localsMayDo(Astro.locals,'academic','edit');
+if(Astro.request.method==='POST'){
+ if(!edit)return new Response('Permission denied',{status:403});
+ const form=await Astro.request.formData();
+ const action=String(form.get('action')??'');
+ let result:{ok:boolean;value?:unknown;error?:string}={ok:false,error:'action'};
+ const assignmentId=String(form.get('assignmentId')??'');
+ if(action==='create'){
+   result=await createAssignment(env.DB,actor,id,{
+    title:String(form.get('title')??''),details:String(form.get('details')??''),
+    dueOn:String(form.get('dueOn')??''),kind:form.get('kind')==='lesson'?'lesson':'homework'
+   });
+ }else if(action==='publish'&&form.get('confirm')==='yes')result=await publishAssignment(env.DB,actor,assignmentId,id);
+ else if(action==='close'&&form.get('confirm')==='yes')result=await closeAssignment(env.DB,actor,assignmentId,id);
+ else if(action==='review'){
+   const belongs=await env.DB.prepare('SELECT 1 FROM homework_assignments WHERE id=? AND batch_id=?')
+     .bind(assignmentId,id).first();
+   if(belongs)result=await reviewHomework(env.DB,actor,assignmentId,String(form.get('enrollmentId')??''),form.get('feedback'),form.get('score'));
+ }
+ const selected=(action==='create'&&result.ok&&typeof result.value==='string')?result.value:assignmentId;
+ return Astro.redirect(`${here}?${result.ok?'saved=1':`error=${encodeURIComponent(result.error??'invalid')}`}&assignment=${encodeURIComponent(selected)}`,303);
+}
+const assignments=await assignmentsForBatch(env.DB,id,true);
+const selected=assignments.find(a=>a.id===Astro.url.searchParams.get('assignment'))??assignments[0];
+const submissions=selected?await assignmentSubmissions(env.DB,selected.id,id):[];
+---
+<Admin title={`হোমওয়ার্ক — ${batch.name}`}>
+ <header class="page-head"><div>
+  <p class="eyebrow"><a href={`/admin/offline/batches/${id}`}>ব্যাচ ও রুটিন</a></p>
+  <h1>{batch.name} — হোমওয়ার্ক ও পাঠ পরিকল্পনা</h1>
+  <p>শিক্ষক ও শিক্ষার্থীর কাজ, জমার অবস্থা, মূল্যায়ন এবং প্রকাশ নিয়ন্ত্রণ।</p>
+ </div></header>
+ {Astro.url.searchParams.has('saved')&&<p class="note note--good">সংরক্ষণ হয়েছে।</p>}
+ {Astro.url.searchParams.has('error')&&<p class="note note--bad">কাজটি করা যায়নি। তথ্য ও অনুমতি যাচাই করুন।</p>}
+ <div class="cols">
+  <section class="card">
+   <div class="card__head"><h2>কাজের তালিকা</h2></div>
+   {assignments.length===0?<p class="muted">এখনো কোনো কাজ নেই।</p>:<ul class="list">
+    {assignments.map(a=><li><div>
+     <a href={`?assignment=${a.id}`}><strong>{a.title}</strong></a>
+     <small>{homeworkKindBn(a.kind)} · {dayBn(a.dueOn)} · {a.status==='draft'?'খসড়া':a.status==='published'?'প্রকাশিত':'বন্ধ'}</small>
+     <small>জমা {a.submissions} · মূল্যায়িত {a.reviewed}</small>
+    </div></li>)}
+   </ul>}
+  </section>
+  <section class="card">
+   <div class="card__head"><h2>নতুন হোমওয়ার্ক / পাঠ পরিকল্পনা</h2></div>
+   {edit?<form method="post" class="form-grid">
+    <input type="hidden" name="action" value="create"/>
+    <label class="field"><span>ধরন</span><select name="kind"><option value="homework">হোমওয়ার্ক</option><option value="lesson">পাঠ পরিকল্পনা</option></select></label>
+    <label class="field"><span>শেষ তারিখ / পাঠের তারিখ</span><input name="dueOn" type="date" required value={todayDhaka()}/></label>
+    <label class="field wide"><span>শিরোনাম</span><input name="title" minlength="2" maxlength="160" required/></label>
+    <label class="field wide"><span>নির্দেশনা</span><textarea name="details" rows="4" maxlength="4000"></textarea></label>
+    <button class="button">খসড়া তৈরি করুন</button>
+   </form>:<p class="muted">আপনার শুধু দেখার অনুমতি আছে।</p>}
+  </section>
+ </div>
+ {selected&&<section class="card details">
+  <div class="card__head"><h2>{selected.title}</h2><small>{selected.status==='draft'?'খসড়া':selected.status==='published'?'প্রকাশিত':'বন্ধ'}</small></div>
+  <p class="muted">{selected.details||'বিস্তারিত নেই'} · {dayBn(selected.dueOn)}</p>
+  {edit&&<div class="actions">
+   {selected.status==='draft'&&<form method="post" data-confirm="হোমওয়ার্ক/পাঠ শিক্ষার্থীদের জন্য প্রকাশ করবেন?">
+    <input type="hidden" name="action" value="publish"/><input type="hidden" name="assignmentId" value={selected.id}/>
+    <input type="hidden" name="confirm" value="yes"/><button class="button">প্রকাশ করুন</button>
+   </form>}
+   {selected.status==='published'&&<form method="post" data-confirm="নতুন জমা বন্ধ করবেন?">
+    <input type="hidden" name="action" value="close"/><input type="hidden" name="assignmentId" value={selected.id}/>
+    <input type="hidden" name="confirm" value="yes"/><button class="button button--ghost">জমা বন্ধ করুন</button>
+   </form>}
+  </div>}
+  <h3>জমা দেওয়া উত্তর — {selected.submissions} জন</h3>
+  {submissions.length===0?<p class="muted">এখনো কোনো জমা নেই।</p>:<div class="answers">
+  {submissions.map(s=><article class="answer">
+   <h3>{s.studentName} · MI-{s.studentNo??'—'}</h3><p>{s.body}</p>
+   {s.state==='reviewed'?<p class="note note--good">মূল্যায়ন: {s.score===null?'নম্বর নেই':`${s.score}/১০০`} · {s.feedback}</p>:
+    edit?<form method="post" class="form-grid">
+      <input type="hidden" name="action" value="review"/><input type="hidden" name="assignmentId" value={selected.id}/>
+      <input type="hidden" name="enrollmentId" value={s.enrollmentId}/>
+      <label class="field"><span>নম্বর (ঐচ্ছিক, ০–১০০)</span><input name="score" type="number" min="0" max="100"/></label>
+      <label class="field wide"><span>মন্তব্য</span><textarea name="feedback" rows="3" maxlength="1200"></textarea></label>
+      <button class="button">মূল্যায়ন সংরক্ষণ</button>
+    </form>:<p class="muted">মূল্যায়ন বাকি।</p>}
+  </article>)}</div>}
+ </section>}
+</Admin>
+<style>.details{margin-top:var(--space-5)}.actions{display:flex;gap:var(--space-3);flex-wrap:wrap}.answers{display:grid;gap:var(--space-4)}.answer{padding:var(--space-4);border:1px solid var(--color-line);border-radius:var(--radius-md)}.answer>p{white-space:pre-wrap}</style>

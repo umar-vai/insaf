@@ -243,7 +243,7 @@ export function adminModule(pathname: string): Module | 'shared' | 'owner' {
   if (p === '/admin' || under('/admin/team')) return 'shared';
   if (under('/admin/system', '/admin/audit')) return 'owner';
   if (under('/admin/finance')) return 'finance';
-  if (under('/admin/offline/sessions', '/admin/offline/batches', '/admin/offline/attendance', '/admin/offline/courses', '/admin/offline/notices')) return 'academic';
+  if (under('/admin/offline/sessions', '/admin/offline/results', '/admin/offline/gradebook', '/admin/offline/homework', '/admin/offline/batches', '/admin/offline/attendance', '/admin/offline/courses', '/admin/offline/notices')) return 'academic';
   if (under('/admin/offline/teachers', '/admin/offline/leave', '/admin/offline/payroll', '/admin/offline/payslip')) return 'hr';
   if (under('/admin/offline/expenses', '/admin/offline/voucher', '/admin/offline/reports', '/admin/offline/online-payments', '/admin/offline/export')) return 'accounts';
   if (under('/admin/offline')) return 'office';

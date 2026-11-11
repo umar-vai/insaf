@@ -154,7 +154,11 @@ export async function createExam(db: D1Database, actor: string, v: ExamInput): P
 
 /** Cancels an exam and waives its fee where it is still on record (money already taken stays with the student's account). */
 export async function cancelExam(db: D1Database, actor: string, id: string): Promise<boolean> {
-  const r = await db.prepare(`UPDATE offline_exams SET status = 'cancelled' WHERE id = ? AND status = 'scheduled' RETURNING batch_id AS batchId, title`).bind(id).first<{ batchId: string; title: string }>();
+  // A published report is immutable; cancelling the exam would hide issued results.
+  const r = await db.prepare(`UPDATE offline_exams SET status = 'cancelled'
+   WHERE id = ? AND status = 'scheduled'
+   AND NOT EXISTS(SELECT 1 FROM assessment_policies p WHERE p.exam_id=offline_exams.id AND p.status='published')
+   RETURNING batch_id AS batchId, title`).bind(id).first<{ batchId: string; title: string }>();
   if (!r) return false;
   const waived = await db
     .prepare(
