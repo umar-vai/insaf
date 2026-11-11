@@ -10,6 +10,7 @@ import FoundationPaymentDetails from '../components/donate/FoundationPaymentDeta
 import BarChart from '../components/admin/BarChart.astro';
 import { fundUpdates, listFunds, monthlyTotals, recentGifts, storyHtml } from '../server/donations';
 import { LAND } from '../lib/land';
+import { FOUNDER } from '../lib/site';
 
 import { bnDigits, dateBn, mediaUrl, taka } from '../lib/format';
 import { monthBn } from '../lib/offline';
@@ -129,7 +130,7 @@ const FAQ = [
       <p>এই জমি ক্রয় প্রকল্পের পরিকল্পনা ও তহবিল সংগ্রহ তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশনের নামে। লক্ষ্য—দীর্ঘমেয়াদে ইবাদত, ইসলামিক শিক্ষা ও সামাজিক সেবার জন্য একটি স্থায়ী অবকাঠামোর ভিত্তি তৈরি করা।</p>
     </div>
     <div class="foundation-family__cards">
-      <article class="foundation-family__card"><small>শিক্ষা উদ্যোগ</small><h3>Tamrin Institute of Bangladesh</h3><p>অনলাইনভিত্তিক কুরআন ও আরবি শিক্ষার উদ্যোগ।</p></article>
+      <article class="foundation-family__card"><small>ফাউন্ডেশনের শিক্ষা প্রতিষ্ঠান</small><h3>মাদরাসাতুল ইনসাফ</h3><p>কুরআন ও সুন্নাহভিত্তিক শিক্ষা ও তারবিয়াতের মাধ্যমে আগামী প্রজন্মের ইলমিযাত্রায় কাজ করছে।</p></article>
       <span class="foundation-family__link" aria-hidden="true">+</span>
       <article class="foundation-family__card"><small>ফাউন্ডেশনের জমি প্রকল্প</small><h3>মসজিদ, মাদরাসা ও ইসলামিক সেন্টার</h3><p>নামাজ, কুরআন শিক্ষা, ইলমচর্চা ও জনকল্যাণমূলক সেবার পরিকল্পিত স্থায়ী কেন্দ্র।</p></article>
     </div>
@@ -179,7 +180,7 @@ const FAQ = [
       <div class="foundation-founder__media">
         <iframe
           src={chairmanVideoEmbed}
-          title="তামরিন ফাউন্ডেশনের চেয়ারম্যান উসতায শাহাদাত হুসাইনের জমি প্রকল্পের ভিডিও বক্তব্য"
+          title={`তামরিন ফাউন্ডেশনের চেয়ারম্যান ${FOUNDER.name}-এর জমি প্রকল্পের ভিডিও বক্তব্য`}
           loading="lazy"
           referrerpolicy="strict-origin-when-cross-origin"
           allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -189,9 +190,9 @@ const FAQ = [
       <div class="foundation-founder__copy">
         <p>চেয়ারম্যানের আহ্বান</p>
         <h2 id="founder-title">মসজিদ, মাদরাসা ও ইসলামিক সেন্টারের জন্য জমি ক্রয়ে অংশ নিন</h2>
-        <p>তামরিন ফাউন্ডেশনের সম্মানিত চেয়ারম্যান উসতায শাহাদাত হুসাইন এই মহতী উদ্যোগ বাস্তবায়নে সকলের প্রতি সাদাকা ও আন্তরিক সহযোগিতার আহ্বান জানিয়েছেন।</p>
+        <p>তামরিন ফাউন্ডেশনের সম্মানিত চেয়ারম্যান {FOUNDER.name} এই মহতী উদ্যোগ বাস্তবায়নে সকলের প্রতি সাদাকা ও আন্তরিক সহযোগিতার আহ্বান জানিয়েছেন।</p>
         <p>আপনার সামর্থ্য অনুযায়ী ছোট-বড় যেকোনো অনুদান এই দীনি প্রতিষ্ঠানের ভিত্তি গড়ে তুলতে সাহায্য করবে, ইন শা আল্লাহ। সাদকায়ে জারিয়ার নিয়তে দান করুন এবং আত্মীয়-পরিচিতজনদেরও অংশ নিতে উৎসাহিত করুন।</p>
-        <div class="foundation-founder__name"><strong>উসতায শাহাদাত হুসাইন</strong><span>সম্মানিত চেয়ারম্যান, তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশন</span></div>
+        <div class="foundation-founder__name"><strong>{FOUNDER.name}</strong><span>সম্মানিত চেয়ারম্যান, তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশন</span></div>
         <p class="foundation-founder__watch"><a href={chairmanVideoUrl} target="_blank" rel="noopener noreferrer">ভিডিওটি YouTube-এ দেখুন</a></p>
       </div>
     </div>
