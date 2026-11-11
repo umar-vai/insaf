@@ -256,7 +256,7 @@ const problem = Astro.url.searchParams.get('error');
       const taskInput = document.querySelector<HTMLInputElement>('#admin-task-search');
       const taskStatus = document.querySelector<HTMLElement>('#admin-task-results');
       const taskGroups = [...document.querySelectorAll<HTMLElement>('[data-task-group]')];
-      const normalizeTask = (value: string) => value.normalize('NFKC').toLocaleLowerCase().replace(/\\s+/g, ' ').trim();
+      const normalizeTask = (value: string) => value.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
 
       const filterTasks = () => {
         const query = normalizeTask(taskInput?.value ?? '');
