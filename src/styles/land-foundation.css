@@ -237,23 +237,9 @@ body.foundation-theme {
 }
 @media(prefers-reduced-motion:reduce) {.foundation-landscape *{transition:none!important;animation:none!important;}}
 
-/* The photo and verified Foundation logo share one fixed SVG viewBox:
-   scaling or cropping cannot reveal the retired signboard identity. */
+/* The photograph includes the actual integrated Foundation signboard; no synthetic overlay. */
 .foundation-landscape {
-  background: #b5dbe4 url('/images/land-campaign-scene.webp') center center / cover no-repeat;
-}
-.foundation-landscape__scene {
-  background:transparent !important;
-  display:block;
-  position:absolute;
-  inset:0;
-  width:100%;
-  height:100%;
-  overflow:hidden;
-}
-.foundation-landscape__scene image,
-.foundation-landscape__scene text {
-  pointer-events:none;
+  background: #b5dbe4;
 }
 .foundation-hero h1 {
   font-size:clamp(2.25rem,3.55vw,4.05rem);
@@ -270,7 +256,6 @@ body.foundation-theme {
 }
 @media(max-width:600px) {
   .foundation-hero h1 {font-size:clamp(1.95rem,8.2vw,2.75rem);line-height:1.22;}
-  .foundation-landscape__scene {width:100%;height:100%;}
 }
 
 /* Keep the progress target on the grass instead of covering signboard copy. */
@@ -387,3 +372,6 @@ body.foundation-theme {
     text-align:center;
   }
 }
+
+/* The full-resolution approved concept image is part of the page, not an overlay. */
+.foundation-landscape > img {width:100%;height:100%;object-fit:cover;object-position:center center;display:block;}
