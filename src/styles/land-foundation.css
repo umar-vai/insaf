@@ -243,6 +243,7 @@ body.foundation-theme {
   background: #b5dbe4 url('/images/land-campaign-scene.webp') center center / cover no-repeat;
 }
 .foundation-landscape__scene {
+  background:transparent !important;
   display:block;
   position:absolute;
   inset:0;
