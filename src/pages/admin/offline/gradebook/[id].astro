@@ -31,7 +31,8 @@ const rows=await examMarks(env.DB,id);
 const ready=exam.status==='draft'&&exam.examinees>0&&exam.completed===exam.examinees&&exam.examStatus==='scheduled';
 const errors:Record<string,string>={marks:'পূর্ণমান ও পাস নম্বর ঠিক করে লিখুন।',confirm:'অনুমোদন দিন।',
  exam:'পরীক্ষা বাতিল বা ফল প্রকাশিত হয়েছে।',empty_roster:'পরীক্ষার্থীর তালিকা খালি। আগে ব্যাচে শিক্ষার্থী যুক্ত করুন।',
- already_marked:'নম্বর দেওয়ার পরে পরীক্ষার নিয়ম বদলানো যাবে না।',locked:'প্রকাশিত ফল পরিবর্তন করা যাবে না।',
+ already_configured:'গ্রেডবুক একবার তৈরি হলে পরীক্ষার্থী ও নম্বরের নীতি পরিবর্তন করা যাবে না।',roster_too_large:'একবারে সর্বোচ্চ ১০০০ পরীক্ষার্থীর গ্রেডবুক তৈরি করা যাবে।',
+ locked:'প্রকাশিত ফল পরিবর্তন করা যাবে না।',
  not_eligible:'এই পরীক্ষায় শিক্ষার্থী নেই অথবা নম্বর দেওয়া বন্ধ।',incomplete:'সবার নম্বর বা অনুপস্থিতি না দেওয়া পর্যন্ত প্রকাশ সম্ভব নয়।',
  permission:'এই কাজের অনুমতি নেই।'};
 ---
