@@ -414,5 +414,5 @@ body.foundation-theme {
   .foundation-landscape > img {object-position:right center;}
 }
 @media (max-width:900px) {
-  .foundation-landscape > img {object-position:65% center;}
+  .foundation-landscape > img {object-position:right center;}
 }
