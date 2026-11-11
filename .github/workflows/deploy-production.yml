@@ -51,3 +51,4 @@ jobs:
         run: npx wrangler deploy --env production
 # Deployment request for reviewed land + home slider: df82796c88efd6db532006cd03fb5b9c7d87e932
 # Deployment request: land navigation blue correction ba0f51f31e4ec0baf8a0592f93cfece1e79e1177
+# Deploy approved photo hero PR4 commit cec8451394e27710b9cb367fc3232864d0631b59
