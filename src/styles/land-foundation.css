@@ -416,3 +416,15 @@ body.foundation-theme {
 @media (max-width:900px) {
   .foundation-landscape > img {object-position:right center;}
 }
+
+
+/* Foundation-only payment links and contact helpers. */
+.foundation-donate__direct {font-size:.84rem;color:#396779;text-align:center;line-height:1.6;margin:15px 5px 0;}
+.foundation-donate__direct a {color:#006486;font-weight:800;text-decoration:underline;text-underline-offset:3px;}
+.foundation-founder__watch a {color:#006486;font-weight:800;text-underline-offset:4px;}
+.foundation-payment-shortcut {border:1px solid #c9e1ed;border-radius:18px;background:#f0f9fd;padding:25px;color:#0a3447;align-self:start;}
+.foundation-payment-shortcut h3 {font-size:1.22rem;margin:0 0 10px;color:#06475d;}
+.foundation-payment-shortcut p {color:#476b7c;}
+.foundation-payment-shortcut .button {display:inline-flex;justify-content:center;min-height:48px;}
+.foundation-payment-shortcut__registry {font-size:.78rem;margin-bottom:0;}
+@media(max-width:900px){.foundation-payment-shortcut{text-align:center;}}

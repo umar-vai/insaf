@@ -1,0 +1,152 @@
+---
+/** Foundation-specific, user-supplied direct transfer details.
+ * Deliberately separate from Madrasatul Insaf's legacy BANK and SSLCommerz integration.
+ */
+const foundation = {
+  name: 'TAMRIN EDUCATION NETWORK FOUNDATION',
+  registration: 'S-14519/2026',
+  address: '27/A/3, Moneshwar 1st Lane, Hazaribagh, Dhaka-1209',
+  hotline: '01334950777',
+  contact: '01612505599',
+};
+const banks = [
+  { label: 'সাধারণ অনুদান — জমি প্রকল্প', name: foundation.name, account: '20502130100317711', kind: 'general' },
+  { label: 'যাকাত তহবিল (আলাদা অ্যাকাউন্ট)', name: 'TAMRIN EDUCATION NETWORK FOUNDATION (JAKAT)', account: '20502130100317812', kind: 'zakat' },
+];
+const mfs = [
+  { provider: 'bKash', fund: 'সাধারণ অনুদান', name: 'TAMRIN FOUNDATION', number: '01334950778', instruction: 'Payment অপশন ব্যবহার করুন' },
+  { provider: 'Nagad', fund: 'সাধারণ অনুদান', name: 'TAMRIN FOUNDATION', number: '01334950778', instruction: 'Donation অপশন ব্যবহার করুন' },
+  { provider: 'CellFin', fund: 'সাধারণ অনুদান', name: 'TAMRIN FOUNDATION', number: '01334950778', instruction: 'লেনদেনের আগে অ্যাকাউন্টের নাম যাচাই করুন' },
+  { provider: 'Nagad', fund: 'যাকাত তহবিল', name: 'TAMRIN FOUNDATION (JAKAT)', number: '01334950779', instruction: 'যাকাতের জন্য নির্ধারিত অ্যাকাউন্ট' },
+];
+---
+<section class="foundation-payments" id="foundation-payment-methods" aria-labelledby="foundation-payment-title">
+  <div class="container foundation-payments__inner">
+    <header class="foundation-payments__intro">
+      <p class="foundation-payments__eyebrow">অফিসিয়াল অনুদান প্রদানের তথ্য</p>
+      <h2 id="foundation-payment-title">তামরিন ফাউন্ডেশনের ব্যাংক ও মোবাইল পেমেন্ট</h2>
+      <p>মসজিদ, মাদরাসা ও ইসলামিক সেন্টারের জন্য জমি ক্রয়ে সহযোগিতা করতে নিচের ফাউন্ডেশন অ্যাকাউন্টগুলোতে সরাসরি অনুদান দিতে পারেন। যাকাতের জন্য আলাদা অ্যাকাউন্ট দেখানো আছে।</p>
+      <p class="foundation-payments__registration">{foundation.name} · Government Registration No: {foundation.registration}</p>
+    </header>
+
+    <div class="foundation-payments__banks">
+      {banks.map((bank) => (
+        <article class:list={['foundation-payments__bank', bank.kind === 'zakat' && 'foundation-payments__bank--zakat']}>
+          <p class="foundation-payments__type">{bank.label}</p>
+          <h3>Islami Bank Bangladesh PLC</h3>
+          <dl>
+            <div><dt>অ্যাকাউন্টের নাম</dt><dd>{bank.name}</dd></div>
+            <div><dt>অ্যাকাউন্ট নম্বর</dt><dd><code>{bank.account}</code></dd></div>
+            <div><dt>শাখা</dt><dd>Head Office Complex, Dhaka</dd></div>
+            <div><dt>রাউটিং নম্বর</dt><dd><code>125272689</code></dd></div>
+          </dl>
+          <button type="button" class="foundation-payments__copy" data-foundation-copy={bank.account} aria-label={`${bank.label} এর অ্যাকাউন্ট নম্বর কপি করুন`}>অ্যাকাউন্ট নম্বর কপি করুন</button>
+        </article>
+      ))}
+    </div>
+
+    <h3 class="foundation-payments__subheading">মোবাইল ফিন্যান্সিয়াল সার্ভিস (MFS)</h3>
+    <div class="foundation-payments__mfs">
+      {mfs.map((entry) => (
+        <article class="foundation-payments__mfs-card">
+          <div class="foundation-payments__mfs-head"><strong>{entry.provider}</strong><span>{entry.fund}</span></div>
+          <p class="foundation-payments__mfs-number"><code>{entry.number}</code></p>
+          <p class="foundation-payments__account-name">{entry.name}</p>
+          <p class="foundation-payments__option">{entry.instruction}</p>
+          <button type="button" class="foundation-payments__copy" data-foundation-copy={entry.number} aria-label={`${entry.provider} নম্বর কপি করুন`}>নম্বর কপি করুন</button>
+        </article>
+      ))}
+    </div>
+
+    <div class="foundation-payments__instructions">
+      <h3>দান ও পেমেন্টের গুরুত্বপূর্ণ নির্দেশনা</h3>
+      <ol>
+        <li>জমি ক্রয়সহ সাধারণ অনুদানের জন্য General Donation Account ব্যবহার করুন।</li>
+        <li>যাকাতের জন্য আলাদা Zakat Fund Account ব্যবহার করুন; জমি ক্রয়ের প্রকল্পে যাকাতের প্রযোজ্যতা ফাউন্ডেশনের সঙ্গে নিশ্চিত করুন।</li>
+        <li>পেমেন্টের আগে Account Name, Account Number এবং নির্বাচিত Payment/Donation অপশন যাচাই করুন।</li>
+        <li>লেনদেনের পরে Transaction ID বা Payment Proof ফাউন্ডেশনকে জানান; সরাসরি ট্রান্সফারের রসিদ/হিসাবের জন্য যোগাযোগ করুন।</li>
+      </ol>
+      <p>সরাসরি ব্যাংক বা MFS ট্রান্সফার উপরের নম্বরগুলোতে হবে। ওয়েবসাইটের অনলাইন দান ফর্ম আলাদা SSLCommerz গেটওয়ে ব্যবহার করে—সেখানে পেমেন্টের আগে প্রদর্শিত প্রাপকের পরিচয় যাচাই করুন।</p>
+    </div>
+
+    <div class="foundation-payments__contact">
+      <div>
+        <strong>{foundation.name}</strong>
+        <p>{foundation.address}</p>
+        <small>Registration: {foundation.registration}</small>
+      </div>
+      <div class="foundation-payments__phones">
+        <a href="tel:+8801334950777">হটলাইন: {foundation.hotline}</a>
+        <a href="tel:+8801612505599">যোগাযোগ: {foundation.contact}</a>
+      </div>
+    </div>
+    <p class="foundation-payments__note">আল্লাহ আপনাদের অনুদান কবুল করুন। সাদকায়ে জারিয়ার নিয়তে অংশ নিন এবং পরিচিতজনদের এই উদ্যোগে সহযোগিতার আহ্বান জানান।</p>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('[data-foundation-copy]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const value = button.dataset.foundationCopy ?? '';
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        const label = button.textContent;
+        button.textContent = 'কপি হয়েছে ✓';
+        window.setTimeout(() => { button.textContent = label; }, 1800);
+      } catch {
+        button.textContent = value;
+      }
+    });
+  });
+</script>
+
+<style>
+  .foundation-payments { padding:clamp(44px,5vw,72px) 0; background:#edf8fc;color:#0a303f;scroll-margin-top:90px; }
+  .foundation-payments__inner {min-width:0;}
+  .foundation-payments__intro {max-width:790px;margin:0 auto 28px;text-align:center;}
+  .foundation-payments__eyebrow {margin:0 0 9px;color:#057194;font-size:.88rem;font-weight:800;}
+  .foundation-payments__intro h2 {font-size:clamp(1.75rem,3vw,2.5rem);line-height:1.3;color:#063d54;margin:0 0 12px;}
+  .foundation-payments__intro > p:not(.foundation-payments__eyebrow) {color:#4b7183;}
+  .foundation-payments__registration {font-size:.85rem;font-weight:700;overflow-wrap:anywhere;}
+  .foundation-payments__banks {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;}
+  .foundation-payments__bank,.foundation-payments__mfs-card {padding:23px;border:1px solid #cce3ed;background:#fff;border-radius:18px;min-width:0;box-shadow:0 6px 22px rgba(0,65,95,.055);}
+  .foundation-payments__bank--zakat {border-color:#b5d8e6;}
+  .foundation-payments__type {margin:0 0 10px;font-size:.86rem;font-weight:800;color:#066a8c;}
+  .foundation-payments__bank h3 {font-size:1.17rem;color:#063d53;margin:0 0 17px;}
+  .foundation-payments dl {display:grid;gap:12px;margin:0 0 20px;}
+  .foundation-payments dl div {display:grid;gap:3px;}
+  .foundation-payments dt {font-size:.8rem;color:#547384;}
+  .foundation-payments dd {margin:0;overflow-wrap:anywhere;font-weight:700;}
+  .foundation-payments code {font-size:1rem;letter-spacing:.02em;overflow-wrap:anywhere;}
+  .foundation-payments__copy {min-height:39px;border:1px solid #a3d0e2;background:#e9f8fd;border-radius:10px;padding:8px 14px;color:#065d7c;font-weight:750;cursor:pointer;}
+  .foundation-payments__copy:hover {background:#d3f0fa;}
+  .foundation-payments__copy:focus-visible {outline:3px solid #73c4e5;outline-offset:2px;}
+  .foundation-payments__subheading {margin:32px 0 15px;text-align:center;color:#063d53;font-size:1.4rem;}
+  .foundation-payments__mfs {display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;}
+  .foundation-payments__mfs-card {padding:19px;}
+  .foundation-payments__mfs-head {display:flex;flex-wrap:wrap;gap:4px 8px;justify-content:space-between;align-items:baseline;color:#075c7d;}
+  .foundation-payments__mfs-head span {font-size:.72rem;color:#4c7587;}
+  .foundation-payments__mfs-number {margin:12px 0 4px;font-weight:800;}
+  .foundation-payments__account-name {font-size:.78rem;font-weight:700;overflow-wrap:anywhere;margin:0 0 6px;min-height:2.4em;}
+  .foundation-payments__option {font-size:.8rem;color:#587487;margin:0 0 16px;min-height:3.2em;}
+  .foundation-payments__instructions {background:#fff;border:1px solid #cfe5ed;border-radius:18px;padding:24px;margin:26px 0 0;}
+  .foundation-payments__instructions h3 {margin:0 0 13px;color:#073f55;}
+  .foundation-payments__instructions ol {margin:0 0 16px;padding-left:22px;display:grid;gap:8px;}
+  .foundation-payments__instructions > p {color:#476a7a;margin:0;}
+  .foundation-payments__contact {display:flex;justify-content:space-between;align-items:center;gap:22px;flex-wrap:wrap;background:#073d54;color:#fff;border-radius:16px;margin-top:18px;padding:23px;}
+  .foundation-payments__contact p {margin:4px 0;font-size:.92rem;color:#d8eef5;}
+  .foundation-payments__contact small {color:#b7d8e6;}
+  .foundation-payments__phones {display:grid;gap:7px;}
+  .foundation-payments__phones a {color:#fff;font-weight:700;text-decoration:underline;text-underline-offset:3px;}
+  .foundation-payments__note {text-align:center;margin:21px 0 0;color:#3c6478;}
+  @media(max-width:1020px) {.foundation-payments__mfs {grid-template-columns:repeat(2,minmax(0,1fr));}}
+  @media(max-width:700px) {
+    .foundation-payments__banks,.foundation-payments__mfs {grid-template-columns:1fr;}
+    .foundation-payments__bank,.foundation-payments__mfs-card {padding:18px;}
+    .foundation-payments__mfs-card .foundation-payments__option,.foundation-payments__account-name {min-height:0;}
+    .foundation-payments__contact {text-align:center;justify-content:center;}
+    .foundation-payments__phones {width:100%;}
+    .foundation-payments__intro h2 {font-size:clamp(1.5rem,7vw,2rem);}
+  }
+</style>

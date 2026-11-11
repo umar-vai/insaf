@@ -6,11 +6,11 @@ import Icon from '../components/Icon.astro';
 import SectionHead from '../components/SectionHead.astro';
 import DonateForm from '../components/donate/DonateForm.astro';
 import FundProgress from '../components/donate/FundProgress.astro';
-import BankCard from '../components/donate/BankCard.astro';
+import FoundationPaymentDetails from '../components/donate/FoundationPaymentDetails.astro';
 import BarChart from '../components/admin/BarChart.astro';
 import { fundUpdates, listFunds, monthlyTotals, recentGifts, storyHtml } from '../server/donations';
 import { LAND } from '../lib/land';
-import { FOUNDER, SITE, whatsappUrl } from '../lib/site';
+
 import { bnDigits, dateBn, mediaUrl, taka } from '../lib/format';
 import { monthBn } from '../lib/offline';
 
@@ -29,8 +29,8 @@ const donors = buy.donors + (members?.donors ?? 0);
 const gifts = buy.gifts + (members?.gifts ?? 0);
 // The approved foundation goal is authoritative; keep Admin fund data synchronized.
 const goalMinor = LAND.goalMinor;
-const founderVideoCandidate = import.meta.env.PUBLIC_FOUNDER_VIDEO_EMBED_URL ?? '';
-const founderVideo = /^https:\/\/(?:www\.)?(?:youtube(?:-nocookie)?\.com\/embed\/|player\.vimeo\.com\/video\/)[A-Za-z0-9_\-/?=&]+$/.test(founderVideoCandidate) ? founderVideoCandidate : null;
+const chairmanVideoUrl = 'https://youtu.be/3Af1wPgcbm0';
+const chairmanVideoEmbed = 'https://www.youtube-nocookie.com/embed/3Af1wPgcbm0?rel=0';
 
 const [months, recent, updates] = await Promise.all([
   Promise.all(landIds.map((id) => monthlyTotals(env.DB, id, 9))),
@@ -57,12 +57,12 @@ const FAQ = [
     q: 'দানের টাকা কোথায় খরচ হবে?',
     a: 'এই জমি ক্রয় তহবিল তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশনের মসজিদ, মাদরাসা ও ইসলামিক সেন্টার প্রতিষ্ঠার পরিকল্পনার জন্য। প্রকল্পের দান আলাদাভাবে হিসাব করা হয়।',
   },
-  { q: 'কীভাবে দান করব?', a: 'বিকাশ, নগদ, রকেট, কার্ড বা নেট ব্যাংকিংয়ে এই পেজ থেকেই দান করা যায়। বড় অঙ্কের দান মাদরাসার ব্যাংক অ্যাকাউন্টে পাঠাতে পারেন।' },
+  { q: 'কীভাবে দান করব?', a: 'তামরিন ফাউন্ডেশনের General Donation ব্যাংক অ্যাকাউন্ট, bKash Payment, Nagad Donation কিংবা CellFin-এ সরাসরি দান করতে পারবেন। বিকল্পভাবে ওয়েবসাইটের SSLCommerz পেমেন্ট গেটওয়ে ব্যবহার করতে পারেন। পেমেন্টের আগে প্রাপকের নাম যাচাই করুন।' },
   { q: 'রসিদ পাব কি?', a: 'হ্যাঁ। পেমেন্ট নিশ্চিত হলেই রসিদ দেখা ও প্রিন্ট করা যায়। ব্যাংকে বা অফিসে দিলে অফিস থেকে রসিদ দেওয়া হয়।' },
   { q: 'মৃত বাবা-মায়ের পক্ষ থেকে দান করা যাবে?', a: 'অবশ্যই। ফর্মে “অন্য কারো পক্ষ থেকে দান” ঘরে তাঁদের নাম লিখে দিন।' },
   { q: 'এই প্রকল্পের মোট লক্ষ্য কত?', a: 'জমি ক্রয়ের বর্তমান নির্ধারিত লক্ষ্য ২ কোটি ৫০ লাখ টাকা (৳২,৫০,০০,০০০)।' },
   { q: 'হিরোতে দেখানো জমি ও ভবন কি প্রকৃত প্রকল্পস্থলের ছবি?', a: 'না। এটি প্রকল্পের পরিকল্পনা বোঝাতে তৈরি করা একটি প্রতীকী দৃশ্য; প্রকৃত জমি বা নির্মিত ভবনের ছবি নয়।' },
-  { q: 'এই প্রকল্প কোন প্রতিষ্ঠানের অধীনে?', a: 'জমি প্রকল্পের উদ্যোগ ও তহবিল সংগ্রহ তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশনের নামে পরিচালিত। ব্যাংক ট্রান্সফারের আগে প্রদর্শিত ব্যাংক হিসাবের প্রকৃত প্রাপকের নাম অবশ্যই মিলিয়ে নিন।' },
+  { q: 'এই প্রকল্প কোন প্রতিষ্ঠানের অধীনে?', a: 'জমি ক্রয়ের তহবিল সংগ্রহ তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশনের উদ্যোগে। সরকারি নিবন্ধন নং S-14519/2026। ফাউন্ডেশনের General Donation ও Zakat Fund অ্যাকাউন্ট আলাদা।' },
 ] as const;
 ---
 
@@ -109,9 +109,14 @@ const FAQ = [
         <p>ছোট-বড় প্রতিটি দান একই জমি ক্রয় লক্ষ্য পূরণে সহযোগিতা করে। এখানে প্রদর্শিত সংগ্রহ, দাতা ও দানের সংখ্যা সংরক্ষিত লেনদেনের তথ্য থেকে আসছে।</p>
         <div class="foundation-donate__progress"><FundProgress raisedMinor={raisedMinor} goalMinor={goalMinor} donors={donors} gifts={gifts} onDark /></div>
       </div>
-      <div class="foundation-donate__form"><DonateForm funds={formFunds} fund={buy.slug} title="জমি ক্রয় তহবিলে দান করুন" from="/land" error={error} /></div>
+      <div class="foundation-donate__form">
+        <DonateForm funds={formFunds} fund={buy.slug} title="জমি ক্রয় তহবিলে দান করুন" from="/land" error={error} />
+        <p class="foundation-donate__direct">ফাউন্ডেশনের নিজস্ব ব্যাংক, বিকাশ, নগদ ও CellFin-এ সরাসরি দান করতে চান? <a href="#foundation-payment-methods">অফিসিয়াল অ্যাকাউন্ট তথ্য দেখুন</a>।</p>
+      </div>
     </div>
   </section>
+
+  <FoundationPaymentDetails />
 
   <section class="foundation-family" aria-labelledby="family-title"><div class="container">
     <div class="foundation-family__brand">
@@ -172,21 +177,22 @@ const FAQ = [
   <section class="foundation-founder" aria-labelledby="founder-title">
     <div class="container foundation-founder__grid">
       <div class="foundation-founder__media">
-        {founderVideo ? (
-          <iframe src={founderVideo} title="প্রতিষ্ঠাতার ভিডিও বাণী" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-        ) : (
-          <div class="foundation-founder__placeholder" role="img" aria-label="প্রতিষ্ঠাতার ভিডিও বাণী সংযোজনের স্থান">
-            <strong>প্রতিষ্ঠাতার ভিডিও বাণী</strong>
-            <p>অনুমোদিত ভিডিও লিংক যুক্ত হলে এই অংশে সরাসরি ভিডিও দেখা যাবে।</p>
-          </div>
-        )}
+        <iframe
+          src={chairmanVideoEmbed}
+          title="তামরিন ফাউন্ডেশনের চেয়ারম্যান উসতায শাহাদাত হুসাইনের জমি প্রকল্পের ভিডিও বক্তব্য"
+          loading="lazy"
+          referrerpolicy="strict-origin-when-cross-origin"
+          allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowfullscreen
+        ></iframe>
       </div>
       <div class="foundation-founder__copy">
-        <p>প্রতিষ্ঠাতার বাণী</p>
-        <h2 id="founder-title">একটি প্রজন্মের জন্য দীর্ঘমেয়াদি শিক্ষার ঠিকানা</h2>
-        <p>এই জমি ক্রয় উদ্যোগের উদ্দেশ্য তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশনের পরিকল্পিত মসজিদ, মাদরাসা ও ইসলামিক সেন্টারের জন্য স্থায়ী স্থান নিশ্চিত করার পথে এগিয়ে যাওয়া। এটি ভবিষ্যতের ইবাদত, ইলম ও জনসেবামূলক উদ্যোগের ভিত্তি হতে পারে।</p>
-        <p>প্রতিষ্ঠাতার সরাসরি বক্তব্য ও প্রকল্পের বিস্তারিত পরিকল্পনা এই অংশে ভিডিওর মাধ্যমে উপস্থাপন করা যাবে।</p>
-        <div class="foundation-founder__name"><strong>{FOUNDER.name}</strong><span>ফাউন্ডেশনের জমি প্রকল্প সম্পর্কে বার্তা</span></div>
+        <p>চেয়ারম্যানের আহ্বান</p>
+        <h2 id="founder-title">মসজিদ, মাদরাসা ও ইসলামিক সেন্টারের জন্য জমি ক্রয়ে অংশ নিন</h2>
+        <p>তামরিন ফাউন্ডেশনের সম্মানিত চেয়ারম্যান উসতায শাহাদাত হুসাইন এই মহতী উদ্যোগ বাস্তবায়নে সকলের প্রতি সাদাকা ও আন্তরিক সহযোগিতার আহ্বান জানিয়েছেন।</p>
+        <p>আপনার সামর্থ্য অনুযায়ী ছোট-বড় যেকোনো অনুদান এই দীনি প্রতিষ্ঠানের ভিত্তি গড়ে তুলতে সাহায্য করবে, ইন শা আল্লাহ। সাদকায়ে জারিয়ার নিয়তে দান করুন এবং আত্মীয়-পরিচিতজনদেরও অংশ নিতে উৎসাহিত করুন।</p>
+        <div class="foundation-founder__name"><strong>উসতায শাহাদাত হুসাইন</strong><span>সম্মানিত চেয়ারম্যান, তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশন</span></div>
+        <p class="foundation-founder__watch"><a href={chairmanVideoUrl} target="_blank" rel="noopener noreferrer">ভিডিওটি YouTube-এ দেখুন</a></p>
       </div>
     </div>
   </section>
@@ -286,9 +292,14 @@ const FAQ = [
             ))
           }
         </div>
-        <p class="ask">আরও জানতে: <a href={`tel:${SITE.phone.tel}`}>{bnDigits(SITE.phone.display)}</a> অথবা <a href={whatsappUrl('জমি ক্রয় প্রজেক্ট সম্পর্কে জানতে চাই')} rel="noopener">WhatsApp</a></p>
+        <p class="ask">ফাউন্ডেশন সম্পর্কে আরও জানতে: <a href="tel:+8801334950777">01334950777</a> অথবা <a href="tel:+8801612505599">01612505599</a>। <a href="#foundation-payment-methods">অফিসিয়াল ব্যাংক ও MFS তথ্য</a></p>
       </div>
-      <BankCard />
+      <aside class="foundation-payment-shortcut">
+        <h3>তামরিন ফাউন্ডেশনের সরাসরি অনুদান</h3>
+        <p>General Donation ও Zakat Fund-এর আলাদা ব্যাংক অ্যাকাউন্ট এবং bKash, Nagad ও CellFin-এর অফিসিয়াল তথ্য উপরের সেকশনে দেওয়া আছে।</p>
+        <a class="button button--ghost" href="#foundation-payment-methods">ব্যাংক ও MFS তথ্য দেখুন</a>
+        <p class="foundation-payment-shortcut__registry">Govt. Registration No: S-14519/2026</p>
+      </aside>
     </div>
   </section>
 
