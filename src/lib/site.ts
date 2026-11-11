@@ -26,7 +26,7 @@ export const BANK = {
 } as const;
 
 export const FOUNDER = {
-  name: 'উস্তাদ শাহাদাত হোসেন',
+  name: 'উসতায শাহাদাত হুসাইন',
   role: 'প্রতিষ্ঠাতা, নীতিগত অভিভাবক ও দিকনির্দেশক',
   about: 'একজন ভাষাপ্রশিক্ষক ও দীনি সংগঠক।',
 } as const;
