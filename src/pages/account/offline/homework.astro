@@ -1,0 +1,146 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotOffline from '../../../components/NotOffline.astro';
+import { currentStudent } from '../../../server/students';
+import { offlineIdsForEmail } from '../../../server/panels';
+import { sameOrigin } from '../../../server/session';
+import { homeworkForEmail, homeworkKindBn, submitHomework } from '../../../server/assessment';
+import { bnDigits } from '../../../lib/format';
+import { dayBn, todayDhaka } from '../../../lib/offline';
+
+// Published homework and lesson plans for the student's current batches.
+// A verified guardian sees the same, read only: only the student's own
+// account can submit an answer (the server checks this, not just the page).
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline%2Fhomework', 303);
+const today = todayDhaka();
+const here = '/account/offline/homework';
+
+if (Astro.request.method === 'POST') {
+  if (!sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
+  const form = await Astro.request.formData();
+  const assignmentId = String(form.get('assignmentId') ?? '');
+  const r = await submitHomework(env.DB, me.email, assignmentId, String(form.get('enrollmentId') ?? ''), form.get('body'), today);
+  return Astro.redirect(`${here}?${r.ok ? 'saved=1' : `error=${encodeURIComponent(r.error)}`}#a-${encodeURIComponent(assignmentId)}`, 303);
+}
+
+const [ids, list, own] = await Promise.all([
+  offlineIdsForEmail(env.DB, me.email),
+  homeworkForEmail(env.DB, me.email),
+  env.DB.prepare("SELECT id FROM offline_students WHERE lower(email) = lower(?) AND status = 'active'").bind(me.email).all<{ id: string }>(),
+]);
+const ownIds = new Set(own.results.map((x) => x.id));
+const canAnswer = (a: (typeof list)[number]) =>
+  a.kind === 'homework' && a.status === 'published' && a.dueOn >= today && a.submissionState !== 'reviewed' && ownIds.has(a.studentId);
+const stateOf = (a: (typeof list)[number]) =>
+  a.kind === 'lesson'
+    ? { label: 'পাঠ', tone: 'info' }
+    : a.submissionState === 'reviewed'
+      ? { label: 'মূল্যায়িত', tone: 'published' }
+      : a.submissionState === 'submitted'
+        ? { label: 'জমা হয়েছে', tone: 'review' }
+        : a.status === 'closed' || a.dueOn < today
+          ? { label: 'জমা হয়নি', tone: 'absent' }
+          : { label: 'জমা বাকি', tone: 'pending' };
+const waiting = list.filter((a) => canAnswer(a) && !a.submissionState).length;
+---
+
+{
+  ids.length === 0 ? (
+    <NotOffline me={me} />
+  ) : (
+    <AccountShell me={me} active="offline-homework" title="হোমওয়ার্ক ও পাঠ">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <h1>হোমওয়ার্ক ও পাঠ</h1>
+            <p>{waiting > 0 ? `${bnDigits(waiting)}টি হোমওয়ার্ক জমা দেওয়া বাকি।` : 'শিক্ষকের দেওয়া কাজ, জমার শেষ দিন আর শিক্ষকের মতামত এখানে পাবেন।'}</p>
+          </div>
+        </header>
+        {Astro.url.searchParams.has('saved') && <p class="note note--good" role="status">উত্তর জমা হয়েছে।</p>}
+        {Astro.url.searchParams.has('error') && <p class="note note--bad" role="alert">উত্তর জমা হয়নি। জমার শেষ দিন পার হয়েছে, কাজটি বন্ধ হয়েছে, অথবা এটি ছাত্রের নিজের অ্যাকাউন্ট নয়।</p>}
+        {list.length === 0 ? (
+          <p class="card muted">এখনো কোনো হোমওয়ার্ক বা পাঠ দেওয়া হয়নি।</p>
+        ) : (
+          <div class="hw-list">
+            {list.map((a) => {
+              const st = stateOf(a);
+              return (
+                <article class="card hw" id={`a-${a.id}`}>
+                  <header class="hw__head">
+                    <div>
+                      <small class="muted">{homeworkKindBn(a.kind)} · {a.batchName}{ids.length > 1 && ` · ${a.studentName}`}</small>
+                      <h2>{a.title}</h2>
+                      <small class="muted">{a.kind === 'homework' ? 'জমার শেষ দিন' : 'পাঠের দিন'}: {dayBn(a.dueOn)}</small>
+                    </div>
+                    <span class={`pill pill--${st.tone}`}>{st.label}</span>
+                  </header>
+                  {a.details && <p class="body">{a.details}</p>}
+                  {a.body && (
+                    <div class="answer">
+                      <strong>জমা দেওয়া উত্তর</strong>
+                      <p class="body">{a.body}</p>
+                    </div>
+                  )}
+                  {a.submissionState === 'reviewed' && (
+                    <div class="note note--good">
+                      <strong>শিক্ষকের মূল্যায়ন</strong>
+                      {a.score !== null && <p>নম্বর: {bnDigits(a.score)} / ১০০</p>}
+                      {a.feedback && <p>{a.feedback}</p>}
+                    </div>
+                  )}
+                  {canAnswer(a) ? (
+                    <form method="post" class="submit">
+                      <input type="hidden" name="assignmentId" value={a.id} />
+                      <input type="hidden" name="enrollmentId" value={a.enrollmentId} />
+                      <label class="field"><span>{a.body ? 'উত্তর বদলাতে চাইলে নতুন করে লিখুন' : 'আপনার উত্তর'}</span><textarea name="body" rows="5" minlength="2" maxlength="5000" required>{a.body ?? ''}</textarea></label>
+                      <button class="button">{a.body ? 'উত্তর আপডেট করুন' : 'উত্তর জমা দিন'}</button>
+                    </form>
+                  ) : (
+                    a.kind === 'homework' && !ownIds.has(a.studentId) && a.status === 'published' && <small class="muted">অভিভাবক হিসেবে আপনি শুধু দেখতে পারবেন। উত্তর জমা দেবে ছাত্র নিজের অ্যাকাউন্ট থেকে।</small>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </AccountShell>
+  )
+}
+
+<style>
+  .hw-list {
+    display: grid;
+    gap: var(--space-5);
+  }
+  .hw__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: start;
+    justify-content: space-between;
+    gap: var(--space-3);
+  }
+  .hw__head h2 {
+    margin-block: var(--space-1);
+  }
+  .body {
+    white-space: pre-wrap;
+  }
+  .answer {
+    margin-top: var(--space-3);
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
+    background: var(--mint-100);
+  }
+  .submit {
+    display: grid;
+    gap: var(--space-3);
+    margin-top: var(--space-4);
+  }
+  .submit button {
+    justify-self: start;
+  }
+</style>

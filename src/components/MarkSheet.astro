@@ -1,0 +1,195 @@
+---
+// An exam's mark sheet: a row per frozen examinee with the mark, an "absent"
+// switch and a short comment, saved for the whole class at once. When the
+// gradebook is published (or the viewer may not edit) it shows the results
+// read only. The page handles the form (action "marks").
+import Icon from './Icon.astro';
+import type { ExamAssessment, ExamMarkRow } from '../server/assessment';
+import { resultLabel, resultTone } from '../server/assessment';
+import { studentCode } from '../lib/offline';
+import { bnDigits } from '../lib/format';
+
+interface Props {
+  exam: ExamAssessment;
+  rows: ExamMarkRow[];
+  editable: boolean;
+}
+const { exam, rows, editable } = Astro.props;
+const max = exam.maxMarks ?? 0;
+const pass = exam.passMarks ?? 0;
+---
+
+<form method="post" class="card marksheet" data-marksheet>
+  <input type="hidden" name="action" value="marks" />
+  <div class="card__head">
+    <div>
+      <h2>নম্বরপত্র</h2>
+      <small class="muted">পূর্ণমান {bnDigits(max)} · পাস নম্বর {bnDigits(pass)} · {bnDigits(rows.length)} জন পরীক্ষার্থী</small>
+    </div>
+  </div>
+  {rows.length === 0 ? <p class="muted">পরীক্ষার্থী নেই।</p> : (
+    <ul class="sheet">
+      {rows.map((r) => (
+        <li>
+          <span class="who">
+            {r.roll && <span class="roll">{bnDigits(r.roll)}</span>}
+            <span><strong>{r.studentName}</strong> <span class="id">{studentCode(r.studentNo)}</span></span>
+          </span>
+          {editable ? (
+            <span class="inputs">
+              <input type="hidden" name="enrollmentId" value={r.enrollmentId} />
+              <label class="num">
+                <span class="visually-hidden">{r.studentName} এর প্রাপ্ত নম্বর</span>
+                {/* Text, not number, so a Bangla keyboard's ০-৯ is accepted; the server checks the range. */}
+                <input name={`obtained_${r.enrollmentId}`} type="text" inputmode="numeric" pattern="[0-9০-৯]{1,4}" autocomplete="off"
+                  value={r.attendance === 'present' && r.obtained !== null ? bnDigits(r.obtained) : ''} disabled={r.attendance === 'absent'}
+                  placeholder="নম্বর" data-mark data-max={max} />
+                <span class="of">/ {bnDigits(max)}</span>
+              </label>
+              <label class="absent">
+                <input type="checkbox" name={`absent_${r.enrollmentId}`} value="yes" checked={r.attendance === 'absent'} data-absent />
+                <span>অনুপস্থিত</span>
+              </label>
+              <label class="comment">
+                <span class="visually-hidden">মন্তব্য</span>
+                <input name={`comment_${r.enrollmentId}`} value={r.comment ?? ''} maxlength="500" placeholder="মন্তব্য (ঐচ্ছিক)" />
+              </label>
+            </span>
+          ) : (
+            <span class="done">
+              {r.attendance !== 'absent' && <strong>{r.obtained === null ? 'বাকি' : `${bnDigits(r.obtained)} / ${bnDigits(max)}`}</strong>}
+              {r.attendance && <span class={`pill pill--${resultTone(r.obtained, pass, r.attendance)}`}>{resultLabel(r.obtained, pass, r.attendance)}</span>}
+              {r.comment && <small class="muted">{r.comment}</small>}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
+  )}
+  {editable && rows.length > 0 && (
+    <div class="foot">
+      <span class="muted" data-filled></span>
+      <button class="button button--leaf"><Icon name="check" /> নম্বর সংরক্ষণ করুন</button>
+    </div>
+  )}
+</form>
+
+<script>
+  const sheet = document.querySelector<HTMLFormElement>('[data-marksheet]');
+  if (sheet?.querySelector('[data-filled]')) {
+    const count = sheet.querySelector<HTMLElement>('[data-filled]')!;
+    const bn = (s: string) => s.replace(/\d/g, (d) => '০১২৩৪৫৬৭৮৯'[Number(d)]!);
+    const update = () => {
+      const rows = [...sheet.querySelectorAll('.sheet li')];
+      const done = rows.filter((li) => {
+        const absent = li.querySelector<HTMLInputElement>('[data-absent]')!;
+        const mark = li.querySelector<HTMLInputElement>('[data-mark]')!;
+        mark.disabled = absent.checked;
+        // Same rule as the server: a whole number from 0 to the full marks.
+        const n = Number(mark.value.trim().replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d))));
+        const bad = !absent.checked && mark.value.trim() !== '' && !(Number.isInteger(n) && n >= 0 && n <= Number(mark.dataset.max));
+        mark.setCustomValidity(bad ? `০ থেকে ${bn(mark.dataset.max ?? '')} এর মধ্যে লিখুন` : '');
+        return absent.checked || mark.value.trim() !== '';
+      }).length;
+      count.textContent = bn(`${done} / ${rows.length} জনের নম্বর লেখা হয়েছে`);
+    };
+    sheet.addEventListener('input', update);
+    sheet.addEventListener('change', update);
+    update();
+  }
+</script>
+
+<style>
+  .sheet {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .sheet li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-4);
+    padding: var(--space-3) 0;
+    border-top: 1px solid var(--color-line);
+  }
+  .who {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 12rem;
+  }
+  .roll {
+    display: grid;
+    place-items: center;
+    min-width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--mint-100);
+    font-weight: 700;
+    color: var(--green-700);
+  }
+  .inputs,
+  .done {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+  }
+  .num {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+  .num input {
+    width: 6.5rem;
+  }
+  .num input:disabled {
+    opacity: 0.45;
+  }
+  .of {
+    color: var(--color-text-muted);
+    font-size: var(--text-sm);
+  }
+  /* Big enough to tap with a thumb. */
+  .absent {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 0.4em 0.85em;
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    cursor: pointer;
+    font: 600 var(--text-sm) / 1.5 var(--font-display);
+  }
+  .absent:has(input:checked) {
+    background: var(--bad-100);
+    border-color: var(--bad-600);
+    color: var(--bad-700);
+  }
+  .comment input {
+    width: 14rem;
+    max-width: 100%;
+  }
+  .foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding-block: var(--space-3);
+    border-top: 1px solid var(--color-line);
+    background: var(--color-surface);
+  }
+  @media (max-width: 560px) {
+    .inputs,
+    .comment,
+    .comment input {
+      width: 100%;
+    }
+  }
+</style>

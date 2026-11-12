@@ -1,0 +1,47 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import { listBatches } from '../../../../server/office';
+import { assignmentCountsByBatch } from '../../../../server/assessment';
+import { bnDigits } from '../../../../lib/format';
+
+// Homework and lesson plans per running batch, with answers still waiting for review.
+const [batches, counts] = await Promise.all([listBatches(env.DB, { activeOnly: true }), assignmentCountsByBatch(env.DB)]);
+const sum = (k: 'total' | 'published' | 'waiting') => [...counts.values()].reduce((a, c) => a + (c[k] ?? 0), 0);
+---
+
+<Admin title="হোমওয়ার্ক ও পাঠ">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">একাডেমিক</p>
+      <h1>হোমওয়ার্ক ও পাঠ পরিকল্পনা</h1>
+      <p>শিক্ষকরা নিজের ব্যাচে হোমওয়ার্ক ও পাঠ পরিকল্পনা দেন। এখান থেকে প্রতিটি ব্যাচের কাজ, ছাত্রদের জমা দেওয়া উত্তর ও মূল্যায়ন দেখা যায়।</p>
+    </div>
+  </header>
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__icon"><Icon name="book" /></span><span class="kpi__label">মোট কাজ</span><strong class="kpi__value">{bnDigits(sum('total'))}</strong></div>
+    <div class="kpi"><span class="kpi__icon"><Icon name="check" /></span><span class="kpi__label">প্রকাশিত, চালু</span><strong class="kpi__value">{bnDigits(sum('published'))}</strong></div>
+    <div class="kpi kpi--info"><span class="kpi__icon"><Icon name="clipboard" /></span><span class="kpi__label">মূল্যায়ন বাকি</span><strong class="kpi__value">{bnDigits(sum('waiting'))}</strong></div>
+  </div>
+  <section class="card">
+    {batches.length === 0 ? (
+      <p class="muted">কোনো চালু ব্যাচ নেই।</p>
+    ) : (
+      <ul class="list">
+        {batches.map((b) => {
+          const c = counts.get(b.id);
+          return (
+            <li>
+              <div>
+                <strong>{b.name}</strong>
+                <small>{b.courseTitle} · কাজ {bnDigits(c?.total ?? 0)}{(c?.waiting ?? 0) > 0 && ` · মূল্যায়ন বাকি ${bnDigits(c!.waiting)}`}</small>
+              </div>
+              <a class="button button--ghost button--sm" href={`/admin/offline/homework/${b.id}`}>খুলুন</a>
+            </li>
+          );
+        })}
+      </ul>
+    )}
+  </section>
+</Admin>

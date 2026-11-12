@@ -1,0 +1,174 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import { localsMayDo } from '../../../../server/staff';
+import { getBatch } from '../../../../server/office';
+import {
+  assignmentStatusBn,
+  assignmentsForBatch,
+  assignmentSubmissions,
+  closeAssignment,
+  createAssignment,
+  homeworkKindBn,
+  publishAssignment,
+  reviewHomework,
+} from '../../../../server/assessment';
+import { bnDigits } from '../../../../lib/format';
+import { dayBn, studentCode, todayDhaka } from '../../../../lib/offline';
+
+// One batch's homework from the office side: the same powers its teacher has.
+const id = Astro.params.id!;
+const here = `/admin/offline/homework/${encodeURIComponent(id)}`;
+const batch = await getBatch(env.DB, id);
+if (!batch) return new Response('ব্যাচটি পাওয়া যায়নি।', { status: 404 });
+const actor = Astro.locals.staff!;
+const edit = localsMayDo(Astro.locals, 'academic', 'edit');
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  const assignmentId = String(form.get('assignmentId') ?? '');
+  let result: { ok: boolean; value?: unknown; error?: string } = { ok: false, error: 'action' };
+  if (!edit) result = { ok: false, error: 'permission' };
+  else if (action === 'create') {
+    result = await createAssignment(env.DB, actor, id, {
+      title: String(form.get('title') ?? ''),
+      details: String(form.get('details') ?? ''),
+      dueOn: String(form.get('dueOn') ?? ''),
+      kind: form.get('kind') === 'lesson' ? 'lesson' : 'homework',
+    });
+  } else if (action === 'publish') result = await publishAssignment(env.DB, actor, assignmentId, id);
+  else if (action === 'close') result = await closeAssignment(env.DB, actor, assignmentId, id);
+  else if (action === 'review') {
+    // The answer must belong to this batch's assignment.
+    const belongs = await env.DB.prepare('SELECT 1 FROM homework_assignments WHERE id = ? AND batch_id = ?').bind(assignmentId, id).first();
+    if (belongs) result = await reviewHomework(env.DB, actor, assignmentId, String(form.get('enrollmentId') ?? ''), form.get('feedback'), form.get('score'));
+  }
+  const selected = action === 'create' && result.ok && typeof result.value === 'string' ? result.value : assignmentId;
+  return Astro.redirect(`${here}?${result.ok ? 'saved=1' : `error=${encodeURIComponent(result.error ?? 'invalid')}`}&a=${encodeURIComponent(selected)}`, 303);
+}
+
+const assignments = await assignmentsForBatch(env.DB, id, true);
+const selected = assignments.find((a) => a.id === Astro.url.searchParams.get('a')) ?? assignments[0];
+const submissions = selected ? await assignmentSubmissions(env.DB, selected.id, id) : [];
+---
+
+<Admin title={`হোমওয়ার্ক · ${batch.name}`}>
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/offline/homework">হোমওয়ার্ক ও পাঠ</a> · <a href={`/admin/offline/batches/${id}`}>{batch.name}</a></p>
+      <h1>{batch.name}</h1>
+      <p>{batch.courseTitle}{batch.teacherName && ` · ${batch.teacherName}`}</p>
+    </div>
+  </header>
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>কাজের তালিকা</h2></div>
+      {assignments.length === 0 ? (
+        <p class="muted">এখনো কোনো কাজ দেওয়া হয়নি।</p>
+      ) : (
+        <ul class="list">
+          {assignments.map((a) => (
+            <li class={a.id === selected?.id ? 'current' : ''}>
+              <div>
+                <a href={`?a=${a.id}`}><strong>{a.title}</strong></a>
+                <small>{homeworkKindBn(a.kind)} · {dayBn(a.dueOn)}{a.kind === 'homework' && ` · জমা ${bnDigits(a.submissions)}, মূল্যায়িত ${bnDigits(a.reviewed)}`}</small>
+              </div>
+              <span class={`pill pill--${a.status === 'closed' ? 'archived' : a.status}`}>{assignmentStatusBn(a.status)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+    {edit && (
+      <section class="card">
+        <div class="card__head"><h2>নতুন হোমওয়ার্ক বা পাঠ</h2></div>
+        <form method="post" class="form-grid">
+          <input type="hidden" name="action" value="create" />
+          <label class="field"><span>ধরন</span><select name="kind"><option value="homework">হোমওয়ার্ক</option><option value="lesson">পাঠ পরিকল্পনা</option></select></label>
+          <label class="field"><span>জমার শেষ দিন / পাঠের দিন</span><input name="dueOn" type="date" required value={todayDhaka()} /></label>
+          <label class="field wide"><span>শিরোনাম</span><input name="title" minlength="2" maxlength="160" required /></label>
+          <label class="field wide"><span>নির্দেশনা</span><textarea name="details" rows="4" maxlength="4000"></textarea></label>
+          <button class="button"><Icon name="plus" /> খসড়া তৈরি করুন</button>
+        </form>
+      </section>
+    )}
+  </div>
+
+  {selected && (
+    <section class="card block">
+      <div class="card__head">
+        <div>
+          <h2>{selected.title}</h2>
+          <small class="muted">{homeworkKindBn(selected.kind)} · {dayBn(selected.dueOn)} · {assignmentStatusBn(selected.status)}</small>
+        </div>
+        {edit && selected.status === 'draft' && (
+          <form method="post" data-confirm="ছাত্রদের জন্য প্রকাশ করবেন?">
+            <input type="hidden" name="action" value="publish" /><input type="hidden" name="assignmentId" value={selected.id} />
+            <button class="button button--sm">প্রকাশ করুন</button>
+          </form>
+        )}
+        {edit && selected.status === 'published' && (
+          <form method="post" data-confirm="বন্ধ করলে আর নতুন উত্তর জমা হবে না। বন্ধ করবেন?">
+            <input type="hidden" name="action" value="close" /><input type="hidden" name="assignmentId" value={selected.id} />
+            <button class="button button--ghost button--sm">জমা বন্ধ করুন</button>
+          </form>
+        )}
+      </div>
+      {selected.details && <p class="body">{selected.details}</p>}
+      {selected.kind === 'homework' && (
+        <>
+          <h3>জমা দেওয়া উত্তর ({bnDigits(selected.submissions)} জন)</h3>
+          {submissions.length === 0 ? (
+            <p class="muted">এখনো কেউ উত্তর জমা দেয়নি।</p>
+          ) : (
+            <div class="answers">
+              {submissions.map((s) => (
+                <article class="answer">
+                  <h4>{s.studentName} <span class="id">{studentCode(s.studentNo)}</span></h4>
+                  <p class="body">{s.body}</p>
+                  {s.state === 'reviewed' ? (
+                    <p class="note note--good">মূল্যায়ন: {s.score === null ? 'নম্বর ছাড়া' : `${bnDigits(s.score)} / ১০০`}{s.feedback && ` · ${s.feedback}`}</p>
+                  ) : edit ? (
+                    <form method="post" class="form-grid" data-confirm="মূল্যায়ন সংরক্ষণের পর আর বদলানো যাবে না। সংরক্ষণ করবেন?">
+                      <input type="hidden" name="action" value="review" /><input type="hidden" name="assignmentId" value={selected.id} />
+                      <input type="hidden" name="enrollmentId" value={s.enrollmentId} />
+                      <label class="field"><span>নম্বর (ঐচ্ছিক, ১০০ এর মধ্যে)</span><input name="score" type="number" min="0" max="100" /></label>
+                      <label class="field wide"><span>মতামত</span><textarea name="feedback" rows="3" maxlength="1200"></textarea></label>
+                      <button class="button button--sm">মূল্যায়ন সংরক্ষণ</button>
+                    </form>
+                  ) : (
+                    <p class="muted">মূল্যায়ন বাকি।</p>
+                  )}
+                </article>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  )}
+</Admin>
+
+<style>
+  .block {
+    margin-top: var(--space-5);
+  }
+  .body {
+    white-space: pre-wrap;
+  }
+  .list .current {
+    background: var(--mint-100);
+  }
+  .answers {
+    display: grid;
+    gap: var(--space-4);
+  }
+  .answer {
+    padding: var(--space-4);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+  }
+</style>

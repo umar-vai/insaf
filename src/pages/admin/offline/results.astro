@@ -1,0 +1,58 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { listAssessments } from '../../../server/assessment';
+import { bnDigits } from '../../../lib/format';
+import { dayBn } from '../../../lib/offline';
+
+// Every exam with where its gradebook stands. Exams are added on the batch page.
+const pending = Astro.url.searchParams.get('show') !== 'all';
+const exams = await listAssessments(env.DB, { pending, limit: 300 });
+const stage = (x: (typeof exams)[number]) =>
+  x.examStatus === 'cancelled'
+    ? { label: 'বাতিল', tone: 'cancelled' }
+    : x.status === 'published'
+      ? { label: 'ফল প্রকাশিত', tone: 'published' }
+      : x.status === 'draft'
+        ? { label: `নম্বর ${bnDigits(x.completed)} / ${bnDigits(x.examinees)}`, tone: 'draft' }
+        : { label: 'গ্রেডবুক তৈরি বাকি', tone: 'pending' };
+---
+
+<Admin title="ফল ও গ্রেডবুক">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">একাডেমিক</p>
+      <h1>ফল ও গ্রেডবুক</h1>
+      <p>প্রতিটি পরীক্ষার পূর্ণমান ও পাস নম্বর ঠিক করুন, নম্বর দেখুন, আর সবার নম্বর হয়ে গেলে ফল প্রকাশ করুন। নতুন পরীক্ষা যোগ হয় <a href="/admin/offline/batches">ক্লাস ও রুটিন</a> থেকে।</p>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="তালিকা">
+    <a href="?show=pending" aria-current={pending ? 'page' : undefined}>কাজ বাকি</a>
+    <a href="?show=all" aria-current={!pending ? 'page' : undefined}>সব পরীক্ষা</a>
+  </nav>
+
+  <section class="card">
+    {exams.length === 0 ? (
+      <p class="muted">{pending ? 'কোনো পরীক্ষার কাজ বাকি নেই।' : 'এখনো কোনো পরীক্ষা নেই।'}</p>
+    ) : (
+      <ul class="list">
+        {exams.map((x) => {
+          const s = stage(x);
+          return (
+            <li>
+              <div>
+                <strong>{x.title}</strong>
+                <small>{x.batchName} · {dayBn(x.examDate)}{x.subject && ` · ${x.subject}`}</small>
+              </div>
+              <span class={`pill pill--${s.tone}`}>{s.label}</span>
+              <a class="button button--ghost button--sm" href={`/admin/offline/gradebook/${x.examId}`}><Icon name="chart" /> গ্রেডবুক</a>
+            </li>
+          );
+        })}
+      </ul>
+    )}
+  </section>
+</Admin>
+

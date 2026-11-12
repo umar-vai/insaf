@@ -8,7 +8,9 @@ import Icon from '../../../components/Icon.astro';
 import { createNotice, listNotices, roster, saveAttendance } from '../../../server/office';
 import { addMaterial, batchForTeacher, hideMaterial, listMaterials, teacherSession } from '../../../server/panels';
 import { getSettings } from '../../../server/settings';
-import { DAY_BN, isYmd, parseDays, studentCode, timeBn, todayDhaka } from '../../../lib/offline';
+import { sameOrigin } from '../../../server/session';
+import { assignmentStatusBn, assignmentsForBatch, createAssignment, homeworkKindBn, listBatchAssessments } from '../../../server/assessment';
+import { DAY_BN, dayBn, isYmd, parseDays, studentCode, timeBn, todayDhaka } from '../../../lib/offline';
 import { bnDigits, dateBn } from '../../../lib/format';
 
 Astro.response.headers.set('Cache-Control', 'no-store');
@@ -41,6 +43,17 @@ if (Astro.request.method === 'POST' && teacher && batch) {
     await hideMaterial(env.DB, me.email, String(form.get('materialId') ?? ''), [id]);
     return back('saved=1', '#materials');
   }
+  if (action === 'homework') {
+    if (!sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
+    const r = await createAssignment(env.DB, me.email, id, {
+      title: String(form.get('title') ?? ''),
+      details: String(form.get('details') ?? ''),
+      dueOn: String(form.get('dueOn') ?? ''),
+      kind: form.get('kind') === 'lesson' ? 'lesson' : 'homework',
+    });
+    if (r.ok) return Astro.redirect(`/teacher/homework/${r.value}?saved=1`, 303);
+    return back(`error=${r.error}`, '#homework');
+  }
   if (action === 'notice' && s.teacherCanPostNotice) {
     const title = String(form.get('title') ?? '').trim().slice(0, 160);
     if (title.length < 2) return back('error=title', '#notices');
@@ -52,9 +65,16 @@ if (Astro.request.method === 'POST' && teacher && batch) {
 
 const askedDay = Astro.url.searchParams.get('day') ?? today;
 const day = isYmd(askedDay) && askedDay <= today ? askedDay : today;
-const [rows, materials, notices] = batch
-  ? await Promise.all([roster(env.DB, id, day), listMaterials(env.DB, [id]), listNotices(env.DB, ['batch'], 200)])
-  : [[], [], []];
+const [rows, materials, notices, assignments, allExams] = batch
+  ? await Promise.all([
+      roster(env.DB, id, day),
+      listMaterials(env.DB, [id]),
+      listNotices(env.DB, ['batch'], 200),
+      assignmentsForBatch(env.DB, id, true),
+      listBatchAssessments(env.DB, id),
+    ])
+  : [[], [], [], [], []];
+const exams = allExams.filter((x) => x.examStatus === 'scheduled');
 const batchNotices = notices.filter((n) => n.targetId === id && n.status === 'published');
 const saved = Astro.url.searchParams.has('saved');
 const failed = Astro.url.searchParams.has('error');
@@ -100,6 +120,60 @@ const failed = Astro.url.searchParams.has('error');
               </li>
             ))}
           </ul>
+        </section>
+
+        <section class="card block" id="assessment">
+          <div class="card__head"><h2>পরীক্ষার নম্বর</h2></div>
+          {exams.length === 0 ? (
+            <p class="muted">এই ব্যাচে কোনো পরীক্ষা নেই।</p>
+          ) : (
+            <ul class="list">
+              {exams.map((x) => (
+                <li>
+                  <div>
+                    <strong>{x.title}</strong>
+                    <small>{dayBn(x.examDate)}{x.subject && ` · ${x.subject}`}</small>
+                  </div>
+                  <span class={`pill pill--${x.status === 'published' ? 'published' : x.status === 'draft' ? 'draft' : 'pending'}`}>
+                    {x.status === 'published' ? 'ফল প্রকাশিত' : x.status === 'draft' ? `নম্বর ${bnDigits(x.completed)} / ${bnDigits(x.examinees)}` : 'অফিস গ্রেডবুক খুলবে'}
+                  </span>
+                  {x.status && <a class="button button--ghost button--sm" href={`/teacher/exam/${x.examId}`}>{x.status === 'draft' ? 'নম্বর দিন' : 'দেখুন'}</a>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section class="card block" id="homework">
+          <div class="card__head"><h2>হোমওয়ার্ক ও পাঠ পরিকল্পনা</h2></div>
+          {assignments.length === 0 ? (
+            <p class="muted">এখনো কোনো কাজ দেওয়া হয়নি।</p>
+          ) : (
+            <ul class="list">
+              {assignments.map((a) => (
+                <li>
+                  <div>
+                    <strong>{a.title}</strong>
+                    <small>{homeworkKindBn(a.kind)} · {dayBn(a.dueOn)}{a.kind === 'homework' && ` · জমা ${bnDigits(a.submissions)}, মূল্যায়িত ${bnDigits(a.reviewed)}`}</small>
+                  </div>
+                  <span class={`pill pill--${a.status === 'closed' ? 'archived' : a.status}`}>{assignmentStatusBn(a.status)}</span>
+                  <a class="button button--ghost button--sm" href={`/teacher/homework/${a.id}`}>খুলুন</a>
+                </li>
+              ))}
+            </ul>
+          )}
+          <details>
+            <summary>নতুন হোমওয়ার্ক বা পাঠ</summary>
+            <form method="post" class="form-grid add">
+              <input name="action" type="hidden" value="homework" />
+              <label class="field"><span>ধরন</span><select name="kind"><option value="homework">হোমওয়ার্ক</option><option value="lesson">পাঠ পরিকল্পনা</option></select></label>
+              <label class="field"><span>জমার শেষ দিন / পাঠের দিন</span><input name="dueOn" type="date" required value={today} /></label>
+              <label class="field wide"><span>শিরোনাম</span><input name="title" required minlength="2" maxlength="160" /></label>
+              <label class="field wide"><span>নির্দেশনা</span><textarea name="details" rows="4" maxlength="4000"></textarea></label>
+              <button class="button">খসড়া তৈরি করুন</button>
+            </form>
+            <p class="muted">খসড়া তৈরি হলে খুলে "প্রকাশ করুন" চাপলে তবেই ছাত্র ও অভিভাবক দেখতে পাবেন।</p>
+          </details>
         </section>
 
         <section class="card block" id="materials">

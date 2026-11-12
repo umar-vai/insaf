@@ -44,6 +44,7 @@ const totals = active.reduce((a, e) => ({ paid: a.paid + e.ledger.paidMinor, due
             <h1>{panel.people.map((p) => p.student.name).join(', ')}</h1>
             <p>{panel.people.map((p) => <span class="id">{studentCode(p.student.studentNo)}</span>)}</p>
             {currentAcademicSession && <p class="muted">বর্তমান শিক্ষাবর্ষ: {currentAcademicSession.name}</p>}
+            <p><a href="/account/offline/results">পরীক্ষার রিপোর্ট কার্ড</a> · <a href="/account/offline/homework">হোমওয়ার্ক ও পাঠ</a></p>
           </div>
         </header>
 

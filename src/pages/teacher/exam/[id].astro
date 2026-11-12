@@ -1,0 +1,63 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotTeacher from '../../../components/NotTeacher.astro';
+import MarkSheet from '../../../components/MarkSheet.astro';
+import { teacherSession, batchForTeacher } from '../../../server/panels';
+import { sameOrigin } from '../../../server/session';
+import { examAssessment, examMarks, markInputsFromForm, saveExamMarks } from '../../../server/assessment';
+import { bnDigits } from '../../../lib/format';
+import { dayBn } from '../../../lib/offline';
+
+// A teacher enters marks only for exams of a batch they teach now. Setting up
+// the gradebook and publishing stay with the office.
+Astro.response.headers.set('Cache-Control', 'no-store');
+const id = Astro.params.id!;
+const here = `/teacher/exam/${encodeURIComponent(id)}`;
+const { me, teacher } = await teacherSession(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect(`/account?return=${encodeURIComponent(here)}`, 303);
+const exam = teacher ? await examAssessment(env.DB, id) : null;
+if (teacher && !exam) return new Response('পরীক্ষাটি পাওয়া যায়নি।', { status: 404 });
+if (teacher && exam && !(await batchForTeacher(env.DB, teacher.id, exam.batchId))) return new Response('এই পরীক্ষাটি আপনার ব্যাচের নয়।', { status: 403 });
+
+if (Astro.request.method === 'POST' && teacher && exam) {
+  if (!sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
+  const form = await Astro.request.formData();
+  const r = await saveExamMarks(env.DB, me.email, id, markInputsFromForm(form));
+  return Astro.redirect(`${here}?${r.ok ? 'saved=1' : `error=${encodeURIComponent(r.error)}`}`, 303);
+}
+const rows = exam?.status ? await examMarks(env.DB, id) : [];
+const canEdit = exam?.status === 'draft' && exam.examStatus === 'scheduled';
+const err = Astro.url.searchParams.get('error');
+---
+
+{
+  !teacher || !exam ? (
+    <NotTeacher me={me} />
+  ) : (
+    <AccountShell me={me} active="t-home" title={`নম্বর · ${exam.title}`} mode="teacher">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <p class="eyebrow"><a href={`/teacher/batch/${exam.batchId}#assessment`}>{exam.batchName}</a></p>
+            <h1>{exam.title}</h1>
+            <p>{exam.subject || 'বিষয় লেখা নেই'} · {dayBn(exam.examDate)}</p>
+          </div>
+        </header>
+        {Astro.url.searchParams.has('saved') && <p class="note note--good" role="status">নম্বর সংরক্ষণ হয়েছে।</p>}
+        {err && <p class="note note--bad" role="alert">{err === 'marks' ? 'কোনো নম্বর পূর্ণমানের বেশি বা ভুল। কিছুই সংরক্ষণ হয়নি, ঠিক করে আবার সংরক্ষণ করুন।' : 'এই পরীক্ষার নম্বর এখন আর বদলানো যাবে না।'}</p>}
+        {exam.examStatus === 'cancelled' ? (
+          <p class="note note--bad">এই পরীক্ষা বাতিল হয়েছে।</p>
+        ) : !exam.status ? (
+          <p class="note">অফিস পূর্ণমান, পাস নম্বর ও পরীক্ষার্থী তালিকা ঠিক করলে এখানে নম্বর দিতে পারবেন।</p>
+        ) : (
+          <>
+            {exam.status === 'published' && <p class="note note--good">ফল প্রকাশিত। নম্বর আর বদলানো যাবে না।</p>}
+            {canEdit && <p class="muted">প্রত্যেকের নম্বর লিখুন বা "অনুপস্থিত" চাপুন, তারপর নিচের বোতামে একবারে সংরক্ষণ করুন। ফাঁকা রাখলে সেটি পরে দেওয়া যাবে। সব {bnDigits(exam.examinees)} জনের হয়ে গেলে অফিস ফল প্রকাশ করবে।</p>}
+            <MarkSheet exam={exam} rows={rows} editable={canEdit} />
+          </>
+        )}
+      </div>
+    </AccountShell>
+  )
+}
