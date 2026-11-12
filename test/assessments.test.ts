@@ -2,13 +2,14 @@ import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
  examAssessment, configureAssessment, examMarks, recordExamMark, publishAssessment,
- publishedResultsForEmail, teacherOwnsBatch,
+ publishedResultsForEmail, saveExamMarks, markInputsFromForm, listAssessments,
  assignmentsForBatch, createAssignment, publishAssignment, closeAssignment,
  homeworkForEmail, submitHomework, assignmentSubmissions, reviewHomework, percentScore, resultLabel,
 } from '../src/server/assessment';
 import { cancelExam } from '../src/server/academic';
 import { adminModule } from '../src/server/staff';
 import { linkGuardian } from '../src/server/school-academic';
+import { batchForTeacher } from '../src/server/panels';
 
 const db=env.DB;
 const actor='staff@example.org';
@@ -69,9 +70,52 @@ describe('secure exam gradebook',()=>{
  });
  it('teacher scope follows assignment, not arbitrary exam ID',async()=>{
    await seed();
-   expect(await teacherOwnsBatch(db,'t1','b1')).toBe(true);
-   expect(await teacherOwnsBatch(db,'t1','b2')).toBe(false);
-   expect(await teacherOwnsBatch(db,'t2','b1')).toBe(false);
+   expect(await batchForTeacher(db,'t1','b1')).not.toBeNull();
+   expect(await batchForTeacher(db,'t1','b2')).toBeNull();
+   expect(await batchForTeacher(db,'t2','b1')).toBeNull();
+ });
+ it('saves a whole mark sheet at once, all or nothing, and skips blanks',async()=>{
+   await seed();
+   expect((await saveExamMarks(db,actor,'ex1',[])).ok).toBe(false); // not configured yet
+   await configureAssessment(db,actor,'ex1','50','20',true);
+   expect((await listAssessments(db,{pending:true})).map(x=>x.examId)).toEqual(['ex1']);
+   const form=new FormData();
+   form.append('enrollmentId','e1');form.append('obtained_e1','৪৫');form.append('comment_e1','ভালো');
+   form.append('enrollmentId','e2');form.append('obtained_e2','');
+   form.append('enrollmentId','e3');form.append('obtained_e3','10'); // other batch, not an examinee
+   const saved=await saveExamMarks(db,actor,'ex1',markInputsFromForm(form));
+   expect(saved).toEqual({ok:true,value:1});
+   let rows=await examMarks(db,'ex1');
+   expect(rows.map(r=>[r.enrollmentId,r.obtained,r.attendance])).toEqual([['e1',45,'present'],['e2',null,null]]);
+   // One bad row means nothing is written.
+   expect((await saveExamMarks(db,actor,'ex1',[
+     {enrollmentId:'e1',obtained:'30',absent:false,comment:''},
+     {enrollmentId:'e2',obtained:'51',absent:false,comment:''},
+   ])).ok).toBe(false);
+   rows=await examMarks(db,'ex1');
+   expect(rows[0]?.obtained).toBe(45);
+   // Unchanged rows are not rewritten; absent wins over a typed number.
+   expect(await saveExamMarks(db,actor,'ex1',[
+     {enrollmentId:'e1',obtained:'45',absent:false,comment:'ভালো'},
+     {enrollmentId:'e2',obtained:'12',absent:true,comment:''},
+   ])).toEqual({ok:true,value:1});
+   expect((await examMarks(db,'ex1'))[1]?.attendance).toBe('absent');
+   expect((await publishAssessment(db,actor,'ex1')).ok).toBe(true);
+   expect((await listAssessments(db,{pending:true}))).toEqual([]);
+   expect((await saveExamMarks(db,actor,'ex1',[{enrollmentId:'e1',obtained:'1',absent:false,comment:''}])).ok).toBe(false);
+   const log=await db.prepare("SELECT count(*) AS n FROM admin_events WHERE action='assessment.marks'").first<{n:number}>();
+   expect(log?.n).toBe(2);
+ });
+ it('a cancelled exam cannot be set up and draft marks never reach students',async()=>{
+   await seed();
+   await configureAssessment(db,actor,'ex1','100','33',true);
+   await recordExamMark(db,actor,'ex1','e1','70',false,'');
+   expect(await publishedResultsForEmail(db,'rahim@example.org')).toEqual([]);
+   expect(await cancelExam(db,actor,'ex1')).toBe(true);
+   expect((await recordExamMark(db,actor,'ex1','e2','10',false,'')).ok).toBe(false);
+   expect((await publishAssessment(db,actor,'ex1')).ok).toBe(false);
+   await db.prepare("INSERT INTO offline_exams(id,batch_id,title,subject,exam_date,status,created_by) VALUES('ex2','b1','Old','Quran','2026-10-01','cancelled','a')").run();
+   expect((await configureAssessment(db,actor,'ex2','100','33',true)).ok).toBe(false);
  });
 });
 describe('homework and guardian separation',()=>{

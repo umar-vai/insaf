@@ -1,55 +1,63 @@
 ---
 import { env } from 'cloudflare:workers';
 import AccountShell from '../../../components/AccountShell.astro';
+import NotTeacher from '../../../components/NotTeacher.astro';
+import MarkSheet from '../../../components/MarkSheet.astro';
 import { teacherSession, batchForTeacher } from '../../../server/panels';
 import { sameOrigin } from '../../../server/session';
-import { examAssessment, examMarks, recordExamMark, resultLabel } from '../../../server/assessment';
+import { examAssessment, examMarks, markInputsFromForm, saveExamMarks } from '../../../server/assessment';
 import { bnDigits } from '../../../lib/format';
 import { dayBn } from '../../../lib/offline';
-Astro.response.headers.set('Cache-Control','no-store');
-const id=Astro.params.id!;
-const here=`/teacher/exam/${encodeURIComponent(id)}`;
-const {me,teacher}=await teacherSession(env.DB,env,Astro.request.headers.get('Cookie'));
-if(!me)return Astro.redirect(`/account?return=${encodeURIComponent(here)}`,303);
-if(!teacher)return new Response('Teacher access only',{status:403});
-const exam=await examAssessment(env.DB,id);
-if(!exam)return new Response('Exam not found',{status:404});
-if(!(await batchForTeacher(env.DB,teacher.id,exam.batchId)))return new Response('Not your exam',{status:403});
-if(Astro.request.method==='POST'){
- if(!sameOrigin(Astro.request))return new Response('Bad origin',{status:403});
- const form=await Astro.request.formData();
- const r=await recordExamMark(env.DB,me.email,id,String(form.get('enrollmentId')??''),
-  form.get('obtained'),form.get('absent')==='yes',form.get('comment'));
- return Astro.redirect(`${here}?${r.ok?'saved=1':`error=${encodeURIComponent(r.error)}`}`,303);
+
+// A teacher enters marks only for exams of a batch they teach now. Setting up
+// the gradebook and publishing stay with the office.
+Astro.response.headers.set('Cache-Control', 'no-store');
+const id = Astro.params.id!;
+const here = `/teacher/exam/${encodeURIComponent(id)}`;
+const { me, teacher } = await teacherSession(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect(`/account?return=${encodeURIComponent(here)}`, 303);
+const exam = teacher ? await examAssessment(env.DB, id) : null;
+if (teacher && !exam) return new Response('পরীক্ষাটি পাওয়া যায়নি।', { status: 404 });
+if (teacher && exam && !(await batchForTeacher(env.DB, teacher.id, exam.batchId))) return new Response('এই পরীক্ষাটি আপনার ব্যাচের নয়।', { status: 403 });
+
+if (Astro.request.method === 'POST' && teacher && exam) {
+  if (!sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
+  const form = await Astro.request.formData();
+  const r = await saveExamMarks(env.DB, me.email, id, markInputsFromForm(form));
+  return Astro.redirect(`${here}?${r.ok ? 'saved=1' : `error=${encodeURIComponent(r.error)}`}`, 303);
 }
-const rows=await examMarks(env.DB,id);
-const canEdit=exam.status==='draft'&&exam.examStatus==='scheduled';
+const rows = exam?.status ? await examMarks(env.DB, id) : [];
+const canEdit = exam?.status === 'draft' && exam.examStatus === 'scheduled';
+const err = Astro.url.searchParams.get('error');
 ---
-<AccountShell me={me} active="t-home" title="পরীক্ষার নম্বর" mode="teacher">
- <div class="ui">
-  <header class="page-head"><div>
-   <p class="eyebrow"><a href={`/teacher/batch/${exam.batchId}`}>আমার ব্যাচ</a></p>
-   <h1>{exam.title} — নম্বর প্রদান</h1>
-   <p>{exam.batchName} · {dayBn(exam.examDate)} · {exam.subject}</p>
-  </div></header>
-  {Astro.url.searchParams.has('saved')&&<p class="note note--good">নম্বর সংরক্ষিত হয়েছে।</p>}
-  {Astro.url.searchParams.has('error')&&<p class="note note--bad">নম্বর দেওয়া যায়নি; তালিকা ও সীমা যাচাই করুন।</p>}
-  {!exam.status?<p class="note">অ্যাডমিন পরীক্ষার্থীর তালিকা ও পূর্ণমান নিশ্চিত করলে নম্বর দেওয়া যাবে।</p>:(
-  <section class="card">
-   <h2>পরীক্ষার্থী {bnDigits(rows.length)} জন — পূর্ণমান {bnDigits(exam.maxMarks!)} · পাস {bnDigits(exam.passMarks!)}</h2>
-   {exam.status==='published'&&<p class="note note--good">ফলাফল প্রকাশিত; আর পরিবর্তন করা যাবে না।</p>}
-   <div class="marks">
-    {rows.map(r=><form method="post" class="mark">
-      <input type="hidden" name="enrollmentId" value={r.enrollmentId}/>
-      <div><strong>{r.studentName}</strong><small>রোল {r.roll||'—'} · MI-{r.studentNo??'—'}</small></div>
-      {canEdit?<><label class="field"><span>নম্বর</span><input name="obtained" inputmode="numeric" type="number" min="0" max={exam.maxMarks!} value={r.obtained??''}/></label>
-      <label class="check"><input name="absent" type="checkbox" value="yes" checked={r.attendance==='absent'}/> অনুপস্থিত</label>
-      <label class="field"><span>মন্তব্য</span><input name="comment" maxlength="500" value={r.comment??''}/></label>
-      <button class="button button--sm">সংরক্ষণ</button></>:<span>{r.attendance==='absent'?'অনুপস্থিত':r.obtained===null?'নম্বর বাকি':bnDigits(r.obtained)} · {r.attendance?resultLabel(r.obtained,exam.passMarks!,r.attendance):'অপ্রস্তুত'}</span>}
-    </form>)}
-   </div>
-   <p class="muted">শিক্ষক নম্বর দিতে পারবেন; চূড়ান্ত ফল প্রকাশ করবেন একাডেমিক Full অ্যাডমিন।</p>
-  </section>)}
- </div>
-</AccountShell>
-<style>.marks{display:grid;gap:var(--space-3)}.mark{padding:var(--space-3);border:1px solid var(--color-line);border-radius:var(--radius-md);display:grid;grid-template-columns:1fr 100px auto 1fr auto;gap:var(--space-3);align-items:end}.mark small{display:block}.mark .field{min-width:0}@media(max-width:760px){.mark{grid-template-columns:1fr 1fr}.mark>div:first-of-type{grid-column:1/-1}.mark button{grid-column:1/-1}}</style>
+
+{
+  !teacher || !exam ? (
+    <NotTeacher me={me} />
+  ) : (
+    <AccountShell me={me} active="t-home" title={`নম্বর · ${exam.title}`} mode="teacher">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <p class="eyebrow"><a href={`/teacher/batch/${exam.batchId}#assessment`}>{exam.batchName}</a></p>
+            <h1>{exam.title}</h1>
+            <p>{exam.subject || 'বিষয় লেখা নেই'} · {dayBn(exam.examDate)}</p>
+          </div>
+        </header>
+        {Astro.url.searchParams.has('saved') && <p class="note note--good" role="status">নম্বর সংরক্ষণ হয়েছে।</p>}
+        {err && <p class="note note--bad" role="alert">{err === 'marks' ? 'কোনো নম্বর পূর্ণমানের বেশি বা ভুল। কিছুই সংরক্ষণ হয়নি, ঠিক করে আবার সংরক্ষণ করুন।' : 'এই পরীক্ষার নম্বর এখন আর বদলানো যাবে না।'}</p>}
+        {exam.examStatus === 'cancelled' ? (
+          <p class="note note--bad">এই পরীক্ষা বাতিল হয়েছে।</p>
+        ) : !exam.status ? (
+          <p class="note">অফিস পূর্ণমান, পাস নম্বর ও পরীক্ষার্থী তালিকা ঠিক করলে এখানে নম্বর দিতে পারবেন।</p>
+        ) : (
+          <>
+            {exam.status === 'published' && <p class="note note--good">ফল প্রকাশিত। নম্বর আর বদলানো যাবে না।</p>}
+            {canEdit && <p class="muted">প্রত্যেকের নম্বর লিখুন বা "অনুপস্থিত" চাপুন, তারপর নিচের বোতামে একবারে সংরক্ষণ করুন। ফাঁকা রাখলে সেটি পরে দেওয়া যাবে। সব {bnDigits(exam.examinees)} জনের হয়ে গেলে অফিস ফল প্রকাশ করবে।</p>}
+            <MarkSheet exam={exam} rows={rows} editable={canEdit} />
+          </>
+        )}
+      </div>
+    </AccountShell>
+  )
+}

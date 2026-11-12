@@ -43,7 +43,7 @@ const { rows, day, batchName, marked } = Astro.props;
     ))}
   </ul>
   <div class="foot">
-    <span class="muted" data-count></span>
+    <span class="muted" data-present-count></span>
     <button class="button button--leaf"><Icon name="check" /> হাজিরা সংরক্ষণ করুন</button>
   </div>
 </form>
@@ -51,7 +51,7 @@ const { rows, day, batchName, marked } = Astro.props;
 <script>
   const sheet = document.querySelector<HTMLFormElement>('[data-sheet]');
   if (sheet) {
-    const count = sheet.querySelector<HTMLElement>('[data-count]')!;
+    const count = sheet.querySelector<HTMLElement>('[data-present-count]')!;
     const update = () => {
       const all = sheet.querySelectorAll('.roster li').length;
       const here = sheet.querySelectorAll('input[value="present"]:checked, input[value="late"]:checked').length;
