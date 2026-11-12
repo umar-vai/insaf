@@ -34,7 +34,17 @@ export type Settings = {
   lateFeeTaka: number;
   /** Days after an installment's date before the late fee is added. */
   lateGraceDays: number;
+  /** How many days a library book is lent for. */
+  libraryLoanDays: number;
+  /** Fine in taka for each day a student keeps a book late (0 = no fine). */
+  libraryFinePerDayTaka: number;
+  /** Teachers and staff mark their own arrival and leaving in the teacher panel. */
+  staffSelfAttendance: boolean;
+  /** Office start time (HH:MM). Arriving after it counts as late; empty: never late. */
+  staffStartTime: string;
 };
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export const DEFAULT_DUE_TEMPLATE =
   'আসসালামু আলাইকুম, {name}। মাদরাসাতুল ইনসাফে {course} এর {amount} বকেয়া আছে (তারিখ ছিল {date})। অনুগ্রহ করে দ্রুত পরিশোধ করুন। জাযাকাল্লাহু খাইরান।';
@@ -52,10 +62,14 @@ export const DEFAULTS: Settings = {
   teacherRatings: true,
   lateFeeTaka: 0,
   lateGraceDays: 7,
+  libraryLoanDays: 14,
+  libraryFinePerDayTaka: 0,
+  staffSelfAttendance: false,
+  staffStartTime: '',
 };
 
 /** Allowed range for each number. */
-const RANGE: Partial<Record<keyof Settings, [number, number]>> = { paidLeaveDays: [0, 31], expenseApprovalOver: [0, 100_000_000], lateFeeTaka: [0, 100_000], lateGraceDays: [0, 90] };
+const RANGE: Partial<Record<keyof Settings, [number, number]>> = { paidLeaveDays: [0, 31], expenseApprovalOver: [0, 100_000_000], lateFeeTaka: [0, 100_000], lateGraceDays: [0, 90], libraryLoanDays: [1, 365], libraryFinePerDayTaka: [0, 10_000] };
 const inRange = (k: keyof Settings, n: number) => Number.isInteger(n) && n >= (RANGE[k]?.[0] ?? 0) && n <= (RANGE[k]?.[1] ?? 0);
 const toNumber = (raw: unknown) => Number(String(raw ?? '').replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d))).replace(/[,\s]/g, ''));
 
@@ -70,6 +84,7 @@ function read(key: keyof Settings, raw: string | undefined): Settings[keyof Sett
     return inRange(key, n) ? n : d;
   }
   if (key === 'salaryBasis') return (SALARY_BASES as readonly string[]).includes(raw) ? raw : d;
+  if (key === 'staffStartTime') return HHMM.test(raw) ? raw : '';
   return raw.slice(0, 1000) || d;
 }
 
@@ -82,13 +97,15 @@ export async function getSettings(db: D1Database): Promise<Settings> {
 /** Reads the settings form. Unchecked boxes mean off. */
 export function parseSettingsForm(form: FormData): Settings {
   const s = { ...DEFAULTS };
-  for (const k of ['paidLeaveDays', 'expenseApprovalOver', 'lateFeeTaka', 'lateGraceDays'] as const) {
+  for (const k of ['paidLeaveDays', 'expenseApprovalOver', 'lateFeeTaka', 'lateGraceDays', 'libraryLoanDays', 'libraryFinePerDayTaka'] as const) {
     const n = toNumber(form.get(k));
     s[k] = inRange(k, n) ? n : DEFAULTS[k];
   }
   const basis = String(form.get('salaryBasis') ?? '');
   s.salaryBasis = (SALARY_BASES as readonly string[]).includes(basis) ? (basis as SalaryBasis) : DEFAULTS.salaryBasis;
-  for (const k of ['onlineFees', 'teacherSeesPhones', 'teacherCanPostNotice', 'teacherCanShareMaterial', 'teacherTakesAttendance', 'teacherRatings'] as const) s[k] = form.get(k) === 'on';
+  for (const k of ['onlineFees', 'teacherSeesPhones', 'teacherCanPostNotice', 'teacherCanShareMaterial', 'teacherTakesAttendance', 'teacherRatings', 'staffSelfAttendance'] as const) s[k] = form.get(k) === 'on';
+  const start = String(form.get('staffStartTime') ?? '').trim();
+  s.staffStartTime = HHMM.test(start) ? start : '';
   s.dueTemplate = String(form.get('dueTemplate') ?? '').replace(/\r\n/g, '\n').trim().slice(0, 1000) || DEFAULT_DUE_TEMPLATE;
   return s;
 }

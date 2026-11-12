@@ -1,0 +1,107 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { getSettings } from '../../../server/settings';
+import { saveStaffDay, STAFF_STATUS_BN, STAFF_STATUSES, staffDay, staffMarksFromForm, staffMonth } from '../../../server/staff-attendance';
+import { dayBn, isYmd, monthBn, timeBn, todayDhaka } from '../../../lib/offline';
+import { bnDigits } from '../../../lib/format';
+
+const actor = Astro.locals.staff!;
+const today = todayDhaka();
+const here = '/admin/offline/staff-attendance';
+const dayParam = Astro.url.searchParams.get('day') ?? '';
+const day = isYmd(dayParam) && dayParam <= today ? dayParam : today;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const d = String(form.get('day') ?? '');
+  const rows = await staffDay(env.DB, isYmd(d) ? d : today);
+  const n = await saveStaffDay(env.DB, actor, d, staffMarksFromForm(form, rows.map((r) => r.teacherId)), today);
+  return Astro.redirect(`${here}?day=${encodeURIComponent(d)}&${n ? 'saved=1' : 'error=none'}`, 303);
+}
+const monthParam = Astro.url.searchParams.get('month') ?? '';
+const month = /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : day.slice(0, 7);
+const [rows, summary, s] = await Promise.all([staffDay(env.DB, day), staffMonth(env.DB, month), getSettings(env.DB)]);
+const marked = rows.filter((r) => r.status).length;
+---
+
+<Admin title="কর্মীর হাজিরা">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">শিক্ষক ও বেতন</p>
+      <h1>শিক্ষক ও কর্মীর হাজিরা</h1>
+      <p>
+        দিনের হাজিরা একবারে দিন। অনুমোদিত ছুটিতে থাকা কর্মীর পাশে ছুটি লেখা থাকে।
+        {s.staffSelfAttendance ? ' শিক্ষকরা নিজের প্যানেল থেকে আসা ও যাওয়ার সময় দিতে পারেন (সার্ভারের সময় অনুযায়ী)।' : ' শিক্ষকরা নিজে হাজিরা দেওয়ার সুবিধা অফিসের নিয়মে চালু করা যায়।'}
+        {s.staffStartTime && ` অফিস শুরু ${timeBn(s.staffStartTime)}, এর পরে এলে দেরি ধরা হয়।`}
+      </p>
+    </div>
+    <div class="actions"><a class="button button--ghost" href="/admin/offline/settings#staff"><Icon name="layers" /> হাজিরার নিয়ম</a></div>
+  </header>
+  {Astro.url.searchParams.get('error') === 'none' && <p class="note note--bad">কিছু সংরক্ষণ হয়নি। প্রত্যেকের অবস্থা বাছুন (ভবিষ্যতের তারিখে হাজিরা দেওয়া যায় না)।</p>}
+
+  <section class="card">
+    <div class="card__head">
+      <h2>{dayBn(day)} · {bnDigits(marked)}/{bnDigits(rows.length)} জনের হাজিরা আছে</h2>
+      <form method="get" class="inline"><input type="date" name="day" value={day} max={today} aria-label="তারিখ" /><button class="button button--sm button--ghost">দেখুন</button></form>
+    </div>
+    {rows.length === 0 ? <p class="muted">কোনো চালু শিক্ষক বা কর্মী নেই।</p> : (
+      <form method="post">
+        <input type="hidden" name="day" value={day} />
+        <div class="table-wrap"><table>
+          <thead><tr><th>নাম</th><th>অবস্থা</th><th>আসা</th><th>যাওয়া</th><th>নোট</th></tr></thead>
+          <tbody>{rows.map((r) => (
+            <tr>
+              <td><strong>{r.name}</strong> <small class="muted">{r.role === 'staff' ? 'কর্মী' : 'শিক্ষক'}</small>
+                {r.onLeave ? <span class="pill pill--leave">অনুমোদিত ছুটি</span> : null}
+                {r.source === 'self' && <small class="muted"> · নিজে দিয়েছেন</small>}</td>
+              <td>
+                <select name={`status_${r.teacherId}`} aria-label={`${r.name} এর অবস্থা`}>
+                  <option value="">বাছুন</option>
+                  {STAFF_STATUSES.map((st) => <option value={st} selected={(r.status ?? (r.onLeave ? 'leave' : '')) === st}>{STAFF_STATUS_BN[st]}</option>)}
+                </select>
+              </td>
+              <td><input type="time" name={`in_${r.teacherId}`} value={r.inTime} aria-label="আসার সময়" /></td>
+              <td><input type="time" name={`out_${r.teacherId}`} value={r.outTime} aria-label="যাওয়ার সময়" /></td>
+              <td><input name={`note_${r.teacherId}`} value={r.note} maxlength="200" aria-label="নোট" /></td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+        <p class="actions-row">
+          <button type="button" class="button button--ghost" data-all-present>বাকিদের উপস্থিত ধরুন</button>
+          <button class="button"><Icon name="check" /> হাজিরা সংরক্ষণ</button>
+        </p>
+      </form>
+    )}
+  </section>
+
+  <section class="card section-block">
+    <div class="card__head">
+      <h2>{monthBn(month, true)} মাসের হিসাব</h2>
+      <form method="get" class="inline"><input type="month" name="month" value={month} aria-label="মাস" /><button class="button button--sm button--ghost">দেখুন</button></form>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>নাম</th><th>উপস্থিত</th><th>দেরিতে</th><th>অনুপস্থিত</th><th>ছুটি (হাজিরায়)</th><th>অনুমোদিত ছুটির দিন</th></tr></thead>
+      <tbody>{summary.map((r) => (
+        <tr><td>{r.name}</td><td>{bnDigits(r.present)}</td><td>{bnDigits(r.late)}</td><td>{bnDigits(r.absent)}</td><td>{bnDigits(r.leave)}</td><td>{bnDigits(r.leaveApproved)}</td></tr>
+      ))}</tbody>
+    </table></div>
+    <p class="muted"><small>বেতন শিটে ছুটির হিসাব আগের মতো ছুটির আবেদন থেকেই হয়। এই হাজিরা দেখার ও যাচাইয়ের জন্য।</small></p>
+  </section>
+</Admin>
+<script>
+  document.querySelector('[data-all-present]')?.addEventListener('click', () => {
+    document.querySelectorAll('select[name^="status_"]').forEach((el) => {
+      const s = el as unknown as { value: string };
+      if (!s.value) s.value = 'present';
+    });
+  });
+</script>
+<style>
+  .section-block { margin-top: var(--space-5); }
+  .table-wrap { overflow: auto; }
+  .inline { display: flex; gap: var(--space-2); align-items: center; }
+  .actions-row { display: flex; gap: var(--space-3); flex-wrap: wrap; margin-top: var(--space-4); }
+  td input[type='time'] { min-width: 7rem; }
+</style>

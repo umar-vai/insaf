@@ -1,0 +1,64 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotOffline from '../../../components/NotOffline.astro';
+import { currentStudent } from '../../../server/students';
+import { offlineIdsForEmail } from '../../../server/panels';
+import { sameOrigin } from '../../../server/session';
+import { listNotifications, markRead } from '../../../server/notifications';
+import { dateBn } from '../../../lib/format';
+
+// The student's (or the guardian's children's) notifications. Only rows of
+// the records this account may see are read or marked read.
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline%2Fnotifications', 303);
+const ids = await offlineIdsForEmail(env.DB, me.email);
+if (Astro.request.method === 'POST') {
+  if (!sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
+  await markRead(env.DB, { studentIds: ids });
+  return Astro.redirect('/account/offline/notifications', 303);
+}
+const list = await listNotifications(env.DB, { studentIds: ids });
+const unread = list.filter((n) => !n.readAt).length;
+---
+
+{
+  ids.length === 0 ? (
+    <NotOffline me={me} />
+  ) : (
+    <AccountShell me={me} active="offline-notifications" title="নোটিফিকেশন">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <h1>নোটিফিকেশন</h1>
+            <p>ফি, ফলাফল, হোমওয়ার্ক, ছুটি ও অফিসের বার্তা এখানে আসে।</p>
+          </div>
+          {unread > 0 && (
+            <form method="post"><button class="button button--ghost">সব পড়া হয়েছে</button></form>
+          )}
+        </header>
+        {list.length === 0 ? (
+          <p class="card muted">এখনো কোনো নোটিফিকেশন নেই।</p>
+        ) : (
+          <ul class="list card">
+            {list.map((n) => (
+              <li class={n.readAt ? '' : 'unread'}>
+                <div>
+                  <strong>{n.link ? <a href={n.link}>{n.title}</a> : n.title}</strong>
+                  {n.body && <p class="body">{n.body}</p>}
+                  <small class="muted">{dateBn(n.createdAt, true)}{ids.length > 1 && n.studentName && ` · ${n.studentName}`}</small>
+                </div>
+                {!n.readAt && <span class="pill pill--info">নতুন</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </AccountShell>
+  )
+}
+<style>
+  .unread strong { color: var(--color-accent, inherit); }
+  .body { white-space: pre-line; margin: var(--space-1) 0; }
+</style>

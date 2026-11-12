@@ -1,0 +1,57 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../components/AccountShell.astro';
+import NotTeacher from '../../components/NotTeacher.astro';
+import { teacherSession } from '../../server/panels';
+import { sameOrigin } from '../../server/session';
+import { listNotifications, markRead } from '../../server/notifications';
+import { dateBn } from '../../lib/format';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const { me, teacher } = await teacherSession(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Fteacher%2Fnotifications', 303);
+if (Astro.request.method === 'POST' && teacher) {
+  if (!sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
+  await markRead(env.DB, { teacherId: teacher.id });
+  return Astro.redirect('/teacher/notifications', 303);
+}
+const list = teacher ? await listNotifications(env.DB, { teacherId: teacher.id }) : [];
+const unread = list.filter((n) => !n.readAt).length;
+---
+
+{
+  !teacher ? (
+    <NotTeacher me={me} />
+  ) : (
+    <AccountShell me={me} active="t-notifications" title="নোটিফিকেশন" mode="teacher">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <h1>নোটিফিকেশন</h1>
+            <p>ছুটির সিদ্ধান্ত, বেতন ও অফিসের বার্তা এখানে আসে।</p>
+          </div>
+          {unread > 0 && <form method="post"><button class="button button--ghost">সব পড়া হয়েছে</button></form>}
+        </header>
+        {list.length === 0 ? (
+          <p class="card muted">এখনো কোনো নোটিফিকেশন নেই।</p>
+        ) : (
+          <ul class="list card">
+            {list.map((n) => (
+              <li>
+                <div>
+                  <strong>{n.link ? <a href={n.link}>{n.title}</a> : n.title}</strong>
+                  {n.body && <p class="body">{n.body}</p>}
+                  <small class="muted">{dateBn(n.createdAt, true)}</small>
+                </div>
+                {!n.readAt && <span class="pill pill--info">নতুন</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </AccountShell>
+  )
+}
+<style>
+  .body { white-space: pre-line; margin: var(--space-1) 0; }
+</style>

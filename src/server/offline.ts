@@ -553,6 +553,25 @@ export async function monthReport(db: D1Database, month: string) {
   };
 }
 
+/**
+ * Active enrollments with their balance, for one course, one batch (its
+ * current placement, so a promoted student is found in the new class) or
+ * everyone. Used for bulk fee bills and printed due statements.
+ */
+export async function activeEnrollmentsFor(db: D1Database, today: string, target: { kind: 'all' | 'course' | 'batch'; id: string }, limit = 3000): Promise<EnrollmentWithLedger[]> {
+  const filter =
+    target.kind === 'course'
+      ? 'AND e.course_id = ?'
+      : target.kind === 'batch'
+        ? `AND coalesce((SELECT p.to_batch_id FROM academic_promotions p JOIN academic_sessions ss ON ss.id = p.to_session_id AND ss.status = 'active' WHERE p.enrollment_id = e.id LIMIT 1), e.batch_id) = ?`
+        : '';
+  const { results } = await db
+    .prepare(`${ENROLL_SELECT} WHERE e.status = 'active' AND s.status = 'active' ${filter} ORDER BY s.student_no, s.name, e.start_date LIMIT ?`)
+    .bind(...(filter ? [target.id] : []), limit)
+    .all<EnrollmentRow>();
+  return withLedger(results, today);
+}
+
 /** Every enrollment with its balance, for the Excel export. */
 export async function allEnrollments(db: D1Database, today: string): Promise<EnrollmentWithLedger[]> {
   const { results } = await db.prepare(`${ENROLL_SELECT} ORDER BY s.name, e.start_date`).all<EnrollmentRow>();

@@ -1,0 +1,90 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../components/AccountShell.astro';
+import NotTeacher from '../../components/NotTeacher.astro';
+import Icon from '../../components/Icon.astro';
+import { teacherSession } from '../../server/panels';
+import { sameOrigin } from '../../server/session';
+import { getSettings } from '../../server/settings';
+import { dhakaNow, myStaffAttendance, myStaffToday, selfAttendance, STAFF_STATUS_BN } from '../../server/staff-attendance';
+import { dayBn, monthBn, timeBn } from '../../lib/offline';
+
+// The teacher's own attendance: arrive and leave buttons (when the owner
+// allows it), and the month's record as the office keeps it.
+Astro.response.headers.set('Cache-Control', 'no-store');
+const { me, teacher } = await teacherSession(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Fteacher%2Fattendance', 303);
+const s = await getSettings(env.DB);
+const now = dhakaNow();
+if (Astro.request.method === 'POST' && teacher) {
+  if (!sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
+  if (!s.staffSelfAttendance) return Astro.redirect('/teacher/attendance?error=off', 303);
+  const form = await Astro.request.formData();
+  const r = await selfAttendance(env.DB, me.email, teacher.id, form.get('action') === 'out' ? 'out' : 'in', s.staffStartTime);
+  return Astro.redirect(`/teacher/attendance?${r.ok ? 'saved=1' : `error=${r.error}`}`, 303);
+}
+const monthParam = Astro.url.searchParams.get('month') ?? '';
+const month = /^\d{4}-\d{2}$/.test(monthParam) ? monthParam : now.day.slice(0, 7);
+const [todayRow, days] = teacher ? await Promise.all([myStaffToday(env.DB, teacher.id, now.day), myStaffAttendance(env.DB, teacher.id, month)]) : [null, []];
+const ERR: Record<string, string> = { off: 'নিজে হাজিরা দেওয়ার সুবিধা এখন চালু নেই।', already: 'আজকের হাজিরা আগেই দেওয়া আছে।', not_in: 'আগে আসার হাজিরা দিন।' };
+const PILL = { present: 'present', late: 'late', absent: 'absent', leave: 'leave' } as const;
+---
+
+{
+  !teacher ? (
+    <NotTeacher me={me} />
+  ) : (
+    <AccountShell me={me} active="t-attendance" title="আমার হাজিরা" mode="teacher">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <h1>আমার হাজিরা</h1>
+            <p>{dayBn(now.day)}{s.staffStartTime && ` · অফিস শুরু ${timeBn(s.staffStartTime)}`}</p>
+          </div>
+        </header>
+        {Astro.url.searchParams.has('saved') && <p class="note note--good" role="status">হাজিরা নেওয়া হয়েছে।</p>}
+        {Astro.url.searchParams.has('error') && <p class="note note--bad" role="alert">{ERR[Astro.url.searchParams.get('error') ?? ''] ?? 'হাজিরা দেওয়া যায়নি।'}</p>}
+
+        <section class="card">
+          <div class="card__head"><h2>আজ</h2>{todayRow && <span class={`pill pill--${PILL[todayRow.status]}`}>{STAFF_STATUS_BN[todayRow.status]}</span>}</div>
+          {todayRow ? (
+            <p>{todayRow.inTime && `আসা ${timeBn(todayRow.inTime)}`}{todayRow.outTime && ` · যাওয়া ${timeBn(todayRow.outTime)}`}</p>
+          ) : (
+            <p class="muted">আজকের হাজিরা এখনো নেওয়া হয়নি।</p>
+          )}
+          {s.staffSelfAttendance ? (
+            <div class="buttons">
+              {!todayRow && <form method="post"><input type="hidden" name="action" value="in" /><button class="button"><Icon name="check" /> এসেছি</button></form>}
+              {todayRow?.inTime && (todayRow.status === 'present' || todayRow.status === 'late') && (
+                <form method="post"><input type="hidden" name="action" value="out" /><button class="button button--ghost"><Icon name="logout" /> {todayRow.outTime ? 'যাওয়ার সময় বদলান' : 'যাচ্ছি'}</button></form>
+              )}
+            </div>
+          ) : (
+            <p class="muted"><small>অফিস হাজিরা নেয়। নিজে হাজিরা দেওয়ার সুবিধা চালু হলে এখানে বোতাম দেখা যাবে।</small></p>
+          )}
+        </section>
+
+        <section class="card">
+          <div class="card__head">
+            <h2>{monthBn(month, true)}</h2>
+            <form method="get" class="inline"><input type="month" name="month" value={month} aria-label="মাস" /><button class="button button--sm button--ghost">দেখুন</button></form>
+          </div>
+          {days.length === 0 ? <p class="muted">এই মাসে কোনো হাজিরা নেই।</p> : (
+            <ul class="list">
+              {days.map((d) => (
+                <li>
+                  <div><strong>{dayBn(d.day)}</strong><small>{[d.inTime && `আসা ${timeBn(d.inTime)}`, d.outTime && `যাওয়া ${timeBn(d.outTime)}`, d.note].filter(Boolean).join(' · ')}</small></div>
+                  <span class={`pill pill--${PILL[d.status]}`}>{STAFF_STATUS_BN[d.status]}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </AccountShell>
+  )
+}
+<style>
+  .buttons { display: flex; gap: var(--space-3); flex-wrap: wrap; }
+  .inline { display: flex; gap: var(--space-2); align-items: center; }
+</style>
