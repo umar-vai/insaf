@@ -6,6 +6,7 @@ import Icon from '../../components/Icon.astro';
 import '../../styles/panel.css';
 import { createInquiry, parseInquiryForm } from '../../server/inquiries';
 import { sameOrigin } from '../../server/session';
+import { DEPARTMENTS } from '../../lib/madrasa';
 
 // A parent leaves contact details; the office calls back. Rate limited per
 // address, with a hidden field that only bots fill. Never cached.
@@ -22,6 +23,7 @@ if (Astro.request.method === 'POST') {
   return Astro.redirect(`${here}?sent=1`, 303);
 }
 const q = Astro.url.searchParams;
+const picked = DEPARTMENTS.find((d) => d.key === q.get('dept'))?.key ?? '';
 const ERR: Record<string, string> = { name: 'ছাত্রের নাম সঠিকভাবে লিখুন।', phone: 'সঠিক মোবাইল নম্বর লিখুন।', too_many: 'অল্প সময়ে অনেকবার পাঠানো হয়েছে। এক মিনিট পরে আবার চেষ্টা করুন।' };
 ---
 
@@ -39,7 +41,12 @@ const ERR: Record<string, string> = { name: 'ছাত্রের নাম স
         <label class="field"><span>ছাত্র বা ছাত্রীর নাম</span><input name="studentName" required minlength="2" maxlength="120" autocomplete="off" /></label>
         <label class="field"><span>অভিভাবকের নাম</span><input name="guardianName" maxlength="120" autocomplete="name" /></label>
         <label class="field"><span>মোবাইল নম্বর</span><input name="phone" type="tel" required inputmode="tel" maxlength="25" autocomplete="tel" /></label>
-        <label class="field"><span>যে বিভাগ বা ক্লাসে ভর্তি হতে চান</span><input name="desiredClass" maxlength="120" /></label>
+        <label class="field"><span>যে বিভাগে ভর্তি হতে চান</span>
+          <select name="desiredClass">
+            <option value="" selected={!picked}>বিভাগ বাছাই করুন</option>
+            {DEPARTMENTS.map((d) => <option value={d.title} selected={d.key === picked}>{d.title}</option>)}
+          </select>
+        </label>
         <label class="field wide"><span>কিছু জানাতে চাইলে (ঐচ্ছিক)</span><textarea name="message" rows="3" maxlength="1000"></textarea></label>
         <label class="hp" aria-hidden="true">ওয়েবসাইট <input name="website" tabindex="-1" autocomplete="off" /></label>
         <p class="wide muted"><small>এই তথ্য শুধু ভর্তির বিষয়ে যোগাযোগের জন্য মাদরাসার অফিস দেখবে।</small></p>

@@ -31,7 +31,7 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=3600')
             <span class="no">{bnDigits(String(i + 1).padStart(2, '0'))}</span>
             <h3>{d.title}</h3>
             <p>{d.text}</p>
-            <a href={whatsappUrl(`আসসালামু আলাইকুম, ${d.title} বিভাগে ভর্তি সম্পর্কে জানতে চাই।`)} rel="noopener">এই বিভাগে ভর্তি জানতে <Icon name="arrow" size={16} /></a>
+            <a href={`/admission/apply?dept=${d.key}`}>এই বিভাগে ভর্তির আবেদন করুন <Icon name="arrow" size={16} /></a>
           </article>
         ))
       }
