@@ -1,0 +1,77 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { decideStudentLeave, listStudentLeave, STUDENT_LEAVE_STATUS_BN } from '../../../server/student-leave';
+import { dayBn, studentCode } from '../../../lib/offline';
+import { bnDigits, dateBn } from '../../../lib/format';
+import { daysBetween } from '../../../server/ops-util';
+
+// Students' leave requests from the portal. Approving marks "leave" on the
+// class attendance for those days (marks already made stay).
+const actor = Astro.locals.staff!;
+const here = '/admin/offline/student-leave';
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  if (action !== 'approve' && action !== 'reject') return Astro.redirect(`${here}?error=1`, 303);
+  const r = await decideStudentLeave(env.DB, actor, String(form.get('id') ?? ''), action === 'approve' ? 'approved' : 'rejected', String(form.get('note') ?? ''));
+  return Astro.redirect(`${here}?${r.ok ? `saved=1&marked=${r.value.marked}` : 'error=1'}`, 303);
+}
+const all = await listStudentLeave(env.DB, { limit: 300 });
+const pending = all.filter((l) => l.status === 'pending');
+const done = all.filter((l) => l.status !== 'pending');
+const span = (l: { fromDay: string; toDay: string }) => (l.fromDay === l.toDay ? dayBn(l.fromDay) : `${dayBn(l.fromDay)} থেকে ${dayBn(l.toDay)}`);
+const PILL = { pending: 'pending', approved: 'present', rejected: 'absent', cancelled: 'archived' } as const;
+const marked = Number(Astro.url.searchParams.get('marked') ?? 0);
+---
+
+<Admin title="ছাত্রের ছুটি">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">একাডেমিক</p>
+      <h1>ছাত্রের ছুটির আবেদন</h1>
+      <p>ছাত্র বা অভিভাবক পোর্টাল থেকে আবেদন করেন। অনুমোদন দিলে ক্লাসের দিনগুলোর হাজিরায় ছুটি বসে যায়; শিক্ষক আগেই হাজিরা দিয়ে থাকলে তা বদলায় না।</p>
+    </div>
+  </header>
+  {Astro.url.searchParams.has('saved') && marked > 0 && <p class="note note--good">{bnDigits(marked)}টি ক্লাসের দিনে হাজিরায় ছুটি বসানো হয়েছে।</p>}
+  {Astro.url.searchParams.has('error') && <p class="note note--bad">আবেদনটি আগেই সিদ্ধান্ত হয়েছে বা পাওয়া যায়নি।</p>}
+
+  <section class="card">
+    <div class="card__head"><h2>অপেক্ষায় ({bnDigits(pending.length)})</h2></div>
+    {pending.length === 0 ? <div class="empty"><Icon name="check" size={28} /><p>কোনো আবেদন অপেক্ষায় নেই।</p></div> : (
+      <ul class="list">{pending.map((l) => (
+        <li class="leave">
+          <div>
+            <a href={`/admin/offline/students/${l.studentId}`}><strong>{l.studentName}</strong></a> <small class="muted">{studentCode(l.studentNo)} · {span(l)} · {bnDigits(daysBetween(l.fromDay, l.toDay) + 1)} দিন</small>
+            <p>{l.reason}</p>
+            <small class="muted">{l.requestedBy} · {dateBn(l.createdAt, true)}</small>
+          </div>
+          <form method="post" class="decide">
+            <input type="hidden" name="id" value={l.id} />
+            <input name="note" maxlength="500" placeholder="মন্তব্য (ঐচ্ছিক)" aria-label="মন্তব্য" />
+            <button class="button button--sm" name="action" value="approve"><Icon name="check" /> অনুমোদন</button>
+            <button class="button button--sm button--danger" name="action" value="reject">নামঞ্জুর</button>
+          </form>
+        </li>
+      ))}</ul>
+    )}
+  </section>
+
+  <section class="card section-block">
+    <div class="card__head"><h2>আগের আবেদন</h2></div>
+    {done.length === 0 ? <p class="muted">এখনো কিছু নেই।</p> : (
+      <ul class="list">{done.map((l) => (
+        <li>
+          <div><strong>{l.studentName}</strong> <small class="muted">{span(l)}</small><br /><small>{l.reason}{l.decisionNote && ` · মন্তব্য: ${l.decisionNote}`}</small></div>
+          <span class={`pill pill--${PILL[l.status]}`}>{STUDENT_LEAVE_STATUS_BN[l.status]}</span>
+        </li>
+      ))}</ul>
+    )}
+  </section>
+</Admin>
+<style>
+  .section-block { margin-top: var(--space-5); }
+  .leave { align-items: start; }
+  .decide { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+</style>

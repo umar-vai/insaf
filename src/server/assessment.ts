@@ -2,6 +2,7 @@ import { log } from './admin';
 import { roster } from './office';
 import { isYmd } from '../lib/offline';
 import { offlineIdsForEmail } from './panels';
+import { notifyStudents, studentsOfBatch } from './notifications';
 
 // Exam gradebooks and homework.
 //
@@ -301,6 +302,11 @@ export async function publishAssessment(db: D1Database, actor: string, examId: s
     .run();
   if (!out.meta.changes) return fail('incomplete');
   await log(db, actor, 'assessment.publish', `exam:${examId}`);
+  const { results: who } = await db
+    .prepare('SELECT DISTINCT e.student_id AS id FROM assessment_examinees x JOIN offline_enrollments e ON e.id = x.enrollment_id WHERE x.exam_id = ?')
+    .bind(examId)
+    .all<{ id: string }>();
+  await notifyStudents(db, actor, who.map((w) => w.id), { title: 'পরীক্ষার ফল প্রকাশিত হয়েছে', link: '/account/offline/results', sourceKey: `result:${examId}` });
   return { ok: true, value: true };
 }
 
@@ -440,6 +446,12 @@ export async function publishAssignment(db: D1Database, actor: string, id: strin
     .run();
   if (!r.meta.changes) return fail('locked');
   await log(db, actor, 'homework.publish', `assignment:${id}`, { batchId });
+  const a = await db.prepare('SELECT title, kind FROM homework_assignments WHERE id = ?').bind(id).first<{ title: string; kind: string }>();
+  await notifyStudents(db, actor, await studentsOfBatch(db, batchId), {
+    title: `${a?.kind === 'lesson' ? 'নতুন পাঠ' : 'নতুন হোমওয়ার্ক'}: ${a?.title ?? ''}`,
+    link: '/account/offline/homework',
+    sourceKey: `homework:${id}`,
+  });
   return { ok: true, value: true };
 }
 

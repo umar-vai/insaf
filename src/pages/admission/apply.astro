@@ -1,0 +1,54 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import PageHero from '../../components/PageHero.astro';
+import Icon from '../../components/Icon.astro';
+import '../../styles/panel.css';
+import { createInquiry, parseInquiryForm } from '../../server/inquiries';
+import { sameOrigin } from '../../server/session';
+
+// A parent leaves contact details; the office calls back. Rate limited per
+// address, with a hidden field that only bots fill. Never cached.
+Astro.response.headers.set('Cache-Control', 'no-store');
+const here = '/admission/apply';
+if (Astro.request.method === 'POST') {
+  if (!sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
+  const ip = Astro.request.headers.get('CF-Connecting-IP') ?? 'local';
+  if (env.LOGIN_LIMITER && !(await env.LOGIN_LIMITER.limit({ key: `inquiry:${ip}` })).success) return Astro.redirect(`${here}?error=too_many`, 303);
+  const v = parseInquiryForm(await Astro.request.formData());
+  // A bot filling the hidden field is shown the same thanks, and nothing is kept.
+  if (!v.ok) return Astro.redirect(v.error === 'spam' ? `${here}?sent=1` : `${here}?error=${v.error}`, 303);
+  await createInquiry(env.DB, v.value);
+  return Astro.redirect(`${here}?sent=1`, 303);
+}
+const q = Astro.url.searchParams;
+const ERR: Record<string, string> = { name: 'ছাত্রের নাম সঠিকভাবে লিখুন।', phone: 'সঠিক মোবাইল নম্বর লিখুন।', too_many: 'অল্প সময়ে অনেকবার পাঠানো হয়েছে। এক মিনিট পরে আবার চেষ্টা করুন।' };
+---
+
+<Base title="ভর্তির আবেদন" description="মাদরাসাতুল ইনসাফে ভর্তির জন্য যোগাযোগের তথ্য পাঠান, অফিস আপনাকে ফোন করবে।">
+  <PageHero crumbs={[{ href: '/admission', label: 'ভর্তি' }, { href: here, label: 'আবেদন' }]} eyebrow="ভর্তি" title="ভর্তির আবেদন" lead="তথ্য পাঠালে মাদরাসার অফিস আপনাকে ফোন করে ভর্তির নিয়ম, ফি ও তারিখ জানাবে।" />
+  <section class="container apply ui">
+    {q.has('sent') ? (
+      <div class="card">
+        <p class="note note--good" role="status">ধন্যবাদ। আপনার তথ্য অফিসে পৌঁছেছে। অফিস খোলার সময় আপনাকে ফোন করা হবে।</p>
+        <p><a class="button button--ghost" href="/admission">ভর্তি পাতায় ফিরে যান</a></p>
+      </div>
+    ) : (
+      <form method="post" class="card form-grid">
+        {q.has('error') && <p class="wide note note--bad" role="alert">{ERR[q.get('error') ?? ''] ?? 'পাঠানো যায়নি, আবার চেষ্টা করুন।'}</p>}
+        <label class="field"><span>ছাত্র বা ছাত্রীর নাম</span><input name="studentName" required minlength="2" maxlength="120" autocomplete="off" /></label>
+        <label class="field"><span>অভিভাবকের নাম</span><input name="guardianName" maxlength="120" autocomplete="name" /></label>
+        <label class="field"><span>মোবাইল নম্বর</span><input name="phone" type="tel" required inputmode="tel" maxlength="25" autocomplete="tel" /></label>
+        <label class="field"><span>যে বিভাগ বা ক্লাসে ভর্তি হতে চান</span><input name="desiredClass" maxlength="120" /></label>
+        <label class="field wide"><span>কিছু জানাতে চাইলে (ঐচ্ছিক)</span><textarea name="message" rows="3" maxlength="1000"></textarea></label>
+        <label class="hp" aria-hidden="true">ওয়েবসাইট <input name="website" tabindex="-1" autocomplete="off" /></label>
+        <p class="wide muted"><small>এই তথ্য শুধু ভর্তির বিষয়ে যোগাযোগের জন্য মাদরাসার অফিস দেখবে।</small></p>
+        <button class="button"><Icon name="check" /> তথ্য পাঠান</button>
+      </form>
+    )}
+  </section>
+</Base>
+<style>
+  .apply { max-width: 44rem; padding-block: var(--space-8); }
+  .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+</style>

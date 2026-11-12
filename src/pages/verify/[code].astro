@@ -1,0 +1,45 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import '../../styles/panel.css';
+import { CERT_KIND_BN, verifyCertificate } from '../../server/certificates';
+import { dayBn } from '../../lib/offline';
+import { bnDigits } from '../../lib/format';
+
+// Public check of a printed certificate by its code. Shows only the kind,
+// the student's name and ID, the date and whether it is valid.
+Astro.response.headers.set('Cache-Control', 'no-store');
+Astro.response.headers.set('X-Robots-Tag', 'noindex');
+const code = (Astro.params.code ?? '').slice(0, 20);
+const c = await verifyCertificate(env.DB, code);
+if (!c) Astro.response.status = 404;
+---
+
+<Base title="সনদ যাচাই" description="মাদরাসাতুল ইনসাফের সনদ যাচাই">
+  <meta slot="head" name="robots" content="noindex" />
+  <section class="container verify ui">
+    <div class="card">
+      <h1>সনদ যাচাই</h1>
+      {c ? (
+        <>
+          <p class={`note ${c.valid ? 'note--good' : 'note--bad'}`}>{c.valid ? 'এই সনদটি মাদরাসাতুল ইনসাফ থেকে দেওয়া এবং বৈধ।' : 'এই সনদটি বাতিল করা হয়েছে। এটি এখন আর বৈধ নয়।'}</p>
+          <dl>
+            <dt>ধরন</dt><dd>{CERT_KIND_BN[c.kind]} ({c.title})</dd>
+            <dt>ক্রমিক নং</dt><dd>{bnDigits(c.serialNo)}</dd>
+            <dt>নাম</dt><dd>{c.studentName}</dd>
+            {c.studentCode && <><dt>আইডি</dt><dd>{c.studentCode}</dd></>}
+            <dt>তারিখ</dt><dd>{dayBn(c.issuedOn)}</dd>
+          </dl>
+        </>
+      ) : (
+        <p class="note note--bad">এই কোডে কোনো সনদ পাওয়া যায়নি। কোডটি আবার মিলিয়ে দেখুন, অথবা মাদরাসার অফিসে যোগাযোগ করুন।</p>
+      )}
+    </div>
+  </section>
+</Base>
+<style>
+  .verify { max-width: 40rem; padding-block: var(--space-10); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-2) var(--space-4); }
+  dt { color: var(--muted, #4b6357); }
+  dd { margin: 0; font-weight: 600; }
+</style>

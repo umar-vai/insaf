@@ -1,0 +1,60 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotOffline from '../../../components/NotOffline.astro';
+import { currentStudent } from '../../../server/students';
+import { offlineIdsForEmail } from '../../../server/panels';
+import { loansOfStudents } from '../../../server/library';
+import { getSettings } from '../../../server/settings';
+import { dayBn, todayDhaka } from '../../../lib/offline';
+import { bnDigits, taka } from '../../../lib/format';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline%2Flibrary', 303);
+const today = todayDhaka();
+const ids = await offlineIdsForEmail(env.DB, me.email);
+const [loans, s] = await Promise.all([loansOfStudents(env.DB, ids), getSettings(env.DB)]);
+const open = loans.filter((l) => !l.returnedOn);
+const past = loans.filter((l) => l.returnedOn);
+---
+
+{
+  ids.length === 0 ? (
+    <NotOffline me={me} />
+  ) : (
+    <AccountShell me={me} active="offline-library" title="লাইব্রেরির বই">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <h1>লাইব্রেরির বই</h1>
+            <p>
+              {open.length ? `এখন ${bnDigits(open.length)}টি বই আপনার কাছে আছে।` : 'এখন লাইব্রেরির কোনো বই আপনার কাছে নেই।'}
+              {s.libraryFinePerDayTaka > 0 && ` দেরিতে ফেরত দিলে প্রতিদিন ${taka(s.libraryFinePerDayTaka * 100)} জরিমানা।`}
+            </p>
+          </div>
+        </header>
+        {open.length > 0 && (
+          <ul class="list card">
+            {open.map((l) => (
+              <li>
+                <div><strong>{l.bookTitle}</strong>{ids.length > 1 && <span class="muted"> · {l.borrowerName}</span>}<small>নেওয়া {dayBn(l.issuedOn)} · ফেরতের শেষ দিন {dayBn(l.dueOn)}</small></div>
+                {l.dueOn < today ? <span class="pill pill--late">সময় পার</span> : <span class="pill pill--info">আছে</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {past.length > 0 && (
+          <>
+            <h2>ফেরত দেওয়া বই</h2>
+            <ul class="list card">
+              {past.map((l) => (
+                <li><div><strong>{l.bookTitle}</strong><small>{dayBn(l.issuedOn)} থেকে {dayBn(l.returnedOn)}</small></div>{l.fineMinor > 0 && <small>জরিমানা {taka(l.fineMinor)}</small>}</li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
+    </AccountShell>
+  )
+}

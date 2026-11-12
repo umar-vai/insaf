@@ -48,6 +48,19 @@ const gatewayOn = sslConfigured(await gatewayEnv(env.DB, env));
       <label class="check wide"><input type="checkbox" name="teacherRatings" checked={s.teacherRatings} /> ছাত্ররা মাসে একবার শিক্ষককে মূল্যায়ন করবে (ফলাফল শুধু অফিস দেখবে)</label>
     </fieldset>
 
+    <fieldset class="card form-grid" id="staff" disabled={!owner}>
+      <h3><Icon name="clock" /> শিক্ষক ও কর্মীর হাজিরা</h3>
+      <label class="check wide"><input type="checkbox" name="staffSelfAttendance" checked={s.staffSelfAttendance} /> শিক্ষক ও কর্মীরা নিজের প্যানেল থেকে আসা ও যাওয়ার সময় দেবেন (সময় সার্ভার থেকে নেওয়া হয়)</label>
+      <label class="field"><span>অফিস শুরুর সময় (এর পরে এলে দেরি ধরা হবে; খালি রাখলে দেরি ধরা হবে না)</span><input type="time" name="staffStartTime" value={s.staffStartTime} /></label>
+    </fieldset>
+
+    <fieldset class="card form-grid" id="library" disabled={!owner}>
+      <h3><Icon name="book" /> লাইব্রেরি</h3>
+      <label class="field"><span>বই কত দিনের জন্য দেওয়া হবে</span><input name="libraryLoanDays" inputmode="numeric" value={s.libraryLoanDays} /></label>
+      <label class="field"><span>দেরিতে ফেরতের জরিমানা, প্রতিদিন টাকা (০ হলে জরিমানা নেই)</span><input name="libraryFinePerDayTaka" inputmode="numeric" value={s.libraryFinePerDayTaka} /></label>
+      <p class="wide muted"><small>জরিমানা শুধু ছাত্রদের জন্য, বই ফেরতের সময় ছাত্রের ফির হিসাবে যোগ হয়। দরকার হলে লাইব্রেরি পাতা থেকে মাফ করা যায়।</small></p>
+    </fieldset>
+
     <fieldset class="card form-grid" disabled={!owner}>
       <h3><Icon name="coins" /> ছাত্রদের ফি</h3>
       <label class="check wide"><input type="checkbox" name="onlineFees" checked={s.onlineFees} /> ছাত্ররা নিজের প্যানেল থেকে অনলাইনে (বিকাশ, নগদ, কার্ড) বকেয়া দিতে পারবে</label>

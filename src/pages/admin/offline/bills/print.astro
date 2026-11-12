@@ -1,0 +1,100 @@
+---
+import { env } from 'cloudflare:workers';
+import { institute } from '../../../../server/config';
+import { dueStatements, type BillTargetKind } from '../../../../server/fee-bills';
+import { listOfflineCourses } from '../../../../server/offline';
+import { listBatches } from '../../../../server/office';
+import { dayBn, studentCode, todayDhaka } from '../../../../lib/offline';
+import { bnDigits, taka } from '../../../../lib/format';
+
+// Due statements to print: one page per student with every unpaid item
+// (course fee installments and charges). Without a choice it shows the form.
+const q = Astro.url.searchParams;
+const kind = (['all', 'course', 'batch'].includes(q.get('kind') ?? '') ? q.get('kind') : '') as BillTargetKind | '';
+const id = (q.get('id') ?? '').slice(0, 40);
+const today = todayDhaka();
+const [inst, courses, batches] = await Promise.all([institute(env.DB), listOfflineCourses(env.DB, false), listBatches(env.DB, { activeOnly: true })]);
+const ready = kind === 'all' || ((kind === 'course' || kind === 'batch') && id);
+const statements = ready ? await dueStatements(env.DB, today, { kind: kind as BillTargetKind, id }) : [];
+const label = kind === 'course' ? courses.find((c) => c.id === id)?.title : kind === 'batch' ? batches.find((b) => b.id === id)?.name : 'সব ছাত্র';
+---
+
+<!doctype html>
+<html lang="bn">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>বকেয়া বিল | {inst.name}</title>
+    <style>
+      :root { color-scheme: light; }
+      body { margin: 0; background: #eef4ef; font-family: 'Hind Siliguri', 'Nirmala UI', system-ui, sans-serif; color: #10261b; }
+      .tools { max-width: 720px; margin: 16px auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding: 0 16px; }
+      .tools label { display: grid; gap: 4px; font-size: 14px; }
+      .tools select, .tools button, .tools a { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid #b9cdbf; background: #fff; color: inherit; }
+      .tools button.primary { background: #0b3d2a; color: #fff; border: 0; cursor: pointer; }
+      .sheet { max-width: 720px; margin: 16px auto; background: #fff; padding: 28px; border-radius: 12px; box-shadow: 0 2px 10px rgb(0 0 0 / 0.08); break-after: page; }
+      header { display: flex; justify-content: space-between; align-items: center; gap: 16px; border-bottom: 2px solid #0b3d2a; padding-bottom: 12px; }
+      header img { height: 44px; }
+      h1 { font-size: 19px; margin: 0; text-align: right; }
+      dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 16px 0; }
+      dt { color: #4b6357; } dd { margin: 0; font-weight: 600; }
+      table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 14px; }
+      th, td { padding: 6px 4px; border-bottom: 1px solid #e3ebe5; text-align: left; }
+      td:last-child, th:last-child { text-align: right; }
+      .total { font-size: 20px; font-weight: 800; text-align: right; padding: 12px; background: #e8f5e4; border-radius: 8px; }
+      footer { margin-top: 28px; display: flex; justify-content: space-between; font-size: 13px; color: #4b6357; }
+      .sign { border-top: 1px solid #10261b; padding-top: 4px; min-width: 150px; text-align: center; }
+      .empty { text-align: center; padding: 40px; }
+      @media print { body { background: #fff; } .tools { display: none; } .sheet { box-shadow: none; margin: 0; max-width: none; border-radius: 0; } }
+    </style>
+  </head>
+  <body>
+    <form class="tools" method="get">
+      <label>কাদের
+        <select name="kind">
+          <option value="all" selected={kind === 'all'}>সব ছাত্র</option>
+          <option value="course" selected={kind === 'course'}>একটি বিভাগ</option>
+          <option value="batch" selected={kind === 'batch'}>একটি ক্লাস</option>
+        </select>
+      </label>
+      <label>বিভাগ বা ক্লাস
+        <select name="id">
+          <option value="">বাছুন</option>
+          <optgroup label="বিভাগ">{courses.map((c) => <option value={c.id} selected={id === c.id}>{c.title}</option>)}</optgroup>
+          <optgroup label="ক্লাস">{batches.map((b) => <option value={b.id} selected={id === b.id}>{b.courseTitle} · {b.name}</option>)}</optgroup>
+        </select>
+      </label>
+      <button type="submit">দেখুন</button>
+      {ready && statements.length > 0 && <button type="button" class="primary" onclick="print()">প্রিন্ট বা PDF ({bnDigits(statements.length)} জন)</button>}
+      <a href="/admin/offline/bills">ফিরে যান</a>
+    </form>
+    {ready && statements.length === 0 && <main class="sheet empty">{label}: কারো বকেয়া নেই।</main>}
+    {statements.map((s) => {
+      const items = s.enrollments.flatMap((e) => e.ledger.installments.filter((i) => i.paidMinor < i.amountMinor).map((i) => ({ ...i, course: e.courseTitle })));
+      const due = s.enrollments.reduce((a, e) => a + e.ledger.dueMinor, 0);
+      return (
+        <main class="sheet">
+          <header>
+            <img src={inst.logo} alt={inst.name} />
+            <h1>ফি বিল ও বকেয়া<br /><small>{dayBn(today)}</small></h1>
+          </header>
+          <dl>
+            <dt>নাম</dt><dd>{s.studentName}</dd>
+            <dt>আইডি</dt><dd>{studentCode(s.studentNo)}</dd>
+            <dt>বিভাগ</dt><dd>{s.enrollments.map((e) => `${e.courseTitle}${e.batch ? ` (${e.batch})` : ''}`).join(', ')}</dd>
+          </dl>
+          <table>
+            <thead><tr><th>বিবরণ</th><th>বিভাগ</th><th>তারিখ</th><th>বাকি</th></tr></thead>
+            <tbody>{items.map((i) => <tr><td>{i.label}</td><td>{i.course}</td><td>{dayBn(i.dueDate)}</td><td>{taka(i.amountMinor - i.paidMinor)}</td></tr>)}</tbody>
+          </table>
+          <div class="total">মোট বকেয়া: {taka(due)}</div>
+          <footer>
+            <span>{inst.name}<br />{inst.address}<br />{bnDigits(inst.phone)}</span>
+            <span class="sign">অফিসের স্বাক্ষর</span>
+          </footer>
+        </main>
+      );
+    })}
+  </body>
+</html>

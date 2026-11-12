@@ -133,9 +133,9 @@ export type Module = (typeof MODULES)[number];
 export const MODULE_BN: Record<Module, { label: string; hint: string; area: 'online' | 'offline' | 'both' }> = {
   online_sales: { label: 'দান ও দাতা', hint: 'ড্যাশবোর্ড, দানের তালিকা, দাতা (CRM), তহবিল, অফিসে পাওয়া দান', area: 'online' },
   online_content: { label: 'ওয়েবসাইট কনটেন্ট', hint: 'পাবলিক নোটিশ ও খবর', area: 'online' },
-  office: { label: 'অফিস', hint: 'মাদরাসা ড্যাশবোর্ড, ছাত্র ও ভর্তি, ফি আদায়, বকেয়া, পোর্টাল লগইন, টিকেট', area: 'offline' },
-  academic: { label: 'একাডেমিক', hint: 'বিভাগ ও ক্লাস, রুটিন, পরীক্ষা, হাজিরা, নোটিশ', area: 'offline' },
-  hr: { label: 'শিক্ষক ও বেতন', hint: 'শিক্ষক ও কর্মী, ছুটি, বেতন শিট, পে স্লিপ', area: 'offline' },
+  office: { label: 'অফিস', hint: 'মাদরাসা ড্যাশবোর্ড, ছাত্র ও ভর্তি, ভর্তির আবেদন, ফি আদায়, একসাথে ফি বিল, বকেয়া, সনদ, বার্তা, পোর্টাল লগইন, টিকেট', area: 'offline' },
+  academic: { label: 'একাডেমিক', hint: 'বিভাগ ও ক্লাস, রুটিন, পরীক্ষা, হাজিরা, ছাত্রের ছুটি, লাইব্রেরি, নোটিশ', area: 'offline' },
+  hr: { label: 'শিক্ষক ও বেতন', hint: 'শিক্ষক ও কর্মী, কর্মীর হাজিরা, ছুটি, বেতন শিট, পে স্লিপ', area: 'offline' },
   accounts: { label: 'হিসাব', hint: 'খরচ ও ভাউচার, আয় ব্যয় রিপোর্ট, অনলাইনে আসা ফি, Excel', area: 'offline' },
   finance: { label: 'মোট আয় ব্যয়', hint: 'দান ও ফি মিলিয়ে আয়, খরচ, উদ্বৃত্ত', area: 'both' },
 };
@@ -243,8 +243,8 @@ export function adminModule(pathname: string): Module | 'shared' | 'owner' {
   if (p === '/admin' || under('/admin/team')) return 'shared';
   if (under('/admin/system', '/admin/audit')) return 'owner';
   if (under('/admin/finance')) return 'finance';
-  if (under('/admin/offline/sessions', '/admin/offline/results', '/admin/offline/gradebook', '/admin/offline/homework', '/admin/offline/batches', '/admin/offline/attendance', '/admin/offline/courses', '/admin/offline/notices')) return 'academic';
-  if (under('/admin/offline/teachers', '/admin/offline/leave', '/admin/offline/payroll', '/admin/offline/payslip')) return 'hr';
+  if (under('/admin/offline/sessions', '/admin/offline/results', '/admin/offline/gradebook', '/admin/offline/homework', '/admin/offline/batches', '/admin/offline/attendance', '/admin/offline/courses', '/admin/offline/notices', '/admin/offline/library', '/admin/offline/student-leave')) return 'academic';
+  if (under('/admin/offline/teachers', '/admin/offline/leave', '/admin/offline/payroll', '/admin/offline/payslip', '/admin/offline/staff-attendance')) return 'hr';
   if (under('/admin/offline/expenses', '/admin/offline/voucher', '/admin/offline/reports', '/admin/offline/online-payments', '/admin/offline/export')) return 'accounts';
   if (under('/admin/offline')) return 'office';
   if (under('/admin/notices', '/admin/blog')) return 'online_content';

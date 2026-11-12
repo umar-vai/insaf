@@ -1,0 +1,70 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { INQUIRY_STATUS_BN, INQUIRY_STATUSES, listInquiries, updateInquiry, type InquiryStatus } from '../../../server/inquiries';
+import { waNumber } from '../../../lib/offline';
+import { bnDigits, dateBn } from '../../../lib/format';
+
+const here = '/admin/offline/inquiries';
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const ok = await updateInquiry(env.DB, Astro.locals.staff!, String(form.get('id') ?? ''), String(form.get('status') ?? ''), String(form.get('note') ?? ''));
+  return Astro.redirect(`${here}?${ok ? 'saved=1' : 'error=1'}`, 303);
+}
+const f = Astro.url.searchParams.get('status') ?? '';
+const status = ((INQUIRY_STATUSES as readonly string[]).includes(f) ? f : '') as InquiryStatus | '';
+const list = await listInquiries(env.DB, status);
+const PILL: Record<InquiryStatus, string> = { new: 'pending', contacted: 'info', admitted: 'paid', closed: 'archived' };
+---
+
+<Admin title="ভর্তির আবেদন">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">ছাত্র ও ফি</p>
+      <h1>ভর্তির আবেদন</h1>
+      <p>ওয়েবসাইটের ভর্তি পাতা থেকে অভিভাবকরা যোগাযোগের তথ্য পাঠান। ফোন করে অবস্থা লিখে রাখুন। ভর্তি করাতে ছাত্র ও ভর্তি পাতায় নতুন ছাত্র যোগ করুন।</p>
+    </div>
+    <div class="actions"><a class="button button--ghost" href="/admission/apply" target="_blank" rel="noopener"><Icon name="globe" /> আবেদনের পাতা</a></div>
+  </header>
+  <nav class="tabs" aria-label="অবস্থা">
+    <a href={here} aria-current={status === '' ? 'page' : undefined}>সব</a>
+    {INQUIRY_STATUSES.map((s) => <a href={`?status=${s}`} aria-current={status === s ? 'page' : undefined}>{INQUIRY_STATUS_BN[s]}</a>)}
+  </nav>
+  {list.length === 0 ? <p class="card muted">কোনো আবেদন নেই।</p> : (
+    <div class="grid">
+      {list.map((q) => {
+        const wa = waNumber(q.phone);
+        return (
+          <article class="card">
+            <div class="card__head"><h2>{q.studentName}</h2><span class={`pill pill--${PILL[q.status]}`}>{INQUIRY_STATUS_BN[q.status]}</span></div>
+            <p>
+              {q.guardianName && <>অভিভাবক: {q.guardianName}<br /></>}
+              ফোন: <a href={`tel:${q.phone}`}>{bnDigits(q.phone)}</a>{wa && <> · <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener">WhatsApp</a></>}<br />
+              {q.desiredClass && <>যে ক্লাসে: {q.desiredClass}<br /></>}
+              <small class="muted">{dateBn(q.createdAt, true)}</small>
+            </p>
+            {q.message && <p class="msg">{q.message}</p>}
+            <form method="post" class="form-grid">
+              <input type="hidden" name="id" value={q.id} />
+              <label class="field"><span>অবস্থা</span>
+                <select name="status">{INQUIRY_STATUSES.map((s) => <option value={s} selected={s === q.status}>{INQUIRY_STATUS_BN[s]}</option>)}</select>
+              </label>
+              <label class="field wide"><span>অফিসের নোট</span><textarea name="note" rows="2" maxlength="1000">{q.staffNote}</textarea></label>
+              <button class="button button--sm">সংরক্ষণ</button>
+              {q.status !== 'admitted' && <a class="button button--sm button--ghost" href="/admin/offline/students?new=1">নতুন ছাত্র যোগ করুন</a>}
+            </form>
+            {q.handledBy && <small class="muted">শেষ বদল: {q.handledBy}</small>}
+          </article>
+        );
+      })}
+    </div>
+  )}
+</Admin>
+<style>
+  .tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-4); }
+  .tabs a { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); text-decoration: none; }
+  .tabs a[aria-current='page'] { font-weight: 700; text-decoration: underline; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); gap: var(--space-4); }
+  .msg { white-space: pre-line; }
+</style>

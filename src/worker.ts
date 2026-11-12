@@ -4,6 +4,7 @@ import { isPrelaunch } from './lib/envs';
 import { legacyRedirect } from './lib/legacy-redirects';
 import { todayDhaka } from './lib/offline';
 import { applyLateFees } from './server/offline';
+import { remindOverdueBooks } from './server/library';
 import { getSettings } from './server/settings';
 import { withRequest } from './server/request-context';
 import { countsAsPage, pruneActivity, trackPage } from './server/activity';
@@ -68,7 +69,7 @@ async function edgeCached(request: Request, ctx: ExecutionContext, render: () =>
 
 // /api/* and /media/* go to Hono; everything else is rendered by Astro.
 export default {
-  /** Nightly jobs (wrangler.jsonc triggers): late fees on installments past the grace days, and old visit rows. */
+  /** Nightly jobs (wrangler.jsonc triggers): late fees on installments past the grace days, old visit rows, overdue library book notices. */
   async scheduled(_controller, env, ctx) {
     ctx.waitUntil(
       (async () => {
@@ -77,6 +78,7 @@ export default {
       })(),
     );
     ctx.waitUntil(pruneActivity(env.DB, todayDhaka()));
+    ctx.waitUntil(remindOverdueBooks(env.DB, todayDhaka()));
   },
 
   async fetch(request, env, ctx) {

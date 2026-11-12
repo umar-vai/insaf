@@ -835,3 +835,148 @@ export const homeworkSubmissions=sqliteTable('homework_submissions',{
   reviewedBy:text('reviewed_by'),
   reviewedAt:text('reviewed_at'),
 },t=>[primaryKey({columns:[t.assignmentId,t.enrollmentId]}),index('homework_submissions_enrollment_idx').on(t.enrollmentId,t.state)]);
+
+// ---- Phase 4: school operations (0003). Fee bills become offline_charges rows. ----
+export const feeBillRuns = sqliteTable('fee_bill_runs', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  amountMinor: integer('amount_minor').notNull(),
+  dueDate: text('due_date').notNull(),
+  targetKind: text('target_kind', { enum: ['all', 'course', 'batch'] }).notNull(),
+  targetId: text('target_id').notNull().default(''),
+  useConcessions: integer('use_concessions').notNull().default(1),
+  createdCount: integer('created_count').notNull().default(0),
+  skippedCount: integer('skipped_count').notNull().default(0),
+  totalMinor: integer('total_minor').notNull().default(0),
+  status: text('status', { enum: ['posted', 'cancelled'] }).notNull().default('posted'),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+  cancelledBy: text('cancelled_by'),
+  cancelledAt: text('cancelled_at'),
+  cancelReason: text('cancel_reason'),
+}, (t) => [index('fee_bill_runs_created_idx').on(t.createdAt), check('fee_bill_runs_amount_check', sql`${t.amountMinor} > 0`)]);
+
+export const feeConcessions = sqliteTable('fee_concessions', {
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull().references(() => offlineStudents.id),
+  percent: integer('percent').notNull(),
+  reason: text('reason').notNull(),
+  status: text('status', { enum: ['active', 'ended'] }).notNull().default('active'),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+  endedBy: text('ended_by'),
+  endedAt: text('ended_at'),
+}, (t) => [uniqueIndex('fee_concessions_one_active_idx').on(t.studentId).where(sql`${t.status} = 'active'`), check('fee_concessions_percent_check', sql`${t.percent} BETWEEN 1 AND 100`)]);
+
+export const libraryBooks = sqliteTable('library_books', {
+  id: text('id').primaryKey(),
+  accessionNo: integer('accession_no').notNull().unique(),
+  title: text('title').notNull(),
+  author: text('author').notNull().default(''),
+  category: text('category').notNull().default(''),
+  shelf: text('shelf').notNull().default(''),
+  isbn: text('isbn').notNull().default(''),
+  copies: integer('copies').notNull().default(1),
+  status: text('status', { enum: ['active', 'removed'] }).notNull().default('active'),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [index('library_books_title_idx').on(sql`lower(${t.title})`), check('library_books_copies_check', sql`${t.copies} BETWEEN 0 AND 10000`)]);
+
+export const libraryLoans = sqliteTable('library_loans', {
+  id: text('id').primaryKey(),
+  bookId: text('book_id').notNull().references(() => libraryBooks.id),
+  borrowerKind: text('borrower_kind', { enum: ['student', 'teacher'] }).notNull(),
+  studentId: text('student_id').references(() => offlineStudents.id),
+  teacherId: text('teacher_id').references(() => teachers.id),
+  issuedOn: text('issued_on').notNull(),
+  dueOn: text('due_on').notNull(),
+  returnedOn: text('returned_on'),
+  fineMinor: integer('fine_minor').notNull().default(0),
+  fineChargeId: text('fine_charge_id'),
+  issuedBy: text('issued_by').notNull(),
+  returnedBy: text('returned_by'),
+  note: text('note').notNull().default(''),
+  createdAt: timestamp('created_at'),
+}, (t) => [
+  index('library_loans_open_idx').on(t.bookId, t.returnedOn),
+  index('library_loans_student_idx').on(t.studentId, t.returnedOn),
+  index('library_loans_teacher_idx').on(t.teacherId, t.returnedOn),
+  index('library_loans_due_idx').on(t.returnedOn, t.dueOn),
+]);
+
+export const certificates = sqliteTable('certificates', {
+  id: text('id').primaryKey(),
+  serialNo: integer('serial_no').notNull().unique(),
+  code: text('code').notNull().unique(),
+  studentId: text('student_id').notNull().references(() => offlineStudents.id),
+  kind: text('kind', { enum: ['transfer', 'character', 'study', 'completion', 'other'] }).notNull(),
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  issuedOn: text('issued_on').notNull(),
+  issuedBy: text('issued_by').notNull(),
+  status: text('status', { enum: ['issued', 'revoked'] }).notNull().default('issued'),
+  revokedBy: text('revoked_by'),
+  revokedAt: text('revoked_at'),
+  revokeReason: text('revoke_reason'),
+  createdAt: timestamp('created_at'),
+}, (t) => [index('certificates_student_idx').on(t.studentId, t.createdAt)]);
+
+export const staffAttendance = sqliteTable('staff_attendance', {
+  id: text('id').primaryKey(),
+  teacherId: text('teacher_id').notNull().references(() => teachers.id),
+  day: text('day').notNull(),
+  status: text('status', { enum: ['present', 'late', 'absent', 'leave'] }).notNull(),
+  inTime: text('in_time').notNull().default(''),
+  outTime: text('out_time').notNull().default(''),
+  note: text('note').notNull().default(''),
+  source: text('source', { enum: ['office', 'self'] }).notNull().default('office'),
+  markedBy: text('marked_by').notNull(),
+  updatedAt: timestamp('updated_at'),
+}, (t) => [uniqueIndex('staff_attendance_one_idx').on(t.teacherId, t.day), index('staff_attendance_day_idx').on(t.day)]);
+
+export const studentLeaveRequests = sqliteTable('student_leave_requests', {
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull().references(() => offlineStudents.id),
+  fromDay: text('from_day').notNull(),
+  toDay: text('to_day').notNull(),
+  reason: text('reason').notNull(),
+  status: text('status', { enum: ['pending', 'approved', 'rejected', 'cancelled'] }).notNull().default('pending'),
+  requestedBy: text('requested_by').notNull(),
+  decidedBy: text('decided_by'),
+  decidedAt: text('decided_at'),
+  decisionNote: text('decision_note').notNull().default(''),
+  createdAt: timestamp('created_at'),
+}, (t) => [index('student_leave_student_idx').on(t.studentId, t.fromDay), index('student_leave_status_idx').on(t.status, t.createdAt)]);
+
+export const admissionInquiries = sqliteTable('admission_inquiries', {
+  id: text('id').primaryKey(),
+  studentName: text('student_name').notNull(),
+  guardianName: text('guardian_name').notNull().default(''),
+  phone: text('phone').notNull(),
+  desiredClass: text('desired_class').notNull().default(''),
+  message: text('message').notNull().default(''),
+  status: text('status', { enum: ['new', 'contacted', 'admitted', 'closed'] }).notNull().default('new'),
+  staffNote: text('staff_note').notNull().default(''),
+  handledBy: text('handled_by'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (t) => [index('admission_inquiries_status_idx').on(t.status, t.createdAt)]);
+
+export const portalNotifications = sqliteTable('portal_notifications', {
+  id: text('id').primaryKey(),
+  recipientKind: text('recipient_kind', { enum: ['student', 'teacher'] }).notNull(),
+  offlineStudentId: text('offline_student_id').references(() => offlineStudents.id),
+  teacherId: text('teacher_id').references(() => teachers.id),
+  title: text('title').notNull(),
+  body: text('body').notNull().default(''),
+  link: text('link').notNull().default(''),
+  sourceKey: text('source_key').notNull(),
+  createdBy: text('created_by').notNull(),
+  readAt: text('read_at'),
+  createdAt: timestamp('created_at'),
+}, (t) => [
+  uniqueIndex('portal_notifications_student_source_idx').on(t.offlineStudentId, t.sourceKey).where(sql`${t.offlineStudentId} IS NOT NULL`),
+  uniqueIndex('portal_notifications_teacher_source_idx').on(t.teacherId, t.sourceKey).where(sql`${t.teacherId} IS NOT NULL`),
+  index('portal_notifications_student_idx').on(t.offlineStudentId, t.readAt, t.createdAt),
+  index('portal_notifications_teacher_idx').on(t.teacherId, t.readAt, t.createdAt),
+]);

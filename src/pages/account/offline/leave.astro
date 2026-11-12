@@ -1,0 +1,99 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../components/AccountShell.astro';
+import NotOffline from '../../../components/NotOffline.astro';
+import Icon from '../../../components/Icon.astro';
+import { currentStudent } from '../../../server/students';
+import { offlineIdsForEmail } from '../../../server/panels';
+import { sameOrigin } from '../../../server/session';
+import { cancelStudentLeave, listStudentLeave, MAX_LEAVE_DAYS, parseStudentLeaveForm, requestStudentLeave, STUDENT_LEAVE_STATUS_BN } from '../../../server/student-leave';
+import { addDays, dayBn, todayDhaka } from '../../../lib/offline';
+import { bnDigits } from '../../../lib/format';
+
+// The student or a verified guardian asks for leave; the office decides.
+// Which student records this account may act for is checked on the server.
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline%2Fleave', 303);
+const today = todayDhaka();
+const ids = await offlineIdsForEmail(env.DB, me.email);
+const here = '/account/offline/leave';
+if (Astro.request.method === 'POST') {
+  if (!sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
+  const form = await Astro.request.formData();
+  if (form.get('action') === 'cancel') {
+    await cancelStudentLeave(env.DB, me.email, ids, String(form.get('id') ?? ''));
+    return Astro.redirect(`${here}?saved=1`, 303);
+  }
+  const v = parseStudentLeaveForm(form, today);
+  if (!v.ok) return Astro.redirect(`${here}?error=${v.error}`, 303);
+  const r = await requestStudentLeave(env.DB, me.email, ids, v.value);
+  return Astro.redirect(`${here}?${r.ok ? 'saved=1' : `error=${r.error}`}`, 303);
+}
+const [list, people] = await Promise.all([
+  listStudentLeave(env.DB, { studentIds: ids, limit: 60 }),
+  ids.length
+    ? env.DB.prepare(`SELECT id, name FROM offline_students WHERE id IN (${ids.map(() => '?').join(',')}) ORDER BY student_no`).bind(...ids).all<{ id: string; name: string }>()
+    : Promise.resolve({ results: [] as { id: string; name: string }[] }),
+]);
+const ERR: Record<string, string> = { dates: 'তারিখ সঠিকভাবে দিন (সর্বোচ্চ ৭ দিন আগের তারিখ দেওয়া যায়)।', too_long: `একবারে সর্বোচ্চ ${bnDigits(MAX_LEAVE_DAYS)} দিনের আবেদন করা যায়।`, reason: 'কারণ লিখুন।', student: 'ছাত্র বাছুন।' };
+const span = (l: { fromDay: string; toDay: string }) => (l.fromDay === l.toDay ? dayBn(l.fromDay) : `${dayBn(l.fromDay)} থেকে ${dayBn(l.toDay)}`);
+const PILL = { pending: 'pending', approved: 'present', rejected: 'absent', cancelled: 'archived' } as const;
+---
+
+{
+  ids.length === 0 ? (
+    <NotOffline me={me} />
+  ) : (
+    <AccountShell me={me} active="offline-leave" title="ছুটির আবেদন">
+      <div class="ui">
+        <header class="page-head">
+          <div>
+            <h1>ছুটির আবেদন</h1>
+            <p>অসুস্থতা বা অন্য কারণে ক্লাসে আসতে না পারলে এখান থেকে জানান। অফিস অনুমোদন দিলে হাজিরায় ছুটি লেখা হবে।</p>
+          </div>
+        </header>
+        {Astro.url.searchParams.has('saved') && <p class="note note--good" role="status">সংরক্ষণ হয়েছে।</p>}
+        {Astro.url.searchParams.has('error') && <p class="note note--bad" role="alert">{ERR[Astro.url.searchParams.get('error') ?? ''] ?? 'আবেদন পাঠানো যায়নি।'}</p>}
+        <section class="card">
+          <div class="card__head"><h2>নতুন আবেদন</h2></div>
+          <form method="post" class="form-grid">
+            {people.results.length > 1 ? (
+              <label class="field wide"><span>কার জন্য</span><select name="studentId" required>{people.results.map((p) => <option value={p.id}>{p.name}</option>)}</select></label>
+            ) : (
+              <input type="hidden" name="studentId" value={people.results[0]?.id ?? ''} />
+            )}
+            <label class="field"><span>থেকে</span><input type="date" name="fromDay" required min={addDays(today, -7)} value={today} /></label>
+            <label class="field"><span>পর্যন্ত (এক দিনের হলে খালি রাখুন)</span><input type="date" name="toDay" min={addDays(today, -7)} /></label>
+            <label class="field wide"><span>কারণ</span><textarea name="reason" required minlength="2" maxlength="1000" rows="3"></textarea></label>
+            <button class="button"><Icon name="check" /> আবেদন পাঠান</button>
+          </form>
+        </section>
+        <h2>আগের আবেদন</h2>
+        {list.length === 0 ? <p class="muted">এখনো কোনো আবেদন নেই।</p> : (
+          <ul class="list card">
+            {list.map((l) => (
+              <li>
+                <div>
+                  <strong>{span(l)}</strong>{ids.length > 1 && <span class="muted"> · {l.studentName}</span>}
+                  <p class="body">{l.reason}</p>
+                  {l.decisionNote && <small class="muted">অফিসের মন্তব্য: {l.decisionNote}</small>}
+                </div>
+                <div class="side">
+                  <span class={`pill pill--${PILL[l.status]}`}>{STUDENT_LEAVE_STATUS_BN[l.status]}</span>
+                  {l.status === 'pending' && (
+                    <form method="post" data-confirm="আবেদনটি ফিরিয়ে নেবেন?"><input type="hidden" name="action" value="cancel" /><input type="hidden" name="id" value={l.id} /><button class="button button--sm button--ghost">ফিরিয়ে নিন</button></form>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </AccountShell>
+  )
+}
+<style>
+  .side { display: grid; gap: var(--space-2); justify-items: end; }
+  .body { white-space: pre-line; margin: var(--space-1) 0; }
+</style>

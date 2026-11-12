@@ -1,5 +1,6 @@
 import { log } from './admin';
 import { teaches } from './office';
+import { notifyTeachers } from './notifications';
 import type { SalaryBasis, Settings } from './settings';
 import { isYmd, parseDays, PAY_METHODS, parseTaka, weekday } from '../lib/offline';
 
@@ -106,6 +107,12 @@ export async function decideLeave(
     .first<{ teacherId: string }>();
   if (!r) return false;
   await log(db, actor, `leave.${decision}`, `teacher:${r.teacherId}`, { leaveId: id, kind });
+  await notifyTeachers(db, actor, [r.teacherId], {
+    title: decision === 'approved' ? 'ছুটির আবেদন অনুমোদিত হয়েছে' : 'ছুটির আবেদন মঞ্জুর হয়নি',
+    body: note.trim().slice(0, 300),
+    link: '/teacher/leave',
+    sourceKey: `leave:${id}`,
+  });
   return true;
 }
 
@@ -313,5 +320,6 @@ export async function payPayroll(db: D1Database, actor: string, id: string, paid
   ]);
   if (!moved?.meta.changes) return false;
   await log(db, actor, 'payroll.paid', `teacher:${row.teacherId}`, { payrollId: id, month: row.month, net: row.netMinor / 100, expenseId });
+  await notifyTeachers(db, actor, [row.teacherId], { title: `${row.month} মাসের বেতন দেওয়া হয়েছে`, link: '/teacher/salary', sourceKey: `salary:${id}` });
   return true;
 }

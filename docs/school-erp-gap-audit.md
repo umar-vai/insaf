@@ -57,8 +57,9 @@ Confirm the exact old paid plugin name/version (purchase receipt, module screens
 - [x] 2026-11-12: inspected repo modules, portals, permission mapping, D1 schema and tests; made provisional public reference comparison.
 - [x] Phase 1 navigation search: tested and deployed in PR #19.
 - [x] Phase 2: additive academic session/batch placement, preview/confirm same-course promotions, audited verified guardian links (see the Phase 2 operations section below).
-- [ ] Phase 3: code complete and checked locally (Astro/TypeScript 0 errors, 153 Vitest tests, production build), PR #21. **Not released**: not merged, migration 0002 not applied to production, GitHub Actions runs for the PR have stayed queued since 2026-11-11.
-- [ ] Later phases: library, cross-course fee renewal, bulk invoices, formal grading scale approval, certificates; each requires separate scoped PR and test gate.
+- [x] Phase 3: released 2026-11-12 (PR #21, migration 0002 applied after a Time Travel bookmark).
+- [x] Phase 4 (2026-11-12, migration 0003, separate PR): bulk fee bills with concessions and printed statements, library, certificates with public verification, staff attendance, student leave, admission inquiries, portal notifications and group messages. See README.
+- [ ] Not built, waiting for the madrasa's own rules: hostel, transport, formal letter grading scale, multi campus.
 
 
 ## Phase 2 operations, privacy and release (2026-11-12)

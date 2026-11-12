@@ -1,0 +1,105 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { AUDIENCES, MAX_SMS, MESSAGE_AUDIENCE_BN, messageReach, parseMessageForm, recentMessages, sendMessage } from '../../../server/notifications';
+import { smsReady } from '../../../server/reminders';
+import { listOfflineCourses } from '../../../server/offline';
+import { listBatches } from '../../../server/office';
+import { bnDigits, dateBn } from '../../../lib/format';
+
+// A message to a group: it appears in their portal's notifications, and by
+// SMS too if the office ticks it (paid per SMS, only when the SMS service is
+// set up on the system page). The page shows how many it will reach first.
+const here = '/admin/offline/messages';
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const v = parseMessageForm(form);
+  if (!v.ok) return Astro.redirect(`${here}?error=${v.error}`, 303);
+  if (form.get('confirm') !== 'yes') return Astro.redirect(`${here}?error=confirm`, 303);
+  const r = await sendMessage(env.DB, env, Astro.locals.staff!, v.value);
+  if (!r.ok) return Astro.redirect(`${here}?error=${r.error}`, 303);
+  return Astro.redirect(`${here}?saved=1&people=${r.value.people}&sms=${r.value.smsSent}&smsFailed=${r.value.smsFailed}`, 303);
+}
+const q = Astro.url.searchParams;
+const [courses, batches, sent, smsOn] = await Promise.all([listOfflineCourses(env.DB, false), listBatches(env.DB, { activeOnly: true }), recentMessages(env.DB), smsReady(env.DB, env)]);
+let reach: { people: number; smsNumbers: number } | null = null;
+let draft: ReturnType<typeof parseMessageForm> | null = null;
+if (q.get('check') === '1') {
+  const f = new FormData();
+  for (const [k, val] of q) f.set(k, val);
+  draft = parseMessageForm(f);
+  if (draft.ok) reach = await messageReach(env.DB, draft.value.audience, draft.value.targetId);
+}
+const ERR: Record<string, string> = {
+  audience: 'কাদের পাঠাবেন বাছুন।', target: 'বিভাগ বা ক্লাস বাছুন।', title: 'বার্তার শিরোনাম লিখুন।', confirm: 'নিশ্চিত করার টিক দিন।',
+  nobody: 'এই তালিকায় কেউ নেই।', sms_off: 'SMS সেবা চালু নেই। সিস্টেম সেটিংসে SMS কী দিন, অথবা SMS টিক তুলে দিন।', too_many: `একবারে ${bnDigits(MAX_SMS)}টির বেশি SMS পাঠানো যায় না। ছোট দলে পাঠান।`,
+};
+const err = q.get('error') ?? (draft && !draft.ok ? draft.error : '');
+const val = (k: string) => q.get(k) ?? '';
+---
+
+<Admin title="বার্তা ও নোটিফিকেশন">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">ছাত্র ও ফি</p>
+      <h1>বার্তা ও নোটিফিকেশন</h1>
+      <p>ছাত্র, অভিভাবক বা শিক্ষকদের পোর্টালে নোটিফিকেশন পাঠান। চাইলে একই বার্তা SMS এ যায়। ফি বিল, ফল প্রকাশ, হোমওয়ার্ক, ছুটির সিদ্ধান্ত, বেতন ও লাইব্রেরির দেরির নোটিফিকেশন সাইট নিজেই পাঠায়।</p>
+    </div>
+  </header>
+  {err && <p class="note note--bad" role="alert">{ERR[err] ?? 'কাজটি করা যায়নি।'}</p>}
+  {q.has('saved') && (
+    <p class="note note--good" role="status">
+      {bnDigits(Number(q.get('people') ?? 0))} জনের পোর্টালে পাঠানো হয়েছে।
+      {Number(q.get('sms') ?? 0) > 0 && ` ${bnDigits(Number(q.get('sms')))}টি SMS গেছে।`}
+      {Number(q.get('smsFailed') ?? 0) > 0 && ` ${bnDigits(Number(q.get('smsFailed')))}টি SMS যায়নি।`}
+    </p>
+  )}
+
+  <section class="card">
+    <div class="card__head"><h2>নতুন বার্তা</h2></div>
+    <form method="get" class="form-grid">
+      <input type="hidden" name="check" value="1" />
+      <label class="field"><span>কাদের</span>
+        <select name="audience">{AUDIENCES.map((a) => <option value={a} selected={val('audience') === a}>{MESSAGE_AUDIENCE_BN[a]}</option>)}</select>
+      </label>
+      <label class="field"><span>বিভাগ (বিভাগ বাছলে)</span>
+        <select name="courseId"><option value="">বাছুন</option>{courses.map((c) => <option value={c.id} selected={val('courseId') === c.id}>{c.title}</option>)}</select>
+      </label>
+      <label class="field"><span>ক্লাস (ক্লাস বাছলে)</span>
+        <select name="batchId"><option value="">বাছুন</option>{batches.map((b) => <option value={b.id} selected={val('batchId') === b.id}>{b.courseTitle} · {b.name}</option>)}</select>
+      </label>
+      <label class="field wide"><span>শিরোনাম</span><input name="title" required minlength="2" maxlength="160" value={val('title')} /></label>
+      <label class="field wide"><span>বার্তা</span><textarea name="body" rows="4" maxlength="1000">{val('body')}</textarea></label>
+      <label class="check wide"><input type="checkbox" name="sms" checked={val('sms') === 'on'} disabled={!smsOn} /> SMS ও পাঠান {smsOn ? '(প্রতিটি SMS এর খরচ আছে)' : '(SMS সেবা চালু নেই)'}</label>
+      <button class="button button--ghost"><Icon name="users" /> কতজন পাবেন দেখুন</button>
+    </form>
+    {reach && draft?.ok && (
+      <form method="post" class="confirm">
+        <p>এই বার্তা <strong>{bnDigits(reach.people)}</strong> জন পাবেন।{draft.value.sms && ` SMS যাবে ${bnDigits(reach.smsNumbers)}টি নম্বরে।`}</p>
+        <input type="hidden" name="audience" value={draft.value.audience} />
+        <input type="hidden" name="courseId" value={draft.value.audience === 'course' ? draft.value.targetId : ''} />
+        <input type="hidden" name="batchId" value={draft.value.audience === 'batch' ? draft.value.targetId : ''} />
+        <input type="hidden" name="title" value={draft.value.title} />
+        <input type="hidden" name="body" value={draft.value.body} />
+        {draft.value.sms && <input type="hidden" name="sms" value="on" />}
+        <label class="check"><input type="checkbox" name="confirm" value="yes" required /> বার্তা পড়ে দেখেছি, পাঠান</label>
+        <button class="button" disabled={reach.people === 0}><Icon name="bell" /> পাঠান</button>
+      </form>
+    )}
+  </section>
+
+  <section class="card section-block">
+    <div class="card__head"><h2>আগে পাঠানো বার্তা</h2></div>
+    {sent.length === 0 ? <p class="muted">এখনো কিছু পাঠানো হয়নি।</p> : (
+      <ul class="list">{sent.map((m) => (
+        <li><div><strong>{m.title}</strong><br /><small class="muted">{dateBn(m.createdAt, true)} · {m.actor}</small></div>
+          <small>{bnDigits(m.people)} জন{m.smsSent > 0 && ` · ${bnDigits(m.smsSent)} SMS`}</small></li>
+      ))}</ul>
+    )}
+  </section>
+</Admin>
+<style>
+  .section-block { margin-top: var(--space-5); }
+  .confirm { display: grid; gap: var(--space-3); justify-items: start; margin-top: var(--space-5); }
+</style>

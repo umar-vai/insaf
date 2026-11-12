@@ -16,7 +16,18 @@ Astro on Cloudflare Workers, D1 (SQLite) for data, R2 for uploaded pictures and 
 
 **Madrasa ERP (Admin, "মাদরাসা"):** from Tamrin's office: students and admission, departments and fees (offline courses), classes and routine (batches), attendance, fee collection, dues and WhatsApp reminders, exams and extra charges, teachers, leave, payroll and pay slips, expenses with vouchers, reports, portal notices, tickets, team roles and permissions, audit log.
 
-**Portal:** students (or their guardians) at `/account/offline`: dashboard, fees and receipts (pay online if switched on in office settings), attendance, ID card, teacher rating, tickets. Teachers at `/teacher`: classes, attendance, materials, leave, salary, tickets.
+**School operations (Admin, "মাদরাসা"):**
+- Fee bills for many students at once (`/admin/offline/bills`): pick everyone, one department or one class, preview, then post. Each bill is an ordinary charge (`offline_charges`, source `bill:<run>`), so dues, collection, receipts and reports need nothing new. Posting is idempotent; a wrong run is cancelled with a reason (charges voided, never deleted). Concessions: one active percentage per student with a reason, used only by these bills. Printable due statements per student.
+- Library (`/admin/offline/library`): books with copies, lending to students and teachers, returns. Loan days and a daily late fine are office rules; a student's fine becomes a charge on their fees.
+- Certificates (`/admin/offline/certificates`): transfer, character, study, completion. Serial number, editable wording, print page, and a public check at `/verify/<code>` that shows only kind, name, ID, date and validity. Revoked with a reason.
+- Staff attendance (`/admin/offline/staff-attendance`): daily sheet for teachers and staff, monthly totals with approved leave. Teachers can mark their own arrival and leaving in `/teacher/attendance` when the owner turns it on (server time, late after the office start time).
+- Student leave (`/admin/offline/student-leave`): asked in the portal by the student or a verified guardian; approval writes "leave" on class days without overwriting a teacher's mark.
+- Admission inquiries from the public page `/admission/apply` (rate limited) to `/admin/offline/inquiries`.
+- Notifications in the portal and teacher panel with an unread count: fee bills, published results, homework, leave decisions, salary paid, overdue library books (nightly), certificates. The office can message all students, a department, a class or all teachers (`/admin/offline/messages`), by SMS too when the SMS key is set (paid per SMS, at most 300 at once).
+
+Not built, waiting for the madrasa's own rules: hostel and transport, letter grades (A+ and so on), multi campus.
+
+**Portal:** students (or their guardians) at `/account/offline`: dashboard, notifications, fees and receipts (pay online if switched on in office settings), attendance, results, homework, leave requests, library books, ID card, teacher rating, tickets. Teachers at `/teacher`: classes, attendance, materials, notifications, own attendance, leave, salary, tickets.
 
 ## Signing in
 
@@ -65,6 +76,7 @@ D1 keeps 30 days of Time Travel (`wrangler d1 time-travel info insaf --env produ
 | `src/server/donations.ts` | Funds, donations, SSLCommerz validation, office gifts, donors, reports. |
 | `src/server/password.ts` | Mobile number and password sign in. |
 | `src/server/offline.ts`, `office.ts`, `hr.ts`, `academic.ts`, `panels.ts` | The madrasa office (ERP) and the portals. |
+| `src/server/fee-bills.ts`, `library.ts`, `certificates.ts`, `staff-attendance.ts`, `student-leave.ts`, `inquiries.ts`, `notifications.ts` | School operations (migration `0003`). |
 | `src/server/sslcommerz.ts`, `fee-pay.ts` | The gateway; fees paid online. |
 | `src/pages/land.astro`, `src/pages/donate/` | Donation pages. |
 | `src/pages/admin/` | Admin: `dashboard`, `donations`, `donors`, `funds` (CRM); `offline/` (ERP). |
