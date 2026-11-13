@@ -1,0 +1,21 @@
+---
+// Tabs across the accounts pages (/admin/offline/accounts/...).
+const path = Astro.url.pathname.replace(/\/$/, '');
+const TABS = [
+  ['/admin/offline/accounts', 'সারসংক্ষেপ'],
+  ['/admin/offline/accounts/entries', 'অন্যান্য আয় ও স্থানান্তর'],
+  ['/admin/offline/expenses', 'খরচ ও ভাউচার'],
+  ['/admin/offline/accounts/ledger', 'ক্যাশবুক ও লেজার'],
+  ['/admin/offline/accounts/statement', 'আয় ব্যয় বিবরণী'],
+  ['/admin/offline/accounts/budget', 'বাজেট বনাম খরচ'],
+  ['/admin/offline/accounts/reconcile', 'ব্যাংক ও ক্যাশ মেলানো'],
+  ['/admin/offline/accounts/setup', 'প্রকল্প, তহবিল ও হিসাব'],
+] as const;
+---
+
+<nav class="tabs acc-tabs" aria-label="হিসাব খাতা" data-noprint>
+  {TABS.map(([href, label]) => <a href={href} aria-current={path === href ? 'page' : undefined}>{label}</a>)}
+</nav>
+<style>
+  .acc-tabs { margin-bottom: var(--space-5); flex-wrap: wrap; }
+</style>

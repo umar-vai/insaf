@@ -324,11 +324,20 @@ export type Expense = {
   voidReason: string | null;
   status: 'approved' | 'pending' | 'rejected';
   decidedBy: string | null;
+  /** DV number (0004); null for payroll expenses and ones saved before vouchers had numbers. */
+  voucherNo: number | null;
+  projectId: string | null;
+  projectName: string | null;
+  fundId: string | null;
+  fundName: string | null;
+  party: string;
+  /** First step of a two step approval. */
+  checkedBy: string | null;
   createdAt: string;
 };
 /** Counts in the accounts: approved and not voided. */
 export const counts = (e: Pick<Expense, 'voidedAt' | 'status'>) => !e.voidedAt && e.status === 'approved';
-type ExpenseInput = { spentOn: string; category: string; amountTaka: number; description: string; method: string; nonce: string | null };
+type ExpenseInput = { spentOn: string; category: string; amountTaka: number; description: string; method: string; nonce: string | null; projectId?: string | null; fundId?: string | null; party?: string };
 
 export function parseExpenseForm(form: FormData, today: string): Result<ExpenseInput> {
   const amount = parseTaka(form.get('amount'));
@@ -348,25 +357,44 @@ export function parseExpenseForm(form: FormData, today: string): Result<ExpenseI
       description: longText(form, 'description', 500),
       method: (PAY_METHODS as readonly string[]).includes(method) ? method : 'cash',
       nonce: /^[0-9a-f-]{36}$/.test(nonce) ? nonce : null,
+      projectId: text(form, 'projectId', 40) || null,
+      fundId: text(form, 'fundId', 40) || null,
+      party: text(form, 'party', 120),
     },
   };
 }
 
 /**
- * Saves an expense. With needsApproval it waits for the owner and does not
- * count in the accounts until approved.
+ * Saves an expense with the next debit voucher number. With needsApproval
+ * (true or 'pending') it waits and does not count in the accounts until
+ * approved; 'checked' means the first of two approval steps is already given
+ * by the person recording it (see newExpenseStage in accounts.ts).
  */
-export async function recordExpense(db: D1Database, actor: string, v: ExpenseInput, voucherKey: string | null, needsApproval = false): Promise<string> {
-  if (v.nonce) {
-    const seen = await db.prepare('SELECT id FROM expenses WHERE nonce = ?').bind(v.nonce).first<{ id: string }>();
-    if (seen) return seen.id;
-  }
+export async function recordExpense(db: D1Database, actor: string, v: ExpenseInput, voucherKey: string | null, needsApproval: boolean | 'pending' | 'checked' = false): Promise<string> {
+  const seen = async () => (v.nonce ? await db.prepare('SELECT id FROM expenses WHERE nonce = ?').bind(v.nonce).first<{ id: string }>() : null);
+  const before = await seen();
+  if (before) return before.id;
+  const waits = needsApproval !== false;
+  const checked = needsApproval === 'checked';
   const id = newId('exp');
-  await db
-    .prepare('INSERT INTO expenses (id, spent_on, category, amount_minor, description, method, voucher_key, recorded_by, nonce, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(id, v.spentOn, v.category, v.amountTaka * 100, v.description, v.method, voucherKey, actor, v.nonce, needsApproval ? 'pending' : 'approved')
-    .run();
-  await log(db, actor, 'expense.create', `expense:${id}`, { amount: v.amountTaka, category: v.category, day: v.spentOn, pending: needsApproval });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await db
+        .prepare(
+          `INSERT INTO expenses (id, spent_on, category, amount_minor, description, method, voucher_key, recorded_by, nonce, status, voucher_no, project_id, fund_id, party, checked_by, checked_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, (SELECT coalesce(max(voucher_no), 0) + 1 FROM expenses), (SELECT id FROM acc_projects WHERE id = ?11),
+                   (SELECT id FROM acc_funds WHERE id = ?12), ?13, ?14, CASE WHEN ?14 IS NULL THEN NULL ELSE strftime('%Y-%m-%dT%H:%M:%fZ','now') END)`,
+        )
+        .bind(id, v.spentOn, v.category, v.amountTaka * 100, v.description, v.method, voucherKey, actor, v.nonce, waits ? 'pending' : 'approved', v.projectId ?? '', v.fundId ?? '', v.party ?? '', checked ? actor : null)
+        .run();
+      break;
+    } catch (e) {
+      const again = await seen();
+      if (again) return again.id;
+      if (attempt === 2 || !String(e).includes('UNIQUE')) throw e;
+    }
+  }
+  await log(db, actor, 'expense.create', `expense:${id}`, { amount: v.amountTaka, category: v.category, day: v.spentOn, pending: waits, checked });
   return id;
 }
 
@@ -385,34 +413,65 @@ export async function voidExpense(db: D1Database, actor: string, id: string, rea
   return true;
 }
 
-const EXPENSE_SELECT = `SELECT id, spent_on AS spentOn, category, amount_minor AS amountMinor, description, method, voucher_key AS voucherKey,
-  recorded_by AS recordedBy, voided_at AS voidedAt, voided_by AS voidedBy, void_reason AS voidReason, status, decided_by AS decidedBy,
-  created_at AS createdAt FROM expenses`;
+const EXPENSE_SELECT = `SELECT x.id, x.spent_on AS spentOn, x.category, x.amount_minor AS amountMinor, x.description, x.method, x.voucher_key AS voucherKey,
+  x.recorded_by AS recordedBy, x.voided_at AS voidedAt, x.voided_by AS voidedBy, x.void_reason AS voidReason, x.status, x.decided_by AS decidedBy,
+  x.voucher_no AS voucherNo, x.project_id AS projectId, p.name AS projectName, x.fund_id AS fundId, f.name AS fundName, x.party, x.checked_by AS checkedBy,
+  x.created_at AS createdAt FROM expenses x LEFT JOIN acc_projects p ON p.id = x.project_id LEFT JOIN acc_funds f ON f.id = x.fund_id`;
 
-/** The owner approves or turns down an expense that waits. */
-export async function decideExpense(db: D1Database, actor: string, id: string, decision: 'approved' | 'rejected'): Promise<boolean> {
+export type DecideResult = 'approved' | 'rejected' | 'checked' | 'missing' | 'self' | 'owner' | 'forbidden';
+
+/**
+ * Approves or turns down an expense that waits. Two steps above the owner's
+ * limit (ownerOverTaka > 0): someone with full accounts power checks it
+ * first, then an owner approves. Nobody but an owner decides their own
+ * expense. Owners may give both steps at once.
+ */
+export async function decideExpense(
+  db: D1Database,
+  actor: string,
+  id: string,
+  decision: 'approved' | 'rejected',
+  who: { owner: boolean; full: boolean } = { owner: true, full: true },
+  ownerOverTaka = 0,
+): Promise<DecideResult> {
+  const e = await getExpense(db, id);
+  if (!e || e.status !== 'pending' || e.voidedAt) return 'missing';
+  if (!who.owner && !who.full) return 'forbidden';
+  if (!who.owner && e.recordedBy === actor) return 'self';
+  const needsOwner = ownerOverTaka > 0 && e.amountMinor > ownerOverTaka * 100;
+  if (decision === 'approved' && needsOwner && !who.owner) {
+    if (e.checkedBy) return 'owner';
+    const r = await db
+      .prepare(`UPDATE expenses SET checked_by = ?, checked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? AND status = 'pending' AND checked_by IS NULL AND voided_at IS NULL`)
+      .bind(actor, id)
+      .run();
+    if (!r.meta.changes) return 'missing';
+    await log(db, actor, 'expense.checked', `expense:${id}`, { amount: e.amountMinor / 100 });
+    return 'checked';
+  }
   const r = await db
     .prepare(
-      `UPDATE expenses SET status = ?, decided_by = ?, decided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? AND status = 'pending' AND voided_at IS NULL
-       RETURNING amount_minor AS amount`,
+      `UPDATE expenses SET status = ?, decided_by = ?, decided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+       checked_by = coalesce(checked_by, ?), checked_at = coalesce(checked_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+       WHERE id = ? AND status = 'pending' AND voided_at IS NULL RETURNING amount_minor AS amount`,
     )
-    .bind(decision, actor, id)
+    .bind(decision, actor, actor, id)
     .first<{ amount: number }>();
-  if (!r) return false;
+  if (!r) return 'missing';
   await log(db, actor, `expense.${decision}`, `expense:${id}`, { amount: r.amount / 100 });
-  return true;
+  return decision;
 }
 
 export async function pendingExpenses(db: D1Database): Promise<Expense[]> {
-  const { results } = await db.prepare(`${EXPENSE_SELECT} WHERE status = 'pending' AND voided_at IS NULL ORDER BY spent_on`).all<Expense>();
+  const { results } = await db.prepare(`${EXPENSE_SELECT} WHERE x.status = 'pending' AND x.voided_at IS NULL ORDER BY x.spent_on`).all<Expense>();
   return results;
 }
 
-export const getExpense = (db: D1Database, id: string) => db.prepare(`${EXPENSE_SELECT} WHERE id = ?`).bind(id).first<Expense>();
+export const getExpense = (db: D1Database, id: string) => db.prepare(`${EXPENSE_SELECT} WHERE x.id = ?`).bind(id).first<Expense>();
 
 /** Expenses between two dates (inclusive), newest first, with totals by category. */
 export async function expensesBetween(db: D1Database, from: string, to: string) {
-  const { results } = await db.prepare(`${EXPENSE_SELECT} WHERE spent_on BETWEEN ? AND ? ORDER BY spent_on DESC, created_at DESC`).bind(from, to).all<Expense>();
+  const { results } = await db.prepare(`${EXPENSE_SELECT} WHERE x.spent_on BETWEEN ? AND ? ORDER BY x.spent_on DESC, x.created_at DESC`).bind(from, to).all<Expense>();
   const valid = results.filter(counts);
   const byCategory = new Map<string, number>();
   for (const e of valid) byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + e.amountMinor);

@@ -1,0 +1,135 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import AccountsNav from '../../../../components/admin/AccountsNav.astro';
+import { GENERAL_FUND, INCOME_CATEGORIES, listAccounts, listEntries, listFunds, listProjects, parseEntryForm, recordEntry, voidEntry, voucherCode } from '../../../../server/accounts';
+import { localsMayDo } from '../../../../server/staff';
+import { addMonths, dayBn, monthBn, todayDhaka } from '../../../../lib/offline';
+import { bnDigits, taka } from '../../../../lib/format';
+
+// Money in that is not a student fee (a grant, rent, a sale, money moved
+// over from the donation side by decision) and moving money between the
+// cash box, bank and mobile accounts. Each gets a voucher number (CV, JV);
+// a mistake is voided with a reason, never deleted.
+const actor = Astro.locals.staff!;
+const full = localsMayDo(Astro.locals, 'accounts', 'full');
+const today = todayDhaka();
+const here = '/admin/offline/accounts/entries';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  if (form.get('action') === 'void') {
+    if (!full) return Astro.redirect(`${here}?error=full`, 303);
+    const done = await voidEntry(env.DB, actor, String(form.get('id') ?? ''), String(form.get('reason') ?? ''));
+    return Astro.redirect(`${here}?m=${form.get('m')}&${done ? 'saved=1' : 'error=reason'}`, 303);
+  }
+  const v = parseEntryForm(form, today);
+  if (!v.ok) return Astro.redirect(`${here}?kind=${form.get('kind')}&error=${v.error}#new`, 303);
+  const r = await recordEntry(env.DB, actor, v.value);
+  if (!r.ok) return Astro.redirect(`${here}?error=${r.error}#new`, 303);
+  return Astro.redirect(`${here}?m=${v.value.day.slice(0, 7)}&done=${r.value.id}`, 303);
+}
+
+const q = Astro.url.searchParams;
+const asked = q.get('m') ?? '';
+const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(asked) ? asked : today.slice(0, 7);
+const kind = q.get('kind') === 'transfer' ? 'transfer' : 'income';
+const [accounts, funds, projects, entries] = await Promise.all([listAccounts(env.DB, false), listFunds(env.DB), listProjects(env.DB), listEntries(env.DB, `${month}-01`, `${month}-31`)]);
+const done = q.get('done') ? entries.find((e) => e.id === q.get('done')) : null;
+const ERR: Record<string, string> = {
+  amount: 'টাকার অঙ্ক সঠিক নয়।', day: 'তারিখ সঠিক নয় (ভবিষ্যতের তারিখ দেওয়া যায় না)।', account: 'হিসাব বাছুন।', from_account: 'কোন হিসাব থেকে যাবে বাছুন, দুটো আলাদা হতে হবে।',
+  category: 'আয়ের খাত লিখুন।', reason: 'বাতিলের কারণ লিখুন।', full: 'বাতিল করতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।',
+};
+const err = q.get('error');
+const totalIn = entries.filter((e) => e.kind === 'income' && !e.voidedAt).reduce((a, e) => a + e.amountMinor, 0);
+---
+
+<Admin title="অন্যান্য আয় ও স্থানান্তর">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/offline/accounts">হিসাব খাতা</a></p>
+      <h1>অন্যান্য আয় ও স্থানান্তর</h1>
+      <p>ছাত্রদের ফি ছাড়া অন্য আয় (অনুদান, ভাড়া, বিক্রি, দান তহবিল থেকে সিদ্ধান্ত অনুযায়ী আনা টাকা) এবং এক হিসাব থেকে আরেক হিসাবে টাকা নেওয়া (যেমন ক্যাশ থেকে ব্যাংকে জমা)। প্রতিটির ভাউচার নম্বর থাকে।</p>
+    </div>
+  </header>
+  <AccountsNav />
+  {err && <p class="note note--bad" role="alert">{ERR[err] ?? 'কাজটি করা যায়নি।'}</p>}
+  {done && (
+    <p class="note note--good" role="status">
+      <span>সংরক্ষণ হয়েছে। ভাউচার {voucherCode(done.kind, done.voucherNo)}, {taka(done.amountMinor)}।</span>
+      <a class="button button--sm" href={`/admin/offline/accounts/voucher/${done.id}`} target="_blank"><Icon name="printer" /> ভাউচার প্রিন্ট</a>
+    </p>
+  )}
+
+  <section class="card" id="new">
+    <nav class="tabs" aria-label="ধরন">
+      <a href="?kind=income#new" aria-current={kind === 'income' ? 'page' : undefined}>অন্যান্য আয়</a>
+      <a href="?kind=transfer#new" aria-current={kind === 'transfer' ? 'page' : undefined}>এক হিসাব থেকে আরেক হিসাবে</a>
+    </nav>
+    <form method="post" class="form-grid">
+      <input type="hidden" name="nonce" value={crypto.randomUUID()} />
+      <input type="hidden" name="kind" value={kind} />
+      <label class="field"><span>টাকা</span><input name="amount" required inputmode="numeric" /></label>
+      <label class="field"><span>তারিখ</span><input name="day" type="date" required value={today} max={today} /></label>
+      {kind === 'transfer' ? (
+        <>
+          <label class="field"><span>যেখান থেকে</span><select name="fromAccountId" required><option value="">বাছুন</option>{accounts.map((a) => <option value={a.id}>{a.name}</option>)}</select></label>
+          <label class="field"><span>যেখানে</span><select name="accountId" required><option value="">বাছুন</option>{accounts.map((a) => <option value={a.id}>{a.name}</option>)}</select></label>
+        </>
+      ) : (
+        <>
+          <label class="field"><span>আয়ের খাত</span><input name="category" required list="inc-cats" maxlength="60" /></label>
+          <datalist id="inc-cats">{INCOME_CATEGORIES.map((c) => <option value={c} />)}</datalist>
+          <label class="field"><span>কোন হিসাবে এলো</span><select name="accountId" required>{accounts.map((a) => <option value={a.id}>{a.name}</option>)}</select></label>
+          <label class="field"><span>তহবিল</span><select name="fundId">{funds.map((f) => <option value={f.id} selected={f.id === GENERAL_FUND}>{f.name}</option>)}</select></label>
+          <label class="field"><span>প্রকল্প (ঐচ্ছিক)</span><select name="projectId"><option value="">কোনোটি নয়</option>{projects.map((p) => <option value={p.id}>{p.name}</option>)}</select></label>
+          <label class="field"><span>কার কাছ থেকে</span><input name="party" maxlength="120" /></label>
+        </>
+      )}
+      <label class="field"><span>রেফারেন্স (চেক, ট্রানজেকশন নম্বর)</span><input name="reference" maxlength="80" /></label>
+      <label class="field wide"><span>বিবরণ (ঐচ্ছিক)</span><input name="description" maxlength="500" /></label>
+      <button class="button"><Icon name="check" /> সংরক্ষণ করুন</button>
+    </form>
+  </section>
+
+  <form class="toolbar" method="get">
+    <a class="button button--ghost" href={`?m=${addMonths(`${month}-01`, -1).slice(0, 7)}`} aria-label="আগের মাস">‹</a>
+    <input type="month" name="m" value={month} aria-label="মাস বাছুন" />
+    <button class="button button--ghost">দেখুন</button>
+    {month < today.slice(0, 7) && <a class="button button--ghost" href={`?m=${addMonths(`${month}-01`, 1).slice(0, 7)}`} aria-label="পরের মাস">›</a>}
+  </form>
+
+  <section class="card">
+    <div class="card__head"><h2>{monthBn(month, true)}</h2><strong>অন্যান্য আয় {taka(totalIn)}</strong></div>
+    {entries.length === 0 ? <div class="empty"><Icon name="coins" size={28} /><p>এই মাসে কিছু লেখা হয়নি।</p></div> : (
+      <div class="table-wrap"><table>
+        <thead><tr><th>ভাউচার</th><th>তারিখ</th><th>খাত ও বিবরণ</th><th>হিসাব</th><th class="num">টাকা</th><th></th></tr></thead>
+        <tbody>{entries.map((e) => (
+          <tr class={e.voidedAt ? 'void' : ''}>
+            <td><a href={`/admin/offline/accounts/voucher/${e.id}`} target="_blank">{voucherCode(e.kind, e.voucherNo)}</a></td>
+            <td>{dayBn(e.day)}</td>
+            <td><strong>{e.category}</strong>{e.party && <small class="muted"><br />{e.party}</small>}{(e.fundName || e.projectName) && <small class="muted"><br />{[e.fundName, e.projectName].filter(Boolean).join(' · ')}</small>}{e.description && <small class="muted"><br />{e.description}</small>}</td>
+            <td>{e.kind === 'transfer' ? `${e.fromAccountName} → ${e.accountName}` : e.accountName}</td>
+            <td class="num">{taka(e.amountMinor)}</td>
+            <td class="keep">{e.voidedAt ? <small class="bad">বাতিল: {e.voidReason}</small> : full && (
+              <form method="post" class="void-form" data-confirm="এটি বাতিল করবেন? হিসাবে আর ধরা হবে না।">
+                <input type="hidden" name="action" value="void" /><input type="hidden" name="id" value={e.id} /><input type="hidden" name="m" value={month} />
+                <input name="reason" required minlength="2" placeholder="কেন" aria-label="বাতিলের কারণ" />
+                <button class="button button--sm button--danger">বাতিল</button>
+              </form>
+            )}</td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+    )}
+    <p class="muted"><small>মোট {bnDigits(entries.length)}টি লেখা। ছাত্রদের ফি <a href="/admin/offline/collect">ফি আদায়</a> থেকে আর খরচ <a href="/admin/offline/expenses">খরচ ও ভাউচার</a> থেকে নিজে থেকেই হিসাবে আসে।</small></p>
+  </section>
+</Admin>
+<style>
+  .toolbar { margin: var(--space-5) 0 var(--space-4); }
+  .void td.keep { text-decoration: none; opacity: 1; }
+  .void-form { display: flex; gap: var(--space-1); }
+  .void-form input { min-width: 90px; }
+  .bad { color: var(--bad-600); }
+</style>

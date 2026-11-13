@@ -313,8 +313,9 @@ export async function payPayroll(db: D1Database, actor: string, id: string, paid
       .bind(paidOn, m, expenseId, token, id),
     db
       .prepare(
-        `INSERT INTO expenses (id, spent_on, category, amount_minor, description, method, recorded_by, status, decided_by)
-         SELECT ?, ?, 'শিক্ষক বেতন', net_minor, ?, ?, ?, 'approved', ? FROM payroll WHERE id = ? AND status = 'paid' AND updated_at = ? AND net_minor > 0`,
+        `INSERT INTO expenses (id, spent_on, category, amount_minor, description, method, recorded_by, status, decided_by, voucher_no, party)
+         SELECT ?, ?, 'শিক্ষক বেতন', net_minor, ?, ?, ?, 'approved', ?, (SELECT coalesce(max(voucher_no), 0) + 1 FROM expenses),
+                (SELECT name FROM teachers WHERE id = payroll.teacher_id) FROM payroll WHERE id = ? AND status = 'paid' AND updated_at = ? AND net_minor > 0`,
       )
       .bind(expenseId ?? newId('exp'), paidOn, `${row.teacherName}, ${row.month} মাসের বেতন`, m, actor, actor, id, token),
   ]);

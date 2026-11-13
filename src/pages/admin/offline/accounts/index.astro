@@ -1,0 +1,119 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import AccountsNav from '../../../../components/admin/AccountsNav.astro';
+import { ACCOUNT_KIND_BN, FUND_KIND_BN, balancesAsOf, budgetVsActual, fundSummary, listReconciliations, projectSummary } from '../../../../server/accounts';
+import { pendingExpenses } from '../../../../server/office';
+import { dayBn, todayDhaka } from '../../../../lib/offline';
+import { bnDigits, taka } from '../../../../lib/format';
+
+// The accounts at a glance: money in hand in each account today, each fund's
+// balance, this year's projects and budgets, and what waits for approval.
+const today = todayDhaka();
+const year = today.slice(0, 4);
+const yearStart = `${year}-01-01`;
+const [balances, funds, projects, budgets, pending, recs] = await Promise.all([
+  balancesAsOf(env.DB, today),
+  fundSummary(env.DB, yearStart, today),
+  projectSummary(env.DB, yearStart, today),
+  budgetVsActual(env.DB, year, today),
+  pendingExpenses(env.DB),
+  listReconciliations(env.DB, 5),
+]);
+const inHand = balances.reduce((a, b) => a + b.balanceMinor, 0);
+const yearIn = projects.reduce((a, p) => a + p.inMinor, 0);
+const yearOut = projects.reduce((a, p) => a + p.outMinor, 0);
+const over = budgets.filter((b) => b.usedPercent > 100);
+const signed = (m: number) => `${m < 0 ? '−' : ''}${taka(Math.abs(m))}`;
+---
+
+<Admin title="হিসাব খাতা">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">হিসাব</p>
+      <h1>হিসাব খাতা</h1>
+      <p>কোন হিসাবে কত টাকা আছে, কোন তহবিলে কত বাকি, প্রকল্প অনুযায়ী আয় ব্যয় আর বাজেট। ছাত্রদের ফি আর অনুমোদিত খরচ নিজে থেকেই এখানে আসে, আলাদা করে লিখতে হয় না। দানের হিসাব দানের অংশে আলাদা থাকে।</p>
+    </div>
+    <div class="actions" data-noprint>
+      <a class="button" href="/admin/offline/accounts/entries#new"><Icon name="plus" /> অন্যান্য আয় লিখুন</a>
+      <a class="button button--ghost" href="/admin/offline/expenses?new=1#new"><Icon name="wallet" /> খরচ লিখুন</a>
+    </div>
+  </header>
+  <AccountsNav />
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__icon"><Icon name="wallet" /></span><span class="kpi__label">আজ হাতে মোট</span><strong class="kpi__value">{signed(inHand)}</strong><span class="kpi__hint">সব হিসাব মিলিয়ে</span></div>
+    <div class="kpi"><span class="kpi__icon"><Icon name="coins" /></span><span class="kpi__label">{bnDigits(year)} সালে আয়</span><strong class="kpi__value">{taka(yearIn)}</strong><span class="kpi__hint">ফি ও অন্যান্য আয়</span></div>
+    <div class="kpi kpi--warn"><span class="kpi__icon"><Icon name="receipt" /></span><span class="kpi__label">{bnDigits(year)} সালে খরচ</span><strong class="kpi__value">{taka(yearOut)}</strong><span class="kpi__hint">অনুমোদিত খরচ ও বেতন</span></div>
+    <a class={`kpi ${pending.length ? 'kpi--bad' : ''}`} href="/admin/offline/expenses"><span class="kpi__icon"><Icon name="alert" /></span><span class="kpi__label">অনুমোদনের অপেক্ষায়</span><strong class="kpi__value">{bnDigits(pending.length)}টি</strong><span class="kpi__hint">{taka(pending.reduce((a, e) => a + e.amountMinor, 0))}</span></a>
+  </div>
+
+  {over.length > 0 && <p class="note note--warn" role="status">বাজেট ছাড়িয়ে গেছে: {over.map((b) => b.projectName || b.category).join(', ')}। <a href="/admin/offline/accounts/budget">বাজেট দেখুন</a></p>}
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>হিসাব অনুযায়ী টাকা (আজ পর্যন্ত)</h2><a href="/admin/offline/accounts/reconcile">মিলিয়ে দেখুন</a></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>হিসাব</th><th class="num">জমা</th><th class="num">খরচ</th><th class="num">এখন আছে</th></tr></thead>
+        <tbody>{balances.map((b) => (
+          <tr>
+            <td><a href={`/admin/offline/accounts/ledger?account=${b.id}`}>{b.name}</a><br /><small class="muted">{b.kind === 'none' ? 'পদ্ধতিটি কোনো হিসাবে বসান' : ACCOUNT_KIND_BN[b.kind]}{b.numberHint && ` · ${b.numberHint}`}{b.openingMinor ? ` · শুরুর জমা ${taka(b.openingMinor)}` : ''}</small></td>
+            <td class="num">{taka(b.inMinor)}</td><td class="num">{taka(b.outMinor)}</td><td class={`num ${b.balanceMinor < 0 ? 'bad' : ''}`}><strong>{signed(b.balanceMinor)}</strong></td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+      {recs.length > 0 && <p class="muted"><small>শেষ মেলানো: {recs[0]!.accountName}, {dayBn(recs[0]!.asOf)}, পার্থক্য {signed(recs[0]!.statementMinor - recs[0]!.bookMinor)}</small></p>}
+    </section>
+
+    <section class="card">
+      <div class="card__head"><h2>তহবিল অনুযায়ী</h2><a href="/admin/offline/accounts/setup#funds">তহবিল যোগ করুন</a></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>তহবিল</th><th class="num">এ বছর আয়</th><th class="num">এ বছর খরচ</th><th class="num">মোট বাকি</th></tr></thead>
+        <tbody>{funds.map((f) => (
+          <tr>
+            <td><a href={`/admin/offline/accounts/ledger?fund=${f.id}&from=${yearStart}`}>{f.name}</a><br /><small class="muted">{FUND_KIND_BN[f.kind]}{f.restricted ? ' · শুধু নির্দিষ্ট খাতে খরচ' : ''}{f.status === 'closed' ? ' · বন্ধ' : ''}</small></td>
+            <td class="num">{taka(f.inMinor)}</td><td class="num">{taka(f.outMinor)}</td><td class={`num ${f.balanceMinor < 0 ? 'bad' : ''}`}><strong>{signed(f.balanceMinor)}</strong></td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+      {funds.some((f) => f.restricted && f.balanceMinor < 0) && <p class="note note--bad">একটি নির্দিষ্ট খাতের তহবিলে আয়ের চেয়ে খরচ বেশি হয়েছে। খরচের তহবিল ঠিক আছে কিনা দেখুন।</p>}
+    </section>
+  </div>
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>প্রকল্প অনুযায়ী ({bnDigits(year)})</h2><a href="/admin/offline/accounts/setup#projects">প্রকল্প যোগ করুন</a></div>
+      {projects.length === 0 ? <p class="muted">এখনো কোনো প্রকল্প নেই। বিভাগ বা কাজ (যেমন হিফজ বিভাগ, ভবন নির্মাণ) প্রকল্প হিসেবে যোগ করলে আয় ব্যয় আলাদা দেখা যাবে।</p> : (
+        <div class="table-wrap"><table>
+          <thead><tr><th>প্রকল্প</th><th class="num">আয়</th><th class="num">খরচ</th><th class="num">উদ্বৃত্ত</th></tr></thead>
+          <tbody>{projects.map((p) => (
+            <tr><td><a href={`/admin/offline/accounts/ledger?project=${p.id || 'none'}&from=${yearStart}`}>{p.name}</a></td><td class="num">{taka(p.inMinor)}</td><td class="num">{taka(p.outMinor)}</td><td class={`num ${p.inMinor - p.outMinor < 0 ? 'bad' : ''}`}>{signed(p.inMinor - p.outMinor)}</td></tr>
+          ))}</tbody>
+        </table></div>
+      )}
+    </section>
+
+    <section class="card">
+      <div class="card__head"><h2>বাজেট বনাম খরচ ({bnDigits(year)})</h2><a href="/admin/offline/accounts/budget">সব বাজেট</a></div>
+      {budgets.length === 0 ? <p class="muted">এ বছরের বাজেট এখনো ঠিক করা হয়নি।</p> : (
+        <ul class="budget">{budgets.slice(0, 8).map((b) => (
+          <li>
+            <span>{b.projectName ?? ''}{b.projectName && b.category ? ' · ' : ''}{b.category}</span>
+            <span class="num">{taka(b.actualMinor)} / {taka(b.amountMinor)}</span>
+            <span class="track"><span class={b.usedPercent > 100 ? 'over' : ''} style={`width:${Math.min(100, Math.max(2, b.usedPercent))}%`}></span></span>
+          </li>
+        ))}</ul>
+      )}
+    </section>
+  </div>
+</Admin>
+<style>
+  .bad { color: var(--bad-600); }
+  .budget { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+  .budget li { display: grid; grid-template-columns: 1fr auto; gap: var(--space-1); }
+  .track { grid-column: 1 / -1; height: 8px; border-radius: 99px; background: var(--chart-grid); }
+  .track span { display: block; height: 100%; border-radius: 99px; background: var(--chart-income); }
+  .track span.over { background: var(--chart-expense); }
+  .note { margin-top: var(--space-4); }
+</style>

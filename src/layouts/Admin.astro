@@ -35,6 +35,7 @@ const OFFLINE: Group[] = [
     items: [
       { href: '/admin/offline/students', label: 'ছাত্র ও ভর্তি', icon: 'users' },
       { href: '/admin/offline/inquiries', label: 'ভর্তির আবেদন', icon: 'child' },
+      { href: '/admin/offline/crm', label: 'যোগাযোগ ও ফলো আপ', icon: 'phone' },
       { href: '/admin/offline/collect', label: 'ফি আদায়', icon: 'coins' },
       { href: '/admin/offline/bills', label: 'একসাথে ফি বিল', icon: 'receipt' },
       { href: '/admin/offline/dues', label: 'বকেয়া ও রিমাইন্ডার', icon: 'alert' },
@@ -69,6 +70,7 @@ const OFFLINE: Group[] = [
   {
     label: 'হিসাব',
     items: [
+      { href: '/admin/offline/accounts', label: 'হিসাব খাতা', icon: 'layers' },
       { href: '/admin/offline/expenses', label: 'খরচ ও ভাউচার', icon: 'wallet' },
       { href: '/admin/offline/reports', label: 'আয় ব্যয় রিপোর্ট', icon: 'chart' },
       { href: '/admin/offline/online-payments', label: 'অনলাইনে আসা ফি', icon: 'globe' },
@@ -110,7 +112,9 @@ const TASK_HINTS: Record<string, string> = {
   '/admin/offline/teachers': 'শিক্ষক কর্মী প্রোফাইল তালিকা এবং দায়িত্ব',
   '/admin/offline/leave': 'শিক্ষক ও কর্মচারীর ছুটির আবেদন অনুমোদন',
   '/admin/offline/payroll': 'মাসিক বেতন, পে স্লিপ ও বেতন প্রদান',
-  '/admin/offline/expenses': 'অফিস খরচ ভাউচার অনুমোদন',
+  '/admin/offline/expenses': 'অফিস খরচ ভাউচার অনুমোদন দুই ধাপ',
+  '/admin/offline/accounts': 'হিসাব খাতা প্রকল্প তহবিল যাকাত লিল্লাহ গ্রান্ট বাজেট ব্যাংক ক্যাশ মেলানো ক্যাশবুক লেজার আয় ব্যয় বিবরণী অডিট অন্যান্য আয় স্থানান্তর',
+  '/admin/offline/crm': 'অভিভাবক যোগাযোগ কল লগ ফলো আপ রিমাইন্ডার ট্যাগ টেমপ্লেট টাইমলাইন CRM রিপোর্ট',
   '/admin/offline/reports': 'আয় ব্যয়, ছাত্র ফি রিপোর্ট, এক্সেল CSV',
   '/admin/offline/online-payments': 'গেটওয়ে পেমেন্ট যাচাই অনলাইন ফি',
   '/admin/offline/settings': 'মাদরাসা অফিসের নিয়ম ফি জরিমানা অনুমতি',

@@ -1,6 +1,7 @@
 import { log } from './admin';
 import { savedConfig, type ConfigEnv } from './config';
 import { sendSms, smsNumber } from './reminders';
+import { logContactsBulk } from './crm';
 import { EFFECTIVE_BATCH, marks, newId, runBatches, type Result } from './ops-util';
 
 // Notifications inside the student (and guardian) portal and the teacher
@@ -109,12 +110,13 @@ export async function markRead(db: D1Database, o: Owner, id?: string): Promise<n
 
 // ---- Messages the office sends to a group -------------------------------------
 
-export const AUDIENCES = ['all_students', 'batch', 'course', 'all_teachers'] as const;
+export const AUDIENCES = ['all_students', 'batch', 'course', 'tag', 'all_teachers'] as const;
 export type MessageAudience = (typeof AUDIENCES)[number];
 export const MESSAGE_AUDIENCE_BN: Record<MessageAudience, string> = {
   all_students: 'সব ছাত্র ও অভিভাবক',
   course: 'একটি বিভাগের ছাত্র',
   batch: 'একটি ক্লাসের ছাত্র',
+  tag: 'একটি ট্যাগের ছাত্র (যেমন এতিম, আবাসিক)',
   all_teachers: 'সব শিক্ষক ও কর্মী',
 };
 export const MAX_SMS = 300;
@@ -124,12 +126,13 @@ export type MessageInput = { audience: MessageAudience; targetId: string; title:
 export function parseMessageForm(form: FormData): Result<MessageInput> {
   const audience = String(form.get('audience') ?? '') as MessageAudience;
   if (!(AUDIENCES as readonly string[]).includes(audience)) return { ok: false, error: 'audience' };
-  const targetId = String(form.get(audience === 'batch' ? 'batchId' : 'courseId') ?? '').trim().slice(0, 40);
-  if ((audience === 'batch' || audience === 'course') && !targetId) return { ok: false, error: 'target' };
+  const targeted = audience === 'batch' || audience === 'course' || audience === 'tag';
+  const targetId = String(form.get(audience === 'batch' ? 'batchId' : audience === 'tag' ? 'tag' : 'courseId') ?? '').trim().slice(0, 40);
+  if (targeted && !targetId) return { ok: false, error: 'target' };
   const title = String(form.get('title') ?? '').trim().slice(0, 160);
   const body = String(form.get('body') ?? '').replace(/\r\n/g, '\n').trim().slice(0, 1000);
   if (title.length < 2) return { ok: false, error: 'title' };
-  return { ok: true, value: { audience, targetId: audience === 'batch' || audience === 'course' ? targetId : '', title, body, sms: form.get('sms') === 'on' } };
+  return { ok: true, value: { audience, targetId: targeted ? targetId : '', title, body, sms: form.get('sms') === 'on' } };
 }
 
 type Person = { id: string; phone: string };
@@ -139,7 +142,7 @@ async function audiencePeople(db: D1Database, a: MessageAudience, targetId: stri
     const { results } = await db.prepare("SELECT id, phone FROM teachers WHERE status = 'active'").all<Person>();
     return { kind: 'teacher', people: results };
   }
-  const filter = a === 'batch' ? `AND ${EFFECTIVE_BATCH} = ?` : a === 'course' ? 'AND e.course_id = ?' : '';
+  const filter = a === 'batch' ? `AND ${EFFECTIVE_BATCH} = ?` : a === 'course' ? 'AND e.course_id = ?' : a === 'tag' ? 'AND s.id IN (SELECT student_id FROM crm_tags WHERE tag = ?)' : '';
   const { results } = await db
     .prepare(
       `SELECT DISTINCT s.id, CASE WHEN s.guardian_phone <> '' THEN s.guardian_phone ELSE s.phone END AS phone
@@ -175,7 +178,18 @@ export async function sendMessage(
   const sourceKey = `msg:${newId('m')}`;
   const n = { title: v.title, body: v.body, link: kind === 'student' ? '/account/offline/notifications' : '/teacher/notifications', sourceKey };
   const ids = people.map((p) => p.id);
-  const notified = kind === 'student' ? await notifyStudents(db, actor, ids, n) : await notifyTeachers(db, actor, ids, n);
+  const personal = kind === 'student' && /\{(name|id)\}/.test(`${v.title} ${v.body}`);
+  let notified: number;
+  if (personal) {
+    // A template with {name} or {id}: each student gets their own words.
+    const { results } = await db
+      .prepare(`SELECT id, name, student_no AS no FROM offline_students WHERE id IN (${marks(ids.length)})`)
+      .bind(...ids)
+      .all<{ id: string; name: string; no: number | null }>();
+    const fill = (t: string, r: { name: string; no: number | null }) => t.replace(/\{name\}/g, r.name).replace(/\{id\}/g, r.no ? `MI-${String(r.no).padStart(4, '0')}` : '');
+    notified = 0;
+    for (const r of results) notified += await notifyStudents(db, actor, [r.id], { ...n, title: fill(v.title, r), body: fill(v.body, r) });
+  } else notified = kind === 'student' ? await notifyStudents(db, actor, ids, n) : await notifyTeachers(db, actor, ids, n);
   const out: MessageResult = { notified, people: people.length, smsSent: 0, smsFailed: 0, smsSkipped: 0 };
   if (v.sms) {
     const cfg = await savedConfig(db, env);
@@ -183,12 +197,14 @@ export async function sendMessage(
     const numbers = [...new Set(people.map((p) => smsNumber(p.phone)).filter((x): x is string => Boolean(x)))];
     if (numbers.length > MAX_SMS) return { ok: false, error: 'too_many' };
     out.smsSkipped = people.length - numbers.length;
-    const message = `${v.title}\n${v.body}`.trim().slice(0, 900);
+    const message = `${v.title}\n${v.body}`.replace(/\{(name|id)\}/g, '').trim().slice(0, 900);
     for (const to of numbers) {
       if (await sendSms(cfg.smsApiKey, cfg.smsSenderId, to, message, fetcher)) out.smsSent++;
       else out.smsFailed++;
     }
   }
+  // Each student's contact log shows this message.
+  if (kind === 'student') await logContactsBulk(db, actor, ids, v.sms && out.smsSent > 0 ? 'sms' : 'portal', v.title);
   await log(db, actor, 'notify.broadcast', `audience:${v.audience}${v.targetId ? `:${v.targetId}` : ''}`, { title: v.title, ...out });
   return { ok: true, value: out };
 }

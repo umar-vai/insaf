@@ -7,6 +7,7 @@ import { smsReady } from '../../../server/reminders';
 import { listOfflineCourses } from '../../../server/offline';
 import { listBatches } from '../../../server/office';
 import { bnDigits, dateBn } from '../../../lib/format';
+import { allTags, listTemplates } from '../../../server/crm';
 
 // A message to a group: it appears in their portal's notifications, and by
 // SMS too if the office ticks it (paid per SMS, only when the SMS service is
@@ -22,7 +23,7 @@ if (Astro.request.method === 'POST') {
   return Astro.redirect(`${here}?saved=1&people=${r.value.people}&sms=${r.value.smsSent}&smsFailed=${r.value.smsFailed}`, 303);
 }
 const q = Astro.url.searchParams;
-const [courses, batches, sent, smsOn] = await Promise.all([listOfflineCourses(env.DB, false), listBatches(env.DB, { activeOnly: true }), recentMessages(env.DB), smsReady(env.DB, env)]);
+const [courses, batches, sent, smsOn, tags, templates] = await Promise.all([listOfflineCourses(env.DB, false), listBatches(env.DB, { activeOnly: true }), recentMessages(env.DB), smsReady(env.DB, env), allTags(env.DB), listTemplates(env.DB)]);
 let reach: { people: number; smsNumbers: number } | null = null;
 let draft: ReturnType<typeof parseMessageForm> | null = null;
 if (q.get('check') === '1') {
@@ -32,7 +33,7 @@ if (q.get('check') === '1') {
   if (draft.ok) reach = await messageReach(env.DB, draft.value.audience, draft.value.targetId);
 }
 const ERR: Record<string, string> = {
-  audience: 'কাদের পাঠাবেন বাছুন।', target: 'বিভাগ বা ক্লাস বাছুন।', title: 'বার্তার শিরোনাম লিখুন।', confirm: 'নিশ্চিত করার টিক দিন।',
+  audience: 'কাদের পাঠাবেন বাছুন।', target: 'বিভাগ, ক্লাস বা ট্যাগ বাছুন।', title: 'বার্তার শিরোনাম লিখুন।', confirm: 'নিশ্চিত করার টিক দিন।',
   nobody: 'এই তালিকায় কেউ নেই।', sms_off: 'SMS সেবা চালু নেই। সিস্টেম সেটিংসে SMS কী দিন, অথবা SMS টিক তুলে দিন।', too_many: `একবারে ${bnDigits(MAX_SMS)}টির বেশি SMS পাঠানো যায় না। ছোট দলে পাঠান।`,
 };
 const err = q.get('error') ?? (draft && !draft.ok ? draft.error : '');
@@ -44,7 +45,7 @@ const val = (k: string) => q.get(k) ?? '';
     <div>
       <p class="eyebrow">ছাত্র ও ফি</p>
       <h1>বার্তা ও নোটিফিকেশন</h1>
-      <p>ছাত্র, অভিভাবক বা শিক্ষকদের পোর্টালে নোটিফিকেশন পাঠান। চাইলে একই বার্তা SMS এ যায়। ফি বিল, ফল প্রকাশ, হোমওয়ার্ক, ছুটির সিদ্ধান্ত, বেতন ও লাইব্রেরির দেরির নোটিফিকেশন সাইট নিজেই পাঠায়।</p>
+      <p>ছাত্র, অভিভাবক বা শিক্ষকদের পোর্টালে নোটিফিকেশন পাঠান। প্রতিটি ছাত্রের যোগাযোগের খাতায় বার্তাটি লেখা থাকে। টেমপ্লেট বানাতে <a href="/admin/offline/crm?tab=templates">যোগাযোগ ও ফলো আপ</a> পাতায় যান। চাইলে একই বার্তা SMS এ যায়। ফি বিল, ফল প্রকাশ, হোমওয়ার্ক, ছুটির সিদ্ধান্ত, বেতন ও লাইব্রেরির দেরির নোটিফিকেশন সাইট নিজেই পাঠায়।</p>
     </div>
   </header>
   {err && <p class="note note--bad" role="alert">{ERR[err] ?? 'কাজটি করা যায়নি।'}</p>}
@@ -69,6 +70,14 @@ const val = (k: string) => q.get(k) ?? '';
       <label class="field"><span>ক্লাস (ক্লাস বাছলে)</span>
         <select name="batchId"><option value="">বাছুন</option>{batches.map((b) => <option value={b.id} selected={val('batchId') === b.id}>{b.courseTitle} · {b.name}</option>)}</select>
       </label>
+      <label class="field"><span>ট্যাগ (ট্যাগ বাছলে)</span>
+        <select name="tag"><option value="">বাছুন</option>{tags.map((t) => <option value={t.tag} selected={val('tag') === t.tag}>{t.tag} ({bnDigits(t.count)})</option>)}</select>
+      </label>
+      {templates.length > 0 && (
+        <label class="field"><span>টেমপ্লেট থেকে লিখুন (ঐচ্ছিক)</span>
+          <select data-template><option value="">বাছুন</option>{templates.filter((t) => t.channel !== 'whatsapp').map((t) => <option value={t.body} data-name={t.name}>{t.name}</option>)}</select>
+        </label>
+      )}
       <label class="field wide"><span>শিরোনাম</span><input name="title" required minlength="2" maxlength="160" value={val('title')} /></label>
       <label class="field wide"><span>বার্তা</span><textarea name="body" rows="4" maxlength="1000">{val('body')}</textarea></label>
       <label class="check wide"><input type="checkbox" name="sms" checked={val('sms') === 'on'} disabled={!smsOn} /> SMS ও পাঠান {smsOn ? '(প্রতিটি SMS এর খরচ আছে)' : '(SMS সেবা চালু নেই)'}</label>
@@ -80,6 +89,7 @@ const val = (k: string) => q.get(k) ?? '';
         <input type="hidden" name="audience" value={draft.value.audience} />
         <input type="hidden" name="courseId" value={draft.value.audience === 'course' ? draft.value.targetId : ''} />
         <input type="hidden" name="batchId" value={draft.value.audience === 'batch' ? draft.value.targetId : ''} />
+        <input type="hidden" name="tag" value={draft.value.audience === 'tag' ? draft.value.targetId : ''} />
         <input type="hidden" name="title" value={draft.value.title} />
         <input type="hidden" name="body" value={draft.value.body} />
         {draft.value.sms && <input type="hidden" name="sms" value="on" />}
@@ -99,6 +109,19 @@ const val = (k: string) => q.get(k) ?? '';
     )}
   </section>
 </Admin>
+<script>
+  // Picking a template fills the message ({name} and {id} are filled in for each student when sent).
+  for (const sel of [...document.querySelectorAll<HTMLInputElement>('[data-template]')]) {
+    sel.addEventListener('change', () => {
+      const form = sel.form!;
+      const body = form.querySelector<HTMLTextAreaElement>('textarea[name="body"]')!;
+
+      if (!sel.value) return;
+      body.value = sel.value;
+
+    });
+  }
+</script>
 <style>
   .section-block { margin-top: var(--space-5); }
   .confirm { display: grid; gap: var(--space-3); justify-items: start; margin-top: var(--space-5); }

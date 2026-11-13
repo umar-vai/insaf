@@ -68,7 +68,7 @@ const range = `from=${from}&to=${to}`;
   <p class="muted"><small>{dayBn(from)} থেকে {dayBn(to)}</small></p>
 
   <div class="kpis">
-    <div class="kpi"><span class="kpi__icon"><Icon name="coins" /></span><span class="kpi__label">মোট আয়</span><strong class="kpi__value">{taka(income)}</strong><span class="kpi__hint">অনলাইন {taka(r.onlineMinor)} · অফলাইন {taka(r.offlineMinor)}</span></div>
+    <div class="kpi"><span class="kpi__icon"><Icon name="coins" /></span><span class="kpi__label">মোট আয়</span><strong class="kpi__value">{taka(income)}</strong><span class="kpi__hint">দান {taka(r.onlineMinor)} · ছাত্রদের ফি {taka(r.offlineMinor)}</span></div>
     <div class="kpi kpi--warn"><span class="kpi__icon"><Icon name="wallet" /></span><span class="kpi__label">মোট খরচ</span><strong class="kpi__value">{taka(r.expenseMinor)}</strong></div>
     <div class={`kpi ${net < 0 ? 'kpi--bad' : 'kpi--info'}`}><span class="kpi__icon"><Icon name="chart" /></span><span class="kpi__label">{net < 0 ? 'নিট ঘাটতি' : 'নিট লাভ'}</span><strong class="kpi__value">{taka(Math.abs(net))}</strong><span class="kpi__hint">{margin === null ? '' : `আয়ের ${bnDigits(Math.abs(margin))}%`}</span></div>
   </div>
@@ -105,10 +105,10 @@ const range = `from=${from}&to=${to}`;
     <section class="card">
       <div class="card__head"><h2>আয় কোথা থেকে</h2></div>
       <ul class="list">
-        <li><span>অনলাইন কোর্স বিক্রি<small>{bnDigits(r.onlineCount)}টি অর্ডার · {bnDigits(share(r.onlineMinor))}%</small></span><strong class="num">{taka(r.onlineMinor)}</strong></li>
+        <li><span>দান (অনলাইন ও অফিসে পাওয়া)<small>{bnDigits(r.onlineCount)}টি দান · {bnDigits(share(r.onlineMinor))}%</small></span><strong class="num">{taka(r.onlineMinor)}</strong></li>
         <li><span>ছাত্রদের ফি<small>{bnDigits(r.offlineCount)}টি রসিদ · {bnDigits(share(r.offlineMinor))}%</small></span><strong class="num">{taka(r.offlineMinor)}</strong></li>
       </ul>
-      <h3 class="sub">কোর্স অনুযায়ী</h3>
+      <h3 class="sub">তহবিল ও বিভাগ অনুযায়ী</h3>
       <ul class="list">
         {[...r.onlineByCourse.map((c) => ({ ...c, kind: 'দান' })), ...r.offlineByCourse.map((c) => ({ ...c, kind: 'ফি' }))]
           .sort((a, b) => b.totalMinor - a.totalMinor)

@@ -7,6 +7,7 @@ import { offlineOverview } from '../../../server/offline';
 import { classesOn, monthlyFigures, recentPayments, todayMoney } from '../../../server/office';
 import { feePaymentsToReview } from '../../../server/fee-pay';
 import { openTicketCount } from '../../../server/tickets';
+import { followupCounts } from '../../../server/crm';
 import { addMonths, DAY_BN, dayBn, METHOD_BN, monthBn, studentCode, timeBn, todayDhaka, weekday, type PayMethod } from '../../../lib/offline';
 import { bnDigits, taka } from '../../../lib/format';
 
@@ -19,12 +20,14 @@ const [o, money, classes, months, recent] = await Promise.all([
   monthlyFigures(env.DB, addMonths(`${month}-01`, -5).slice(0, 7), month, { online: false, offline: true }),
   recentPayments(env.DB, 6),
 ]);
-const [reviews, pendingLeave, pendingSpend, openTickets] = await Promise.all([
+const [reviews, pendingLeave, pendingSpend, openTickets, fu] = await Promise.all([
   feePaymentsToReview(env.DB),
   env.DB.prepare(`SELECT count(*) AS n FROM leave_requests WHERE status = 'pending'`).first<{ n: number }>(),
   env.DB.prepare(`SELECT count(*) AS n FROM expenses WHERE status = 'pending' AND voided_at IS NULL`).first<{ n: number }>(),
   openTicketCount(env.DB),
+  followupCounts(env.DB, today),
 ]);
+const fuDue = fu.overdue + fu.today;
 const net = o.collectedThisMonthMinor - money.spentMonth;
 ---
 
@@ -44,8 +47,9 @@ const net = o.collectedThisMonthMinor - money.spentMonth;
   </header>
 
   {
-    (reviews.length > 0 || (pendingLeave?.n ?? 0) > 0 || (pendingSpend?.n ?? 0) > 0 || openTickets > 0) && (
+    (reviews.length > 0 || (pendingLeave?.n ?? 0) > 0 || (pendingSpend?.n ?? 0) > 0 || openTickets > 0 || fuDue > 0) && (
       <div class="alerts">
+        {fuDue > 0 && <a class="note note--warn" href="/admin/offline/crm"><Icon name="phone" /> আজ {bnDigits(fuDue)} জনকে ফলো আপ করতে হবে{fu.overdue > 0 ? ` (${bnDigits(fu.overdue)}টির তারিখ পার)` : ''}।</a>}
         {openTickets > 0 && <a class="note note--warn" href="/admin/offline/tickets?status=open"><Icon name="mail" /> ছাত্র বা শিক্ষকের {bnDigits(openTickets)}টি টিকেট উত্তরের অপেক্ষায়।</a>}
         {reviews.length > 0 && <a class="note note--bad" href="/admin/offline/online-payments"><Icon name="alert" /> অনলাইনে আসা {bnDigits(reviews.length)}টি ফি যাচাই করা দরকার।</a>}
         {(pendingSpend?.n ?? 0) > 0 && <a class="note note--warn" href="/admin/offline/expenses"><Icon name="wallet" /> {bnDigits(pendingSpend!.n)}টি বড় খরচ অনুমোদনের অপেক্ষায়।</a>}

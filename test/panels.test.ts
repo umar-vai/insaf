@@ -252,10 +252,10 @@ describe('large expenses wait for the owner', () => {
     const other = await spend(3000, true);
     let r = await profitAndLoss(db, today, today);
     expect(r.expenseMinor).toBe(50_000);
-    expect(await decideExpense(db, ACTOR, big, 'approved')).toBe(true);
-    expect(await decideExpense(db, ACTOR, big, 'rejected')).toBe(false); // already decided
-    expect(await decideExpense(db, ACTOR, other, 'rejected')).toBe(true);
-    expect(await decideExpense(db, ACTOR, small, 'approved')).toBe(false); // was never waiting
+    expect(await decideExpense(db, ACTOR, big, 'approved')).toBe('approved');
+    expect(await decideExpense(db, ACTOR, big, 'rejected')).toBe('missing'); // already decided
+    expect(await decideExpense(db, ACTOR, other, 'rejected')).toBe('rejected');
+    expect(await decideExpense(db, ACTOR, small, 'approved')).toBe('missing'); // was never waiting
     r = await profitAndLoss(db, today, today);
     expect(r.expenseMinor).toBe(550_000);
   });

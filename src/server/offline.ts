@@ -388,6 +388,14 @@ export async function recordPayment(
         .first<{ receiptNo: number }>();
       if (!r) return { ok: false, error: 'too_much' };
       await log(db, actor, 'offline.payment', `offline_student:${row.studentId}`, { paymentId: id, receiptNo: r!.receiptNo, amount: v.amountTaka, method: v.method });
+      // The digital receipt reaches the student's (and guardian's) portal at once.
+      await db
+        .prepare(
+          `INSERT INTO portal_notifications (id, recipient_kind, offline_student_id, title, body, link, source_key, created_by)
+           VALUES (?, 'student', ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`,
+        )
+        .bind(newId('ntf'), row.studentId, `৳${v.amountTaka.toLocaleString('en-IN')} জমা হয়েছে, রসিদ নং ${r!.receiptNo}`, `${row.courseTitle}। রসিদ খুলে প্রিন্ট বা সংরক্ষণ করতে পারবেন।`, `/account/offline/receipt/${id}`, `receipt:${id}`, actor)
+        .run();
       return { ok: true, id, receiptNo: r!.receiptNo };
     } catch (e) {
       if (v.nonce) {

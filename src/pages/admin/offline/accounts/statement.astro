@@ -1,0 +1,108 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import AccountsNav from '../../../../components/admin/AccountsNav.astro';
+import { fundSummary, projectSummary, receiptsAndPayments } from '../../../../server/accounts';
+import { statementRange } from '../../../../server/accounts-ledger';
+import { dayBn, todayDhaka } from '../../../../lib/offline';
+import { taka } from '../../../../lib/format';
+import { SITE } from '../../../../lib/site';
+
+// The receipts and payments statement (with funds and projects) the
+// committee and auditors read: opening balance, every receipt and payment by
+// head, closing balance that matches the accounts. Printable and as Excel.
+const today = todayDhaka();
+const { from, to, preset } = statementRange(Astro.url.searchParams, today);
+const [s, funds, projects] = await Promise.all([receiptsAndPayments(env.DB, from, to), fundSummary(env.DB, from, to), projectSummary(env.DB, from, to)]);
+const check = s.openingMinor + s.newOpeningMinor + s.receiptsMinor - s.paymentsMinor;
+const signed = (m: number) => `${m < 0 ? '−' : ''}${taka(Math.abs(m))}`;
+const qs = `from=${from}&to=${to}`;
+---
+
+<Admin title="আয় ব্যয় বিবরণী">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/offline/accounts">হিসাব খাতা</a></p>
+      <h1>প্রাপ্তি ও পরিশোধ বিবরণী</h1>
+      <p>{SITE.nameBn} · {dayBn(from)} থেকে {dayBn(to)}। শুরুতে হাতে কত ছিল, কোন খাতে কত এলো, কোন খাতে কত গেল, শেষে কত আছে। অডিট ও কমিটির সভার জন্য।</p>
+    </div>
+    <div class="actions" data-noprint>
+      <a class="button button--ghost" href={`/admin/offline/accounts/statement.csv?${qs}`}><Icon name="download" /> Excel</a>
+      <button type="button" class="button button--ghost" data-print><Icon name="printer" /> PDF বা প্রিন্ট</button>
+    </div>
+  </header>
+  <AccountsNav />
+
+  <form class="card range" method="get" data-noprint>
+    <nav class="tabs" aria-label="সময়">
+      <a href="?p=month" aria-current={preset === 'month' ? 'page' : undefined}>এই মাস</a>
+      <a href="?p=last" aria-current={preset === 'last' ? 'page' : undefined}>গত মাস</a>
+      <a href="?p=year" aria-current={preset === 'year' ? 'page' : undefined}>এই বছর</a>
+      <a href="?p=lastyear" aria-current={preset === 'lastyear' ? 'page' : undefined}>গত বছর</a>
+    </nav>
+    <label class="field"><span>থেকে</span><input type="date" name="from" value={from} max={today} /></label>
+    <label class="field"><span>পর্যন্ত</span><input type="date" name="to" value={to} max={today} /></label>
+    <button class="button">দেখুন</button>
+  </form>
+
+  <div class="rp">
+    <section class="card">
+      <div class="card__head"><h2>প্রাপ্তি</h2></div>
+      <table>
+        <tbody>
+          <tr class="sub"><td>শুরুর ব্যালেন্স ({dayBn(from)} এর আগে)</td><td class="num">{signed(s.openingMinor)}</td></tr>
+          {s.openingByAccount.filter((b) => b.balanceMinor).map((b) => <tr class="indent"><td>{b.name}</td><td class="num">{signed(b.balanceMinor)}</td></tr>)}
+          {s.newOpeningMinor !== 0 && <tr><td>নতুন হিসাবের শুরুর জমা</td><td class="num">{signed(s.newOpeningMinor)}</td></tr>}
+          {s.receipts.map((r) => <tr><td>{r.head}</td><td class="num">{taka(r.minor)}</td></tr>)}
+          <tr class="total"><td>মোট প্রাপ্তি (শুরুর ব্যালেন্সসহ)</td><td class="num">{signed(s.openingMinor + s.newOpeningMinor + s.receiptsMinor)}</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>পরিশোধ</h2></div>
+      <table>
+        <tbody>
+          {s.payments.map((r) => <tr><td>{r.head}</td><td class="num">{taka(r.minor)}</td></tr>)}
+          <tr class="sub"><td>শেষ ব্যালেন্স ({dayBn(to)})</td><td class="num">{signed(s.closingMinor)}</td></tr>
+          {s.closingByAccount.filter((b) => b.balanceMinor).map((b) => <tr class="indent"><td>{b.name}</td><td class="num">{signed(b.balanceMinor)}</td></tr>)}
+          <tr class="total"><td>মোট পরিশোধ (শেষ ব্যালেন্সসহ)</td><td class="num">{signed(s.paymentsMinor + s.closingMinor)}</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+  {check !== s.closingMinor && <p class="note note--warn">হিসাবের তারিখের কারণে {signed(check - s.closingMinor)} মিলছে না। কোনো হিসাবের শুরুর তারিখ এই সময়ের মধ্যে থাকলে এমন হতে পারে; প্রকল্প, তহবিল ও হিসাব পাতায় শুরুর তারিখ দেখুন।</p>}
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>তহবিল অনুযায়ী</h2></div>
+      <table>
+        <thead><tr><th>তহবিল</th><th class="num">আয়</th><th class="num">খরচ</th><th class="num">মোট বাকি</th></tr></thead>
+        <tbody>{funds.map((f) => <tr><td>{f.name}</td><td class="num">{taka(f.inMinor)}</td><td class="num">{taka(f.outMinor)}</td><td class="num">{signed(f.balanceMinor)}</td></tr>)}</tbody>
+      </table>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>প্রকল্প অনুযায়ী</h2></div>
+      <table>
+        <thead><tr><th>প্রকল্প</th><th class="num">আয়</th><th class="num">খরচ</th><th class="num">উদ্বৃত্ত</th></tr></thead>
+        <tbody>{projects.map((p) => <tr><td>{p.name}</td><td class="num">{taka(p.inMinor)}</td><td class="num">{taka(p.outMinor)}</td><td class="num">{signed(p.inMinor - p.outMinor)}</td></tr>)}</tbody>
+      </table>
+    </section>
+  </div>
+
+  <div class="signs">
+    <span>প্রস্তুতকারী (হিসাবরক্ষক)</span><span>যাচাইকারী</span><span>অনুমোদনকারী (মুহতামিম বা সভাপতি)</span>
+  </div>
+</Admin>
+<style>
+  .range { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: end; margin-bottom: var(--space-5); }
+  .range .tabs { margin: 0; }
+  .rp { display: grid; gap: var(--space-5); grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); align-items: start; }
+  .rp table, .cols table { width: 100%; }
+  .sub td { font-weight: 650; }
+  .indent td:first-child { padding-left: var(--space-5); color: var(--color-muted); }
+  .total td { font-weight: 700; border-top: 2px solid var(--color-line); }
+  .signs { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-5); margin-top: 72px; text-align: center; font-size: var(--text-sm); }
+  .signs span { border-top: 1px solid var(--color-text); padding-top: var(--space-2); }
+  @media (max-width: 640px) { .signs { grid-template-columns: 1fr; } }
+</style>

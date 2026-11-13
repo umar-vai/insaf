@@ -1,0 +1,93 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../../layouts/Admin.astro';
+import Icon from '../../../../../components/Icon.astro';
+import { getEntry, listAccounts, methodMap, voucherCode } from '../../../../../server/accounts';
+import { getExpense } from '../../../../../server/office';
+import { METHOD_BN, dayBn, type PayMethod } from '../../../../../lib/offline';
+import { dateBn, taka } from '../../../../../lib/format';
+import { SITE } from '../../../../../lib/site';
+
+// A printable voucher: debit (an expense), credit (other income) or journal
+// (a transfer), with who prepared, checked and approved it and space to sign.
+const id = Astro.params.id ?? '';
+type V = {
+  code: string; kindBn: string; day: string; amountMinor: number; head: string; party: string; description: string; account: string;
+  fund: string; project: string; reference: string; preparedBy: string; checkedBy: string; approvedBy: string; status: string; voided: string | null; photo: boolean;
+};
+let v: V | null = null;
+const exp = await getExpense(env.DB, id);
+{
+  const e = exp;
+  if (e) {
+    const accounts = await listAccounts(env.DB);
+    const acc = accounts.find((a) => a.id === methodMap(accounts).get(e.method));
+    v = {
+      code: voucherCode('expense', e.voucherNo) || 'বেতন', kindBn: 'ডেবিট ভাউচার (খরচ)', day: e.spentOn, amountMinor: e.amountMinor, head: e.category, party: e.party, description: e.description,
+      account: `${acc?.name ?? ''} (${METHOD_BN[e.method as PayMethod] ?? e.method})`, fund: e.fundName ?? 'সাধারণ তহবিল', project: e.projectName ?? '', reference: '',
+      preparedBy: e.recordedBy, checkedBy: e.checkedBy ?? '', approvedBy: e.status === 'approved' ? (e.decidedBy ?? e.recordedBy) : '',
+      status: e.status === 'approved' ? 'অনুমোদিত' : e.status === 'pending' ? 'অনুমোদনের অপেক্ষায়' : 'নামঞ্জুর', voided: e.voidedAt ? e.voidReason : null, photo: Boolean(e.voucherKey),
+    };
+  }
+}
+if (!exp) {
+  const e = await getEntry(env.DB, id);
+  if (e) {
+    v = {
+      code: voucherCode(e.kind, e.voucherNo), kindBn: e.kind === 'income' ? 'ক্রেডিট ভাউচার (আয়)' : 'জার্নাল ভাউচার (স্থানান্তর)', day: e.day, amountMinor: e.amountMinor,
+      head: e.category, party: e.party, description: e.description, account: e.kind === 'transfer' ? `${e.fromAccountName} থেকে ${e.accountName}` : e.accountName,
+      fund: e.fundName ?? '', project: e.projectName ?? '', reference: e.reference, preparedBy: e.recordedBy, checkedBy: '', approvedBy: '', status: 'লেখা হয়েছে',
+      voided: e.voidedAt ? e.voidReason : null, photo: false,
+    };
+  }
+}
+if (!v) return new Response('Not found', { status: 404 });
+---
+
+<Admin title={`ভাউচার ${v.code}`}>
+  <div class="actions" data-noprint>
+    <button type="button" class="button" data-print><Icon name="printer" /> প্রিন্ট বা PDF</button>
+    {v.photo && <a class="button button--ghost" href={`/admin/offline/voucher/${id}`} target="_blank">মূল ভাউচারের ছবি</a>}
+  </div>
+  <article class="card voucher">
+    <header>
+      <div><strong>{SITE.nameBn}</strong><br /><small>{v.kindBn}</small></div>
+      <div class="no"><span>নম্বর</span><strong>{v.code}</strong><span>তারিখ {dayBn(v.day)}</span></div>
+    </header>
+    {v.voided && <p class="note note--bad">এই ভাউচার বাতিল: {v.voided}</p>}
+    <dl>
+      <dt>খাত</dt><dd>{v.head}</dd>
+      {v.party && <><dt>{v.kindBn.startsWith('ক্রেডিট') ? 'যাঁর কাছ থেকে' : 'যাঁকে দেওয়া'}</dt><dd>{v.party}</dd></>}
+      <dt>টাকা</dt><dd class="amount">{taka(v.amountMinor)}</dd>
+      <dt>হিসাব</dt><dd>{v.account}</dd>
+      {v.fund && <><dt>তহবিল</dt><dd>{v.fund}</dd></>}
+      {v.project && <><dt>প্রকল্প</dt><dd>{v.project}</dd></>}
+      {v.reference && <><dt>রেফারেন্স</dt><dd>{v.reference}</dd></>}
+      {v.description && <><dt>বিবরণ</dt><dd>{v.description}</dd></>}
+      <dt>অবস্থা</dt><dd>{v.status}</dd>
+    </dl>
+    <div class="signs">
+      <div><span>{v.preparedBy}</span>প্রস্তুতকারী</div>
+      <div><span>{v.checkedBy}</span>যাচাইকারী</div>
+      <div><span>{v.approvedBy}</span>অনুমোদনকারী</div>
+      <div><span></span>গ্রহীতা</div>
+    </div>
+    <p class="muted foot"><small>প্রিন্ট: {dateBn(new Date().toISOString(), true)}</small></p>
+  </article>
+</Admin>
+<style>
+  .actions { display: flex; gap: var(--space-2); margin-bottom: var(--space-4); }
+  .voucher { max-width: 760px; }
+  .voucher header { display: flex; justify-content: space-between; gap: var(--space-4); border-bottom: 2px solid var(--color-line); padding-bottom: var(--space-3); margin-bottom: var(--space-4); }
+  .no { display: grid; text-align: right; }
+  .no strong { font-size: 1.4rem; }
+  dl { display: grid; grid-template-columns: 9rem 1fr; gap: var(--space-2) var(--space-4); margin: 0; }
+  dt { color: var(--color-muted); }
+  dd { margin: 0; }
+  .amount { font-size: 1.3rem; font-weight: 700; }
+  .signs { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-4); margin-top: 80px; text-align: center; font-size: var(--text-sm); }
+  .signs div { border-top: 1px solid var(--color-text); padding-top: var(--space-2); display: grid; }
+  .signs span { font-size: var(--text-xs); color: var(--color-muted); min-height: 1.2em; word-break: break-all; }
+  .foot { margin-top: var(--space-4); }
+  @media (max-width: 640px) { .signs { grid-template-columns: repeat(2, 1fr); } dl { grid-template-columns: 1fr; } }
+</style>
