@@ -236,6 +236,8 @@ export const offlineCourses = sqliteTable('offline_courses', {
   durationMonths: integer('duration_months').notNull(),
   note: text('note').notNull().default(''),
   status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
+  /** The accounts project this department's fees count under (0004). */
+  projectId: text('project_id'),
   createdAt: timestamp('created_at'),
 });
 
@@ -413,6 +415,15 @@ export const expenses = sqliteTable(
     voidedAt: text('voided_at'),
     voidedBy: text('voided_by'),
     voidReason: text('void_reason'),
+    /** Debit voucher number shown as DV-0001 (0004). Payroll expenses have none. */
+    voucherNo: integer('voucher_no'),
+    projectId: text('project_id'),
+    fundId: text('fund_id'),
+    /** Who was paid. */
+    party: text('party').notNull().default(''),
+    /** First approval step of a large expense (accounts full); the owner gives the second. */
+    checkedBy: text('checked_by'),
+    checkedAt: text('checked_at'),
     createdAt: timestamp('created_at'),
   },
   (t) => [index('expenses_spent_idx').on(t.spentOn), index('expenses_status_idx').on(t.status), uniqueIndex('expenses_nonce_idx').on(t.nonce), check('expenses_amount_check', sql`${t.amountMinor} > 0`)],
@@ -980,3 +991,125 @@ export const portalNotifications = sqliteTable('portal_notifications', {
   index('portal_notifications_student_idx').on(t.offlineStudentId, t.readAt, t.createdAt),
   index('portal_notifications_teacher_idx').on(t.teacherId, t.readAt, t.createdAt),
 ]);
+
+// ---- Accounts and student CRM (0004) ----
+
+export const accProjects = sqliteTable('acc_projects', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  note: text('note').notNull().default(''),
+  status: text('status', { enum: ['active', 'closed'] }).notNull().default('active'),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+});
+
+export const accFunds = sqliteTable('acc_funds', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  kind: text('kind', { enum: ['general', 'zakat', 'lillah', 'grant', 'other'] }).notNull().default('general'),
+  restricted: integer('restricted').notNull().default(0),
+  note: text('note').notNull().default(''),
+  status: text('status', { enum: ['active', 'closed'] }).notNull().default('active'),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+});
+
+export const accAccounts = sqliteTable('acc_accounts', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  kind: text('kind', { enum: ['cash', 'bank', 'mobile', 'gateway'] }).notNull(),
+  methods: text('methods').notNull().default(''),
+  numberHint: text('number_hint').notNull().default(''),
+  openingMinor: integer('opening_minor').notNull().default(0),
+  openingOn: text('opening_on').notNull().default(''),
+  status: text('status', { enum: ['active', 'closed'] }).notNull().default('active'),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+});
+
+export const accEntries = sqliteTable('acc_entries', {
+  id: text('id').primaryKey(),
+  kind: text('kind', { enum: ['income', 'transfer'] }).notNull(),
+  voucherNo: integer('voucher_no').notNull(),
+  day: text('day').notNull(),
+  amountMinor: integer('amount_minor').notNull(),
+  accountId: text('account_id').notNull().references(() => accAccounts.id),
+  fromAccountId: text('from_account_id').references(() => accAccounts.id),
+  projectId: text('project_id').references(() => accProjects.id),
+  fundId: text('fund_id').references(() => accFunds.id),
+  category: text('category').notNull().default(''),
+  party: text('party').notNull().default(''),
+  description: text('description').notNull().default(''),
+  reference: text('reference').notNull().default(''),
+  recordedBy: text('recorded_by').notNull(),
+  nonce: text('nonce'),
+  voidedAt: text('voided_at'),
+  voidedBy: text('voided_by'),
+  voidReason: text('void_reason'),
+  createdAt: timestamp('created_at'),
+}, (t) => [uniqueIndex('acc_entries_voucher_idx').on(t.kind, t.voucherNo), uniqueIndex('acc_entries_nonce_idx').on(t.nonce), index('acc_entries_day_idx').on(t.day)]);
+
+export const accBudgets = sqliteTable('acc_budgets', {
+  id: text('id').primaryKey(),
+  year: text('year').notNull(),
+  projectId: text('project_id').notNull().default(''),
+  category: text('category').notNull().default(''),
+  amountMinor: integer('amount_minor').notNull(),
+  note: text('note').notNull().default(''),
+  createdBy: text('created_by').notNull(),
+  updatedAt: timestamp('updated_at'),
+}, (t) => [uniqueIndex('acc_budgets_one_idx').on(t.year, t.projectId, t.category)]);
+
+export const accReconciliations = sqliteTable('acc_reconciliations', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull().references(() => accAccounts.id),
+  asOf: text('as_of').notNull(),
+  statementMinor: integer('statement_minor').notNull(),
+  bookMinor: integer('book_minor').notNull(),
+  note: text('note').notNull().default(''),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [index('acc_reconciliations_account_idx').on(t.accountId, t.asOf)]);
+
+export const crmTags = sqliteTable('crm_tags', {
+  studentId: text('student_id').notNull().references(() => offlineStudents.id),
+  tag: text('tag').notNull(),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [primaryKey({ columns: [t.studentId, t.tag] }), index('crm_tags_tag_idx').on(t.tag)]);
+
+export const crmFollowups = sqliteTable('crm_followups', {
+  id: text('id').primaryKey(),
+  studentId: text('student_id').references(() => offlineStudents.id),
+  inquiryId: text('inquiry_id').references(() => admissionInquiries.id),
+  title: text('title').notNull(),
+  dueOn: text('due_on').notNull(),
+  assignedTo: text('assigned_to').notNull().default(''),
+  status: text('status', { enum: ['open', 'done', 'cancelled'] }).notNull().default('open'),
+  outcome: text('outcome').notNull().default(''),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+  doneBy: text('done_by'),
+  doneAt: text('done_at'),
+}, (t) => [index('crm_followups_due_idx').on(t.status, t.dueOn), index('crm_followups_student_idx').on(t.studentId)]);
+
+export const crmContacts = sqliteTable('crm_contacts', {
+  id: text('id').primaryKey(),
+  studentId: text('student_id').references(() => offlineStudents.id),
+  inquiryId: text('inquiry_id').references(() => admissionInquiries.id),
+  channel: text('channel', { enum: ['call', 'sms', 'whatsapp', 'visit', 'portal', 'email', 'letter'] }).notNull(),
+  direction: text('direction', { enum: ['out', 'in'] }).notNull().default('out'),
+  summary: text('summary').notNull(),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [index('crm_contacts_student_idx').on(t.studentId, t.createdAt), index('crm_contacts_created_idx').on(t.createdAt)]);
+
+export const crmTemplates = sqliteTable('crm_templates', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  channel: text('channel', { enum: ['any', 'sms', 'whatsapp', 'portal'] }).notNull().default('any'),
+  body: text('body').notNull(),
+  status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
+  createdBy: text('created_by').notNull(),
+  updatedAt: timestamp('updated_at'),
+});

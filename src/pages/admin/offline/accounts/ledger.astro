@@ -1,0 +1,72 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import AccountsNav from '../../../../components/admin/AccountsNav.astro';
+import { ledgerView } from '../../../../server/accounts-ledger';
+import { dayBn, todayDhaka } from '../../../../lib/offline';
+import { bnDigits, taka } from '../../../../lib/format';
+
+// Cash book (one account), fund ledger or project ledger: every movement in a
+// date range with a running balance, printable and downloadable for audit.
+const today = todayDhaka();
+const v = await ledgerView(env.DB, Astro.url.searchParams, today);
+const qs = new URLSearchParams({ from: v.from, to: v.to, account: v.filter.account, fund: v.filter.fund, project: v.filter.project }).toString();
+const signed = (m: number) => `${m < 0 ? '−' : ''}${taka(Math.abs(m))}`;
+const SOURCE_BN = { fee: 'ফি', income: 'আয়', expense: 'খরচ', transfer: 'স্থানান্তর' } as const;
+---
+
+<Admin title="ক্যাশবুক ও লেজার">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/offline/accounts">হিসাব খাতা</a></p>
+      <h1>{v.title}</h1>
+      <p>{dayBn(v.from)} থেকে {dayBn(v.to)}। প্রতিটি জমা ও খরচ তারিখ অনুযায়ী, পাশে চলতি ব্যালেন্স। ভাউচার বা রসিদ নম্বরে চাপ দিলে মূল কাগজ খোলে।</p>
+    </div>
+    <div class="actions" data-noprint>
+      <a class="button button--ghost" href={`/admin/offline/accounts/ledger.csv?${qs}`}><Icon name="download" /> Excel</a>
+      <button type="button" class="button button--ghost" data-print><Icon name="printer" /> PDF বা প্রিন্ট</button>
+    </div>
+  </header>
+  <AccountsNav />
+
+  <form class="card filters" method="get" data-noprint>
+    <label class="field"><span>থেকে</span><input type="date" name="from" value={v.from} max={today} /></label>
+    <label class="field"><span>পর্যন্ত</span><input type="date" name="to" value={v.to} max={today} /></label>
+    <label class="field"><span>হিসাব (ক্যাশবুক)</span><select name="account"><option value="">সব হিসাব</option>{v.accounts.map((a) => <option value={a.id} selected={v.filter.account === a.id}>{a.name}</option>)}</select></label>
+    <label class="field"><span>তহবিল</span><select name="fund"><option value="">সব তহবিল</option>{v.funds.map((f) => <option value={f.id} selected={v.filter.fund === f.id}>{f.name}</option>)}</select></label>
+    <label class="field"><span>প্রকল্প</span><select name="project"><option value="">সব প্রকল্প</option><option value="none" selected={v.filter.project === 'none'}>কোনো প্রকল্পে নয়</option>{v.projects.map((p) => <option value={p.id} selected={v.filter.project === p.id}>{p.name}</option>)}</select></label>
+    <button class="button">দেখুন</button>
+  </form>
+
+  <div class="kpis">
+    {v.opening !== null && <div class="kpi"><span class="kpi__label">শুরুর ব্যালেন্স</span><strong class="kpi__value">{signed(v.opening)}</strong></div>}
+    <div class="kpi"><span class="kpi__label">জমা</span><strong class="kpi__value">{taka(v.inMinor)}</strong></div>
+    <div class="kpi kpi--warn"><span class="kpi__label">খরচ</span><strong class="kpi__value">{taka(v.outMinor)}</strong></div>
+    {v.opening !== null && <div class="kpi kpi--info"><span class="kpi__label">শেষ ব্যালেন্স</span><strong class="kpi__value">{signed(v.opening + v.inMinor - v.outMinor)}</strong></div>}
+  </div>
+
+  <section class="card block">
+    {v.rows.length === 0 ? <p class="muted">এই সময়ে কিছু নেই।</p> : (
+      <div class="table-wrap"><table>
+        <thead><tr><th>তারিখ</th><th>নম্বর</th><th>খাত</th><th>বিবরণ</th>{!v.filter.account && <th>হিসাব</th>}<th class="num">জমা</th><th class="num">খরচ</th>{v.opening !== null && <th class="num">ব্যালেন্স</th>}</tr></thead>
+        <tbody>{v.rows.map((r) => (
+          <tr>
+            <td>{dayBn(r.day)}</td>
+            <td><a href={r.link} target="_blank">{r.ref}</a><br /><small class="muted">{SOURCE_BN[r.source]}</small></td>
+            <td>{r.head}</td><td>{r.party}</td>
+            {!v.filter.account && <td><small>{r.accountName}</small></td>}
+            <td class="num">{r.inMinor ? taka(r.inMinor) : ''}</td><td class="num">{r.outMinor ? taka(r.outMinor) : ''}</td>
+            {v.opening !== null && <td class="num">{signed(r.balance)}</td>}
+          </tr>
+        ))}</tbody>
+      </table></div>
+    )}
+    {v.truncated && <p class="note note--warn">প্রথম {bnDigits(v.rows.length)}টি সারি দেখানো হচ্ছে। ছোট সময় বাছুন বা Excel নিন।</p>}
+  </section>
+</Admin>
+<style>
+  .filters { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: end; margin-bottom: var(--space-5); }
+  .filters .field { flex: 1 1 160px; }
+  .block { margin-top: var(--space-5); }
+</style>

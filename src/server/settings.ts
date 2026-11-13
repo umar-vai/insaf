@@ -28,6 +28,8 @@ export type Settings = {
   dueTemplate: string;
   /** Expenses above this many taka wait for the owner's approval (0 = never). */
   expenseApprovalOver: number;
+  /** Second step: expenses above this many taka also need an owner (0 = one step only). */
+  expenseOwnerOver: number;
   /** Offline students rate their teachers once a month. */
   teacherRatings: boolean;
   /** Late fee in taka added once to each installment still unpaid after the grace days (0 = no late fee). */
@@ -59,6 +61,7 @@ export const DEFAULTS: Settings = {
   teacherTakesAttendance: true,
   dueTemplate: DEFAULT_DUE_TEMPLATE,
   expenseApprovalOver: 2000,
+  expenseOwnerOver: 25000,
   teacherRatings: true,
   lateFeeTaka: 0,
   lateGraceDays: 7,
@@ -69,7 +72,7 @@ export const DEFAULTS: Settings = {
 };
 
 /** Allowed range for each number. */
-const RANGE: Partial<Record<keyof Settings, [number, number]>> = { paidLeaveDays: [0, 31], expenseApprovalOver: [0, 100_000_000], lateFeeTaka: [0, 100_000], lateGraceDays: [0, 90], libraryLoanDays: [1, 365], libraryFinePerDayTaka: [0, 10_000] };
+const RANGE: Partial<Record<keyof Settings, [number, number]>> = { paidLeaveDays: [0, 31], expenseApprovalOver: [0, 100_000_000], expenseOwnerOver: [0, 100_000_000], lateFeeTaka: [0, 100_000], lateGraceDays: [0, 90], libraryLoanDays: [1, 365], libraryFinePerDayTaka: [0, 10_000] };
 const inRange = (k: keyof Settings, n: number) => Number.isInteger(n) && n >= (RANGE[k]?.[0] ?? 0) && n <= (RANGE[k]?.[1] ?? 0);
 const toNumber = (raw: unknown) => Number(String(raw ?? '').replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d))).replace(/[,\s]/g, ''));
 
@@ -97,7 +100,7 @@ export async function getSettings(db: D1Database): Promise<Settings> {
 /** Reads the settings form. Unchecked boxes mean off. */
 export function parseSettingsForm(form: FormData): Settings {
   const s = { ...DEFAULTS };
-  for (const k of ['paidLeaveDays', 'expenseApprovalOver', 'lateFeeTaka', 'lateGraceDays', 'libraryLoanDays', 'libraryFinePerDayTaka'] as const) {
+  for (const k of ['paidLeaveDays', 'expenseApprovalOver', 'expenseOwnerOver', 'lateFeeTaka', 'lateGraceDays', 'libraryLoanDays', 'libraryFinePerDayTaka'] as const) {
     const n = toNumber(form.get(k));
     s[k] = inRange(k, n) ? n : DEFAULTS[k];
   }

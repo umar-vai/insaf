@@ -1,3 +1,4 @@
+import { logContactsBulk } from './crm';
 import { log } from './admin';
 import { savedConfig, type ConfigEnv } from './config';
 import { allEnrollments, type EnrollmentWithLedger } from './offline';
@@ -115,6 +116,7 @@ export async function sendReminders(
     for (const r of results) if (r.email) emails.set(r.id, r.email);
   }
   const out: SendResult = { sent: 0, skipped: ids.length - all.length, failed: 0 };
+  const reached: string[] = [];
   for (const e of all) {
     const text = fillTemplate(template, e, opts.kind);
     let ok: boolean;
@@ -133,9 +135,12 @@ export async function sendReminders(
       }
       ok = await sendEmail(env, to, `${SITE.nameBn}: ফি পরিশোধের অনুরোধ`, text);
     }
-    if (ok) out.sent++;
-    else out.failed++;
+    if (ok) {
+      out.sent++;
+      reached.push(e.studentId);
+    } else out.failed++;
   }
+  await logContactsBulk(db, actor, reached, opts.channel === 'sms' ? 'sms' : 'email', 'বকেয়া ফির রিমাইন্ডার পাঠানো হয়েছে');
   await log(db, actor, `reminder.${opts.channel}`, 'offline_dues', { ...out, kind: opts.kind });
   return out;
 }

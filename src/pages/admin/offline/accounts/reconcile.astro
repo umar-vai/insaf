@@ -1,0 +1,93 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import AccountsNav from '../../../../components/admin/AccountsNav.astro';
+import { balancesAsOf, listReconciliations, parseReconcileForm, saveReconciliation, UNASSIGNED } from '../../../../server/accounts';
+import { dateBn } from '../../../../lib/format';
+import { dayBn, todayDhaka } from '../../../../lib/offline';
+import { taka } from '../../../../lib/format';
+
+// Count the cash box or read the bank / bKash statement, enter what it says,
+// and see the difference from the books for that day. Each count is kept.
+const actor = Astro.locals.staff!;
+const today = todayDhaka();
+const here = '/admin/offline/accounts/reconcile';
+const q = Astro.url.searchParams;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const v = parseReconcileForm(form, today);
+  if (!v.ok) return Astro.redirect(`${here}?error=${v.error}`, 303);
+  const r = await saveReconciliation(env.DB, actor, v.value);
+  return Astro.redirect(r.ok ? `${here}?done=${r.value.id}` : `${here}?error=${r.error}`, 303);
+}
+
+const asOf = /^\d{4}-\d{2}-\d{2}$/.test(q.get('asOf') ?? '') && q.get('asOf')! <= today ? q.get('asOf')! : today;
+const [balances, recs] = await Promise.all([balancesAsOf(env.DB, asOf), listReconciliations(env.DB)]);
+const accounts = balances.filter((b) => b.id !== UNASSIGNED);
+const done = q.get('done') ? recs.find((r) => r.id === q.get('done')) : null;
+const ERR: Record<string, string> = { account: 'হিসাব বাছুন।', day: 'তারিখ সঠিক নয়।', statement: 'স্টেটমেন্ট বা গোনা টাকার অঙ্ক লিখুন।' };
+const signed = (m: number) => `${m < 0 ? '−' : ''}${taka(Math.abs(m))}`;
+---
+
+<Admin title="ব্যাংক ও ক্যাশ মেলানো">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/offline/accounts">হিসাব খাতা</a></p>
+      <h1>ব্যাংক ও ক্যাশ মেলানো</h1>
+      <p>ক্যাশ বাক্সের টাকা গুনে, অথবা ব্যাংক বা বিকাশের স্টেটমেন্ট দেখে অঙ্কটি লিখুন। খাতার হিসাবের সাথে কত পার্থক্য তা দেখা যাবে এবং রেকর্ড থেকে যাবে। পার্থক্য থাকলে লেজার খুলে কোন লেখা বাকি আছে খুঁজুন।</p>
+    </div>
+  </header>
+  <AccountsNav />
+  {q.get('error') && <p class="note note--bad" role="alert">{ERR[q.get('error')!] ?? 'কাজটি করা যায়নি।'}</p>}
+  {done && (
+    <p class={`note ${done.statementMinor === done.bookMinor ? 'note--good' : 'note--warn'}`} role="status">
+      {done.accountName}, {dayBn(done.asOf)}: খাতায় {signed(done.bookMinor)}, আসলে {signed(done.statementMinor)}।
+      {done.statementMinor === done.bookMinor ? ' পুরোপুরি মিলেছে।' : ` পার্থক্য ${signed(done.statementMinor - done.bookMinor)}।`}
+    </p>
+  )}
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>নতুন মেলানো</h2></div>
+      <form method="get" class="inline" data-noprint>
+        <label class="field"><span>কোন দিনের হিসাব</span><input type="date" name="asOf" value={asOf} max={today} /></label>
+        <button class="button button--ghost">খাতার অঙ্ক দেখুন</button>
+      </form>
+      <form method="post" class="form-grid">
+        <input type="hidden" name="asOf" value={asOf} />
+        <label class="field"><span>হিসাব</span>
+          <select name="accountId" required>{accounts.map((b) => <option value={b.id}>{b.name} (খাতায় {signed(b.balanceMinor)})</option>)}</select>
+        </label>
+        <label class="field"><span>আসলে আছে (টাকা)</span><input name="statement" inputmode="numeric" required /></label>
+        <label class="field wide"><span>নোট (যেমন স্টেটমেন্টের পাতা, কে গুনেছেন)</span><input name="note" maxlength="500" /></label>
+        <button class="button"><Icon name="check" /> মিলিয়ে সংরক্ষণ</button>
+      </form>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>{dayBn(asOf)} পর্যন্ত খাতার হিসাব</h2></div>
+      <ul class="list">{accounts.map((b) => <li><span><a href={`/admin/offline/accounts/ledger?account=${b.id}&to=${asOf}`}>{b.name}</a></span><strong class="num">{signed(b.balanceMinor)}</strong></li>)}</ul>
+    </section>
+  </div>
+
+  <section class="card block">
+    <div class="card__head"><h2>আগের মেলানো</h2></div>
+    {recs.length === 0 ? <p class="muted">এখনো কিছু মেলানো হয়নি।</p> : (
+      <div class="table-wrap"><table>
+        <thead><tr><th>তারিখ</th><th>হিসাব</th><th class="num">খাতায়</th><th class="num">আসলে</th><th class="num">পার্থক্য</th><th>কে, নোট</th></tr></thead>
+        <tbody>{recs.map((r) => (
+          <tr>
+            <td>{dayBn(r.asOf)}</td><td>{r.accountName}</td><td class="num">{signed(r.bookMinor)}</td><td class="num">{signed(r.statementMinor)}</td>
+            <td class="num">{r.statementMinor === r.bookMinor ? <span class="pill pill--paid">মিলেছে</span> : <span class="pill pill--failed">{signed(r.statementMinor - r.bookMinor)}</span>}</td>
+            <td><small>{r.createdBy} · {dateBn(r.createdAt, true)}{r.note && <><br />{r.note}</>}</small></td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+    )}
+  </section>
+</Admin>
+<style>
+  .block { margin-top: var(--space-5); }
+  .inline { display: flex; gap: var(--space-2); align-items: end; flex-wrap: wrap; margin-bottom: var(--space-4); }
+</style>

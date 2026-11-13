@@ -1,0 +1,178 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import AccountsNav from '../../../../components/admin/AccountsNav.astro';
+import {
+  ACCOUNT_KIND_BN,
+  ACCOUNT_KINDS,
+  ALL_METHODS,
+  FUND_KIND_BN,
+  FUND_KINDS,
+  GENERAL_FUND,
+  courseProjects,
+  listAccounts,
+  listFunds,
+  listProjects,
+  parseAccountForm,
+  parseFundForm,
+  parseProjectForm,
+  saveAccount,
+  saveFund,
+  saveProject,
+  setCourseProject,
+} from '../../../../server/accounts';
+import { localsMayDo } from '../../../../server/staff';
+import { METHOD_BN, dayBn } from '../../../../lib/offline';
+import { taka } from '../../../../lib/format';
+
+// The few things set once: projects, funds, where money is kept (and which
+// payment method lands where), and which project each department's fees
+// count under. Only those with full accounts power change them.
+const actor = Astro.locals.staff!;
+const full = localsMayDo(Astro.locals, 'accounts', 'full');
+const here = '/admin/offline/accounts/setup';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  const id = String(form.get('id') ?? '') || null;
+  const back = (r: { ok: boolean; error?: string }, hash: string) => Astro.redirect(`${here}?${r.ok ? 'saved=1' : `error=${r.error ?? 'action'}`}${hash}`, 303);
+  if (!full) return back({ ok: false, error: 'full' }, '');
+  if (action === 'project') {
+    const v = parseProjectForm(form);
+    return back(v.ok ? await saveProject(env.DB, actor, id, v.value) : v, '#projects');
+  }
+  if (action === 'fund') {
+    const v = parseFundForm(form);
+    return back(v.ok ? await saveFund(env.DB, actor, id, v.value) : v, '#funds');
+  }
+  if (action === 'account') {
+    const v = parseAccountForm(form);
+    return back(v.ok ? await saveAccount(env.DB, actor, id, v.value) : v, '#accounts');
+  }
+  if (action === 'course') {
+    const ok = await setCourseProject(env.DB, actor, String(form.get('courseId') ?? ''), String(form.get('projectId') ?? '') || null);
+    return back({ ok, error: 'course' }, '#departments');
+  }
+  return back({ ok: false }, '');
+}
+
+const [projects, funds, accounts, courses] = await Promise.all([listProjects(env.DB, true), listFunds(env.DB, true), listAccounts(env.DB), courseProjects(env.DB)]);
+const q = Astro.url.searchParams;
+const edit = q.get('edit') ?? '';
+const ep = projects.find((p) => p.id === edit);
+const ef = funds.find((f) => f.id === edit);
+const ea = accounts.find((a) => a.id === edit);
+const ERR: Record<string, string> = { name: 'নাম লিখুন।', name_taken: 'এই নাম আগেই আছে।', kind: 'ধরন বাছুন।', opening: 'শুরুর টাকা সঠিক নয়।', opening_on: 'শুরুর তারিখ সঠিক নয়।', full: 'এসব বদলাতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।', course: 'বিভাগটি পাওয়া যায়নি।' };
+const err = q.get('error');
+const unplaced = ALL_METHODS.filter((m) => !accounts.some((a) => a.methods.split(',').includes(m)));
+---
+
+<Admin title="প্রকল্প, তহবিল ও হিসাব">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/offline/accounts">হিসাব খাতা</a></p>
+      <h1>প্রকল্প, তহবিল ও হিসাব</h1>
+      <p>একবার ঠিক করে রাখলেই চলে। প্রকল্প: আলাদা কাজ বা বিভাগ, যার আয় ব্যয় আলাদা দেখতে চান। তহবিল: টাকা কোন উৎসের ও কোন খাতে খরচ করা যায় (সাধারণ, যাকাত, লিল্লাহ, কোনো সংস্থার অনুদান)। হিসাব: টাকা কোথায় থাকে।</p>
+    </div>
+  </header>
+  <AccountsNav />
+  {err && <p class="note note--bad" role="alert">{ERR[err] ?? 'কাজটি করা যায়নি।'}</p>}
+  {unplaced.length > 0 && <p class="note note--warn">এই পদ্ধতিগুলো কোনো হিসাবে বসানো নেই: {unplaced.map((m) => METHOD_BN[m]).join(', ')}। নিচে কোনো হিসাবে টিক দিন।</p>}
+
+  <section class="card block" id="accounts">
+    <div class="card__head"><h2>টাকা কোথায় থাকে (হিসাব)</h2></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>নাম</th><th>ধরন</th><th>কোন পদ্ধতির টাকা আসে</th><th>শুরুর জমা</th><th></th></tr></thead>
+      <tbody>{accounts.map((a) => (
+        <tr class={a.status === 'closed' ? 'void' : ''}>
+          <td>{a.name}{a.numberHint && <small class="muted"> · {a.numberHint}</small>}</td><td>{ACCOUNT_KIND_BN[a.kind]}</td>
+          <td>{a.methods.split(',').filter(Boolean).map((m) => METHOD_BN[m as keyof typeof METHOD_BN] ?? m).join(', ') || <span class="muted">কিছু না</span>}</td>
+          <td>{taka(a.openingMinor)}{a.openingOn && <small class="muted"><br />{dayBn(a.openingOn)} থেকে</small>}</td>
+          <td>{full && <a class="button button--sm button--ghost" href={`?edit=${a.id}#account-form`}>বদলান</a>}</td>
+        </tr>
+      ))}</tbody>
+    </table></div>
+    {full && (
+      <form method="post" class="form-grid sub" id="account-form">
+        <input type="hidden" name="action" value="account" />{ea && <input type="hidden" name="id" value={ea.id} />}
+        <h3 class="wide">{ea ? `${ea.name} বদলান` : 'নতুন হিসাব'}</h3>
+        <label class="field"><span>নাম</span><input name="name" required maxlength="80" value={ea?.name ?? ''} placeholder="যেমন ইসলামী ব্যাংক চলতি হিসাব" /></label>
+        <label class="field"><span>ধরন</span><select name="kind">{ACCOUNT_KINDS.map((k) => <option value={k} selected={ea?.kind === k}>{ACCOUNT_KIND_BN[k]}</option>)}</select></label>
+        <label class="field"><span>নম্বরের শেষ অংশ (ঐচ্ছিক)</span><input name="numberHint" maxlength="12" value={ea?.numberHint ?? ''} placeholder="যেমন ...4521" /></label>
+        <label class="field"><span>শুরুর জমা (টাকা)</span><input name="opening" inputmode="numeric" value={ea ? String(ea.openingMinor / 100) : '0'} /></label>
+        <label class="field"><span>শুরুর তারিখ (এর আগের লেখা এই জমায় ধরা)</span><input name="openingOn" type="date" value={ea?.openingOn ?? ''} /></label>
+        <fieldset class="field wide methods"><legend>কোন পদ্ধতির টাকা এই হিসাবে আসে ও যায়</legend>
+          {ALL_METHODS.map((m) => <label class="check"><input type="checkbox" name="methods" value={m} checked={ea?.methods.split(',').includes(m)} /> {METHOD_BN[m]}</label>)}
+        </fieldset>
+        {ea && <label class="check wide"><input type="checkbox" name="status" value="closed" checked={ea.status === 'closed'} /> হিসাবটি বন্ধ</label>}
+        <button class="button"><Icon name="check" /> সংরক্ষণ</button>
+        {ea && <a class="button button--ghost" href={`${here}#accounts`}>বাতিল</a>}
+      </form>
+    )}
+  </section>
+
+  <div class="cols">
+    <section class="card" id="funds">
+      <div class="card__head"><h2>তহবিল</h2></div>
+      <ul class="list">{funds.map((f) => (
+        <li><span>{f.name}<small>{FUND_KIND_BN[f.kind]}{f.restricted ? ' · শুধু নির্দিষ্ট খাতে' : ''}{f.status === 'closed' ? ' · বন্ধ' : ''}{f.note && ` · ${f.note}`}</small></span>
+          {full && <a class="button button--sm button--ghost" href={`?edit=${f.id}#funds`}>বদলান</a>}</li>
+      ))}</ul>
+      {full && (
+        <form method="post" class="form-grid sub">
+          <input type="hidden" name="action" value="fund" />{ef && <input type="hidden" name="id" value={ef.id} />}
+          <h3 class="wide">{ef ? `${ef.name} বদলান` : 'নতুন তহবিল'}</h3>
+          <label class="field"><span>নাম</span><input name="name" required maxlength="80" value={ef?.name ?? ''} placeholder="যেমন যাকাত তহবিল" /></label>
+          <label class="field"><span>ধরন</span><select name="kind">{FUND_KINDS.map((k) => <option value={k} selected={ef?.kind === k}>{FUND_KIND_BN[k]}</option>)}</select></label>
+          <label class="field wide"><span>নোট</span><input name="note" maxlength="300" value={ef?.note ?? ''} /></label>
+          {ef?.id !== GENERAL_FUND && <label class="check wide"><input type="checkbox" name="restricted" checked={Boolean(ef?.restricted)} /> শুধু নির্দিষ্ট খাতে খরচ করা যায় (যাকাত, গ্রান্ট)</label>}
+          {ef && ef.id !== GENERAL_FUND && <label class="check wide"><input type="checkbox" name="status" value="closed" checked={ef.status === 'closed'} /> তহবিল বন্ধ</label>}
+          <button class="button"><Icon name="check" /> সংরক্ষণ</button>
+        </form>
+      )}
+    </section>
+
+    <section class="card" id="projects">
+      <div class="card__head"><h2>প্রকল্প</h2></div>
+      {projects.length === 0 ? <p class="muted">এখনো কোনো প্রকল্প নেই।</p> : (
+        <ul class="list">{projects.map((p) => (
+          <li><span>{p.name}<small>{p.status === 'closed' ? 'শেষ · ' : ''}{p.note}</small></span>{full && <a class="button button--sm button--ghost" href={`?edit=${p.id}#projects`}>বদলান</a>}</li>
+        ))}</ul>
+      )}
+      {full && (
+        <form method="post" class="form-grid sub">
+          <input type="hidden" name="action" value="project" />{ep && <input type="hidden" name="id" value={ep.id} />}
+          <h3 class="wide">{ep ? `${ep.name} বদলান` : 'নতুন প্রকল্প'}</h3>
+          <label class="field"><span>নাম</span><input name="name" required maxlength="80" value={ep?.name ?? ''} placeholder="যেমন হিফজ বিভাগ, নতুন ভবন" /></label>
+          <label class="field wide"><span>নোট</span><input name="note" maxlength="300" value={ep?.note ?? ''} /></label>
+          {ep && <label class="check wide"><input type="checkbox" name="status" value="closed" checked={ep.status === 'closed'} /> প্রকল্প শেষ</label>}
+          <button class="button"><Icon name="check" /> সংরক্ষণ</button>
+        </form>
+      )}
+    </section>
+  </div>
+
+  <section class="card block" id="departments">
+    <div class="card__head"><h2>বিভাগের ফি কোন প্রকল্পে যাবে</h2></div>
+    <p class="muted"><small>বিভাগকে প্রকল্পে বসালে সেই বিভাগের ছাত্রদের ফি প্রকল্পের আয় হিসেবে দেখা যাবে। ফি সবসময় সাধারণ তহবিলে যায়।</small></p>
+    <ul class="list">{courses.map((c) => (
+      <li><span>{c.title}{c.status !== 'active' && <small>আর্কাইভ</small>}</span>
+        {full ? (
+          <form method="post" class="inline"><input type="hidden" name="action" value="course" /><input type="hidden" name="courseId" value={c.id} />
+            <select name="projectId" aria-label="প্রকল্প"><option value="">কোনো প্রকল্পে নয়</option>{projects.map((p) => <option value={p.id} selected={c.projectId === p.id}>{p.name}</option>)}</select>
+            <button class="button button--sm button--ghost">রাখুন</button></form>
+        ) : <span>{projects.find((p) => p.id === c.projectId)?.name ?? 'কোনো প্রকল্পে নয়'}</span>}
+      </li>
+    ))}</ul>
+  </section>
+</Admin>
+<style>
+  .block { margin-top: var(--space-5); }
+  .sub { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--color-line); }
+  .sub h3 { margin: 0; font-size: var(--text-sm); }
+  .methods { display: flex; flex-wrap: wrap; gap: var(--space-3); border: 0; padding: 0; }
+  .methods legend { margin-bottom: var(--space-2); }
+  .inline { display: flex; gap: var(--space-2); align-items: center; }
+</style>

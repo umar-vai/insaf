@@ -1,0 +1,128 @@
+---
+import Icon from '../Icon.astro';
+import { CHANNEL_BN, CHANNELS, SUGGESTED_TAGS, renderTemplate, type Followup, type Template, type TemplateVars, type TimelineItem } from '../../server/crm';
+import { dayBn, waNumber } from '../../lib/offline';
+import { dateBn } from '../../lib/format';
+
+// The CRM card on a student's admin page: tags, follow ups, a message from a
+// template (WhatsApp or SMS, then logged), a contact note, and the timeline.
+// The forms post to the student page, which handles the crm-* actions.
+type Props = { tags: string[]; allTags: string[]; followups: Followup[]; templates: Template[]; vars: TemplateVars; phone: string; timeline: TimelineItem[]; today: string };
+const { tags, allTags, followups, templates, vars, phone, timeline, today } = Astro.props;
+const wa = waNumber(phone);
+const choices = [...new Set([...SUGGESTED_TAGS, ...allTags])];
+const rendered = templates.map((t) => ({ id: t.id, name: t.name, text: renderTemplate(t.body, vars) }));
+const TONE = { good: 'paid', bad: 'absent', info: 'info', plain: 'draft' } as const;
+---
+
+<section class="card crm" id="crm">
+  <div class="card__head"><h2>যোগাযোগ ও ফলো আপ (CRM)</h2><a href={`/admin/offline/crm?tab=report`}>রিপোর্ট</a></div>
+
+  <form method="post" class="tags">
+    <input type="hidden" name="action" value="crm-tags" />
+    <span class="muted">ট্যাগ:</span>
+    {choices.map((t) => <label class="chip"><input type="checkbox" name="tag" value={t} checked={tags.includes(t)} /> {t}</label>)}
+    <input name="tags" maxlength="80" placeholder="নতুন ট্যাগ, কমা দিয়ে" aria-label="নতুন ট্যাগ" />
+    <button class="button button--sm button--ghost">ট্যাগ রাখুন</button>
+  </form>
+
+  <div class="crm-grid">
+    <div>
+      <h3>ফলো আপ</h3>
+      {followups.filter((f) => f.status === 'open').length === 0 ? <p class="muted"><small>কিছু বাকি নেই।</small></p> : (
+        <ul class="list">{followups.filter((f) => f.status === 'open').map((f) => (
+          <li>
+            <span>{f.title}<small class={f.dueOn < today ? 'bad' : ''}>{dayBn(f.dueOn)}{f.dueOn < today ? ' (তারিখ পার)' : ''}{f.assignedTo && ` · ${f.assignedTo}`}</small></span>
+            <form method="post" class="inline">
+              <input type="hidden" name="action" value="crm-close" /><input type="hidden" name="followupId" value={f.id} />
+              <input name="outcome" maxlength="500" placeholder="ফলাফল" aria-label="ফলাফল" />
+              <select name="channel" aria-label="মাধ্যম">{CHANNELS.map((c) => <option value={c}>{CHANNEL_BN[c]}</option>)}</select>
+              <button class="button button--sm"><Icon name="check" /> শেষ</button>
+            </form>
+          </li>
+        ))}</ul>
+      )}
+      <form method="post" class="form-grid compact">
+        <input type="hidden" name="action" value="crm-followup" />
+        <label class="field wide"><span>নতুন ফলো আপ</span><input name="title" required maxlength="200" placeholder="যেমন বকেয়া নিয়ে আবার ফোন" /></label>
+        <label class="field"><span>কবে</span><input type="date" name="dueOn" required value={today} min={today} /></label>
+        <label class="field"><span>কে করবেন</span><input name="assignedTo" maxlength="120" /></label>
+        <button class="button button--sm"><Icon name="plus" /> যোগ</button>
+      </form>
+    </div>
+
+    <div>
+      <h3>বার্তা পাঠান</h3>
+      {rendered.length === 0 ? <p class="muted"><small>টেমপ্লেট নেই। <a href="/admin/offline/crm?tab=templates">টেমপ্লেট বানান</a></small></p> : (
+        <div class="send" data-send>
+          <select aria-label="টেমপ্লেট" data-pick><option value="">টেমপ্লেট বাছুন</option>{rendered.map((t) => <option value={t.text}>{t.name}</option>)}</select>
+          <textarea rows="4" maxlength="1000" data-text aria-label="বার্তা"></textarea>
+          <div class="row">
+            {wa && <a class="button button--sm button--wa" data-wa={wa} href={`https://wa.me/${wa}`} target="_blank" rel="noopener"><Icon name="whatsapp" /> WhatsApp</a>}
+            <a class="button button--sm button--ghost" data-sms={phone} href={`sms:${phone}`}>SMS</a>
+          </div>
+        </div>
+      )}
+      <form method="post" class="form-grid compact" data-log>
+        <input type="hidden" name="action" value="crm-contact" />
+        <label class="field"><span>মাধ্যম</span><select name="channel">{CHANNELS.map((c) => <option value={c}>{CHANNEL_BN[c]}</option>)}</select></label>
+        <label class="field"><span>কে করলেন</span><select name="direction"><option value="out">আমরা</option><option value="in">অভিভাবক</option></select></label>
+        <label class="field wide"><span>কী কথা হলো (খাতায় থাকবে)</span><textarea name="summary" rows="2" required maxlength="1000"></textarea></label>
+        <button class="button button--sm"><Icon name="check" /> লিখে রাখুন</button>
+      </form>
+    </div>
+  </div>
+
+  <h3>টাইমলাইন</h3>
+  {timeline.length === 0 ? <p class="muted">এখনো কিছু নেই।</p> : (
+    <ol class="timeline">{timeline.map((t) => (
+      <li>
+        <span class={`pill pill--${TONE[t.tone]}`}>{t.kind}</span>
+        <div><strong>{t.link ? <a href={t.link} target="_blank">{t.title}</a> : t.title}</strong>{t.detail && <small class="muted"> · {t.detail}</small>}<br /><small class="muted">{dateBn(t.at, true)}</small></div>
+      </li>
+    ))}</ol>
+  )}
+</section>
+<script>
+  for (const box of [...document.querySelectorAll<HTMLElement>('[data-send]')]) {
+    const pick = box.querySelector<HTMLInputElement>('[data-pick]')!;
+    const text = box.querySelector<HTMLTextAreaElement>('[data-text]')!;
+    const wa = box.querySelector<HTMLAnchorElement>('[data-wa]');
+    const sms = box.querySelector<HTMLAnchorElement>('[data-sms]');
+    const log = document.querySelector<HTMLFormElement>('[data-log]');
+    const sync = () => {
+      if (wa) wa.href = `https://wa.me/${wa.dataset.wa}?text=${encodeURIComponent(text.value)}`;
+      if (sms) sms.href = `sms:${sms.dataset.sms}?body=${encodeURIComponent(text.value)}`;
+    };
+    pick.addEventListener('change', () => {
+      text.value = pick.value;
+      sync();
+    });
+    text.addEventListener('input', sync);
+    // After opening WhatsApp or SMS, the contact note is filled in, ready to save.
+    for (const [a, ch] of [[wa, 'whatsapp'], [sms, 'sms']] as const) {
+      a?.addEventListener('click', () => {
+        if (!log || !text.value) return;
+        log.querySelector<HTMLInputElement>('select[name="channel"]')!.value = ch;
+        log.querySelector<HTMLTextAreaElement>('textarea[name="summary"]')!.value = text.value.slice(0, 1000);
+      });
+    }
+  }
+</script>
+<style>
+  .crm { margin-top: var(--space-5); }
+  .crm h3 { font-size: var(--text-sm); margin: var(--space-4) 0 var(--space-2); }
+  .tags { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+  .chip { display: inline-flex; gap: 4px; align-items: center; padding: 2px 10px; border: 1px solid var(--color-line); border-radius: 999px; font-size: var(--text-xs); }
+  .tags input[name='tags'] { width: auto; flex: 0 1 200px; }
+  .crm-grid { display: grid; gap: var(--space-5); grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+  .compact { margin-top: var(--space-3); }
+  .inline { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+  .inline input { width: 120px; }
+  .send { display: grid; gap: var(--space-2); }
+  .send .row { display: flex; gap: var(--space-2); }
+  .bad { color: var(--bad-600); }
+  .timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); max-height: 520px; overflow: auto; }
+  .timeline li { display: grid; grid-template-columns: 6.5rem 1fr; gap: var(--space-3); align-items: start; }
+  .timeline .pill { justify-self: start; }
+</style>

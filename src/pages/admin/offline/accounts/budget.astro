@@ -1,0 +1,102 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import AccountsNav from '../../../../components/admin/AccountsNav.astro';
+import { budgetVsActual, listProjects, parseBudgetForm, removeBudget, saveBudget } from '../../../../server/accounts';
+import { usedCategories } from '../../../../server/office';
+import { localsMayDo } from '../../../../server/staff';
+import { EXPENSE_CATEGORIES, todayDhaka } from '../../../../lib/offline';
+import { bnDigits, taka } from '../../../../lib/format';
+
+// A year's budget per project and/or expense head, against approved spending.
+const actor = Astro.locals.staff!;
+const full = localsMayDo(Astro.locals, 'accounts', 'full');
+const today = todayDhaka();
+const here = '/admin/offline/accounts/budget';
+const asked = Astro.url.searchParams.get('year') ?? '';
+const year = /^20\d\d$/.test(asked) ? asked : today.slice(0, 4);
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  if (!full) return Astro.redirect(`${here}?year=${year}&error=full`, 303);
+  if (form.get('action') === 'remove') {
+    await removeBudget(env.DB, actor, String(form.get('id') ?? ''));
+    return Astro.redirect(`${here}?year=${year}&saved=1`, 303);
+  }
+  const v = parseBudgetForm(form);
+  if (!v.ok) return Astro.redirect(`${here}?year=${year}&error=${v.error}`, 303);
+  const r = await saveBudget(env.DB, actor, v.value);
+  return Astro.redirect(`${here}?year=${v.value.year}&${r.ok ? 'saved=1' : `error=${r.error}`}`, 303);
+}
+
+const [lines, projects, used] = await Promise.all([budgetVsActual(env.DB, year, today), listProjects(env.DB, true), usedCategories(env.DB)]);
+const categories = [...new Set([...used, ...EXPENSE_CATEGORIES])];
+const total = lines.reduce((a, b) => ({ budget: a.budget + b.amountMinor, actual: a.actual + b.actualMinor }), { budget: 0, actual: 0 });
+// How far through the year we are, to judge whether spending runs ahead of the budget.
+const yearShare = year < today.slice(0, 4) ? 100 : year > today.slice(0, 4) ? 0 : Math.round(((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${year}-01-01T00:00:00Z`)) / (365 * 86_400_000)) * 100);
+const ERR: Record<string, string> = { year: 'সাল সঠিক নয়।', amount: 'টাকার অঙ্ক সঠিক নয়।', head: 'প্রকল্প অথবা খরচের খাত, অন্তত একটি বাছুন।', project: 'প্রকল্পটি পাওয়া যায়নি।', full: 'বাজেট ঠিক করতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।' };
+const err = Astro.url.searchParams.get('error');
+---
+
+<Admin title="বাজেট বনাম খরচ">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/offline/accounts">হিসাব খাতা</a></p>
+      <h1>বাজেট বনাম খরচ {bnDigits(year)}</h1>
+      <p>বছরের শুরুতে প্রকল্প বা খরচের খাত অনুযায়ী বাজেট ঠিক করুন। অনুমোদিত খরচ নিজে থেকেই পাশে বসে, কত বাকি আর কত ছাড়িয়ে গেল দেখা যায়। এখন বছরের {bnDigits(yearShare)}% পার হয়েছে।</p>
+    </div>
+    <div class="actions" data-noprint>
+      <a class="button button--ghost" href={`?year=${Number(year) - 1}`}>‹ {bnDigits(Number(year) - 1)}</a>
+      <a class="button button--ghost" href={`?year=${Number(year) + 1}`}>{bnDigits(Number(year) + 1)} ›</a>
+      <button type="button" class="button button--ghost" data-print><Icon name="printer" /> প্রিন্ট</button>
+    </div>
+  </header>
+  <AccountsNav />
+  {err && <p class="note note--bad" role="alert">{ERR[err] ?? 'কাজটি করা যায়নি।'}</p>}
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__label">মোট বাজেট</span><strong class="kpi__value">{taka(total.budget)}</strong></div>
+    <div class="kpi kpi--warn"><span class="kpi__label">এ পর্যন্ত খরচ</span><strong class="kpi__value">{taka(total.actual)}</strong><span class="kpi__hint">{total.budget ? `${bnDigits(Math.round((total.actual / total.budget) * 100))}%` : ''}</span></div>
+    <div class={`kpi ${total.budget - total.actual < 0 ? 'kpi--bad' : 'kpi--info'}`}><span class="kpi__label">{total.budget - total.actual < 0 ? 'বাজেট ছাড়িয়েছে' : 'বাজেটে বাকি'}</span><strong class="kpi__value">{taka(Math.abs(total.budget - total.actual))}</strong></div>
+  </div>
+
+  <section class="card block">
+    {lines.length === 0 ? <p class="muted">{bnDigits(year)} সালের কোনো বাজেট নেই।</p> : (
+      <div class="table-wrap"><table>
+        <thead><tr><th>প্রকল্প</th><th>খরচের খাত</th><th class="num">বাজেট</th><th class="num">খরচ</th><th class="num">পার্থক্য</th><th>ব্যবহার</th>{full && <th data-noprint></th>}</tr></thead>
+        <tbody>{lines.map((b) => (
+          <tr>
+            <td>{b.projectName ?? <span class="muted">সব প্রকল্প</span>}</td>
+            <td>{b.category || <span class="muted">সব খাত</span>}{b.note && <small class="muted"><br />{b.note}</small>}</td>
+            <td class="num">{taka(b.amountMinor)}</td><td class="num">{taka(b.actualMinor)}</td>
+            <td class={`num ${b.varianceMinor < 0 ? 'bad' : ''}`}>{b.varianceMinor < 0 ? '−' : ''}{taka(Math.abs(b.varianceMinor))}</td>
+            <td><span class={`pill pill--${b.usedPercent > 100 ? 'failed' : b.usedPercent > yearShare + 10 ? 'pending' : 'paid'}`}>{bnDigits(b.usedPercent)}%</span></td>
+            {full && <td data-noprint><form method="post" data-confirm="এই বাজেট সরাবেন?"><input type="hidden" name="action" value="remove" /><input type="hidden" name="id" value={b.id} /><button class="button button--sm button--ghost">সরান</button></form></td>}
+          </tr>
+        ))}</tbody>
+      </table></div>
+    )}
+    <p class="muted"><small>সবুজ: ঠিক আছে। হলুদ: বছরের যতটা গেছে তার চেয়ে বেশি খরচ হয়ে গেছে। লাল: বাজেট ছাড়িয়েছে।</small></p>
+  </section>
+
+  {full && (
+    <section class="card block" data-noprint>
+      <div class="card__head"><h2>বাজেট যোগ বা বদল</h2></div>
+      <form method="post" class="form-grid">
+        <label class="field"><span>সাল</span><input name="year" inputmode="numeric" value={year} required /></label>
+        <label class="field"><span>প্রকল্প</span><select name="projectId"><option value="">সব প্রকল্প</option>{projects.map((p) => <option value={p.id}>{p.name}</option>)}</select></label>
+        <label class="field"><span>খরচের খাত</span><input name="category" list="bud-cats" maxlength="60" placeholder="খালি রাখলে সব খাত" /></label>
+        <datalist id="bud-cats">{categories.map((c) => <option value={c} />)}</datalist>
+        <label class="field"><span>বছরের বাজেট (টাকা)</span><input name="amount" inputmode="numeric" required /></label>
+        <label class="field wide"><span>নোট (ঐচ্ছিক)</span><input name="note" maxlength="200" /></label>
+        <button class="button"><Icon name="check" /> সংরক্ষণ</button>
+      </form>
+      <p class="muted"><small>একই সাল, প্রকল্প আর খাতের বাজেট আবার দিলে আগেরটি বদলে যায়।</small></p>
+    </section>
+  )}
+</Admin>
+<style>
+  .block { margin-top: var(--space-5); }
+  .bad { color: var(--bad-600); }
+</style>

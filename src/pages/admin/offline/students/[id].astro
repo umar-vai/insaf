@@ -27,6 +27,8 @@ import { guardianLinks, linkGuardian, parseGuardianForm, relationBn, revokeGuard
 import { listBatches, studentAttendance } from '../../../../server/office';
 import { ATTENDANCE_BN, ITEM_KIND_BN, dayBn, durationBn, METHOD_BN, OFFLINE_ENROLL_STATUS_BN, PAY_METHODS, PLAN_MONTHS, planBn, studentCode, todayDhaka, waNumber } from '../../../../lib/offline';
 import { bnDigits, dateBn, taka } from '../../../../lib/format';
+import StudentCrm from '../../../../components/admin/StudentCrm.astro';
+import { addFollowup, allTags, closeFollowup, CHANNELS, listFollowups, listTemplates, logContact, parseContactForm, parseFollowupForm, parseTags, setTags, studentTimeline, tagsOf, type Channel } from '../../../../server/crm';
 
 const id = Astro.params.id!;
 const actor = Astro.locals.staff!;
@@ -44,6 +46,33 @@ if (Astro.request.method === 'POST') {
   const mine = current.enrollments.some((e) => e.id === enrollmentId);
   const fail = (e: string) => Astro.redirect(`${here}?error=${e}`, 303);
 
+  if (action === 'crm-tags') {
+    await setTags(env.DB, actor, id, parseTags(form));
+    return Astro.redirect(`${here}?saved=1#crm`, 303);
+  }
+  if (action === 'crm-followup') {
+    form.set('studentId', id);
+    form.delete('inquiryId');
+    const v = parseFollowupForm(form, today);
+    if (!v.ok) return Astro.redirect(`${here}?error=${v.error}#crm`, 303);
+    await addFollowup(env.DB, actor, v.value);
+    return Astro.redirect(`${here}?saved=1#crm`, 303);
+  }
+  if (action === 'crm-close') {
+    const fid = String(form.get('followupId') ?? '');
+    const mineF = (await listFollowups(env.DB, { studentId: id, status: 'open' })).some((f) => f.id === fid);
+    const ch = String(form.get('channel') ?? '');
+    if (!mineF || !(await closeFollowup(env.DB, actor, fid, 'done', String(form.get('outcome') ?? ''), (CHANNELS as readonly string[]).includes(ch) ? (ch as Channel) : null))) return fail('followup');
+    return Astro.redirect(`${here}?saved=1#crm`, 303);
+  }
+  if (action === 'crm-contact') {
+    form.set('studentId', id);
+    form.delete('inquiryId');
+    const v = parseContactForm(form);
+    if (!v.ok) return Astro.redirect(`${here}?error=${v.error}#crm`, 303);
+    await logContact(env.DB, actor, v.value);
+    return Astro.redirect(`${here}?saved=1#crm`, 303);
+  }
   if (action === 'guardian-link') {
     if (!owner) return new Response('Guardian changes require office full permission', { status: 403 });
     const checked=parseGuardianForm(form);
@@ -97,12 +126,17 @@ const data = await getOfflineStudent(env.DB, id, today);
 if (!data) return new Response('Not found', { status: 404 });
 const { student, enrollments, payments } = data;
 const hasPassword = student.email ? Boolean(await env.DB.prepare('SELECT 1 AS x FROM students WHERE lower(email) = lower(?) AND password_hash IS NOT NULL').bind(student.email).first()) : false;
-const [courses, batches, attendance, charges, guardians] = await Promise.all([
+const [courses, batches, attendance, charges, guardians, crmTags, tagChoices, followups, templates, timeline] = await Promise.all([
   listOfflineCourses(env.DB, false),
   listBatches(env.DB),
   studentAttendance(env.DB, id, 40),
   chargesOfStudent(env.DB, id),
   guardianLinks(env.DB, id),
+  tagsOf(env.DB, id),
+  allTags(env.DB),
+  listFollowups(env.DB, { studentId: id, limit: 30 }),
+  listTemplates(env.DB),
+  studentTimeline(env.DB, id),
 ]);
 const wa = waNumber(student.phone);
 const totals = enrollments.reduce(
@@ -396,6 +430,24 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
       );
     })
   }
+
+  <StudentCrm
+    tags={crmTags}
+    allTags={tagChoices.map((t) => t.tag)}
+    followups={followups}
+    templates={templates}
+    phone={student.guardianPhone || student.phone}
+    timeline={timeline}
+    today={today}
+    vars={{
+      name: student.name,
+      id: studentCode(student.studentNo),
+      course: enrollments.filter((e) => e.status === 'active').map((e) => e.courseTitle).join(', '),
+      class: enrollments.filter((e) => e.status === 'active').map((e) => e.batch).filter(Boolean).join(', '),
+      due: taka(totals.due),
+      date: dayBn(today),
+    }}
+  />
 
   <h2>সব পেমেন্ট</h2>
   {

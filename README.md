@@ -25,6 +25,17 @@ Astro on Cloudflare Workers, D1 (SQLite) for data, R2 for uploaded pictures and 
 - Admission inquiries from the public page `/admission/apply` (rate limited) to `/admin/offline/inquiries`.
 - Notifications in the portal and teacher panel with an unread count: fee bills, published results, homework, leave decisions, salary paid, overdue library books (nightly), certificates. The office can message all students, a department, a class or all teachers (`/admin/offline/messages`), by SMS too when the SMS key is set (paid per SMS, at most 300 at once).
 
+**Accounts book (Admin, "মাদরাসা", হিসাব খাতা, migration `0004`):** `/admin/offline/accounts`.
+- Projects (a department or a piece of work such as a building repair), funds (general, zakat, lillah, grants; restricted or not) and the places money is kept (cash box, bank, mobile banking, gateway). Each payment method belongs to one account, so fees and expenses land in the right account without extra typing. A department can be put under a project; its fees then count as that project's income (fees always go to the general fund).
+- Other income (grants, rent, sales, money moved over from the donation side by decision) and transfers between accounts, with voucher numbers CV and JV. Expenses get DV numbers, a payee, a fund and a project. Every voucher prints with prepared, checked and approved by. Nothing is deleted: wrong entries are voided with a reason.
+- Two step approval for large expenses (office settings): above the first limit someone with full accounts power approves; above the second the owner gives the final approval after that check. Nobody but an owner approves their own expense.
+- Cash book and fund and project ledgers with running balance (print and Excel), the receipts and payments statement with fund and project tables (print and Excel), yearly budget against approved spending, and bank and cash reconciliation (counted or statement amount against the books, kept with the difference).
+- Donations are not counted here; the owner's combined view stays at `/admin/finance`.
+
+**Student CRM (যোগাযোগ ও ফলো আপ):** `/admin/offline/crm` and the CRM card on each student's page: tags (orphan, residential, hifz...), follow ups with a date and who does them (due ones show on the dashboard), the contact log (calls, visits, WhatsApp, SMS; group messages and due reminders are logged on their own), message templates with `{name} {id} {course} {class} {due} {date}`, one timeline per student (admission, payments, charges, contacts, follow ups, tickets, leave, certificates, notifications, library, absences) and the engagement report. Group messages can go to a tag. Every fee payment sends the digital receipt to the student's portal at once.
+
+**Demo data:** `node scripts/demo-data.mjs seed` writes an SQL file of test students, teachers, staff, classes, fees, expenses, income and CRM rows (ids start with `demo_`, names end in "(টেস্ট)"); `node scripts/demo-data.mjs remove` writes the SQL that deletes exactly those rows. Run either with `npx wrangler d1 execute DB --env production --remote --file <file>`.
+
 Not built, waiting for the madrasa's own rules: hostel and transport, letter grades (A+ and so on), multi campus.
 
 **Portal:** students (or their guardians) at `/account/offline`: dashboard, notifications, fees and receipts (pay online if switched on in office settings), attendance, results, homework, leave requests, library books, ID card, teacher rating, tickets. Teachers at `/teacher`: classes, attendance, materials, notifications, own attendance, leave, salary, tickets.
@@ -77,6 +88,7 @@ D1 keeps 30 days of Time Travel (`wrangler d1 time-travel info insaf --env produ
 | `src/server/password.ts` | Mobile number and password sign in. |
 | `src/server/offline.ts`, `office.ts`, `hr.ts`, `academic.ts`, `panels.ts` | The madrasa office (ERP) and the portals. |
 | `src/server/fee-bills.ts`, `library.ts`, `certificates.ts`, `staff-attendance.ts`, `student-leave.ts`, `inquiries.ts`, `notifications.ts` | School operations (migration `0003`). |
+| `src/server/accounts.ts`, `accounts-ledger.ts`, `crm.ts` | Accounts book and student CRM (migration `0004`). |
 | `src/server/sslcommerz.ts`, `fee-pay.ts` | The gateway; fees paid online. |
 | `src/pages/land.astro`, `src/pages/donate/` | Donation pages. |
 | `src/pages/admin/` | Admin: `dashboard`, `donations`, `donors`, `funds` (CRM); `offline/` (ERP). |

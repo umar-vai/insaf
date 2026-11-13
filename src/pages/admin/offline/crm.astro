@@ -1,0 +1,293 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import {
+  CHANNEL_BN,
+  CHANNELS,
+  TEMPLATE_CHANNEL_BN,
+  TEMPLATE_VARS,
+  addFollowup,
+  allTags,
+  archiveTemplate,
+  closeFollowup,
+  engagementReport,
+  followupCounts,
+  listContacts,
+  listFollowups,
+  listTemplates,
+  logContact,
+  parseContactForm,
+  parseFollowupForm,
+  parseTemplateForm,
+  saveTemplate,
+  type Channel,
+} from '../../../server/crm';
+import { dayBn, studentCode, todayDhaka, waNumber } from '../../../lib/offline';
+import { bnDigits, dateBn } from '../../../lib/format';
+
+// The office's relationship work with students and guardians in one place:
+// follow ups due today, the contact log, message templates and the
+// engagement report. Each student's own page shows the same for that student.
+const actor = Astro.locals.staff!;
+const today = todayDhaka();
+const here = '/admin/offline/crm';
+const q = Astro.url.searchParams;
+const tab = (['followups', 'contacts', 'templates', 'report'] as const).find((t) => t === q.get('tab')) ?? 'followups';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  const back = (t: string, r: { ok: boolean; error?: string }) => Astro.redirect(`${here}?tab=${t}&${r.ok ? 'saved=1' : `error=${r.error ?? 'action'}`}`, 303);
+  if (action === 'followup') {
+    const v = parseFollowupForm(form, today);
+    return back('followups', v.ok ? await addFollowup(env.DB, actor, v.value) : v);
+  }
+  if (action === 'close') {
+    const ch = String(form.get('channel') ?? '');
+    const ok = await closeFollowup(env.DB, actor, String(form.get('id') ?? ''), form.get('status') === 'cancelled' ? 'cancelled' : 'done', String(form.get('outcome') ?? ''), (CHANNELS as readonly string[]).includes(ch) ? (ch as Channel) : null);
+    return back('followups', { ok, error: 'followup' });
+  }
+  if (action === 'contact') {
+    const v = parseContactForm(form);
+    if (!v.ok) return back('contacts', v);
+    await logContact(env.DB, actor, v.value);
+    return back('contacts', { ok: true });
+  }
+  if (action === 'template') {
+    const v = parseTemplateForm(form);
+    return back('templates', v.ok ? await saveTemplate(env.DB, actor, String(form.get('id') ?? '') || null, v.value) : v);
+  }
+  if (action === 'archive') return back('templates', { ok: await archiveTemplate(env.DB, actor, String(form.get('id') ?? '')), error: 'template' });
+  return back(tab, { ok: false });
+}
+
+const [counts, students, inquiries] = await Promise.all([
+  followupCounts(env.DB, today),
+  env.DB.prepare("SELECT id, name, student_no AS no FROM offline_students WHERE status = 'active' ORDER BY student_no, name LIMIT 3000").all<{ id: string; name: string; no: number | null }>(),
+  env.DB.prepare("SELECT id, student_name AS name, phone FROM admission_inquiries WHERE status IN ('new', 'contacted') ORDER BY created_at DESC LIMIT 200").all<{ id: string; name: string; phone: string }>(),
+]);
+const open = tab === 'followups' ? await listFollowups(env.DB, { status: 'open' }) : [];
+const closed = tab === 'followups' ? await listFollowups(env.DB, { status: 'closed', limit: 20 }) : [];
+const contacts = tab === 'contacts' ? await listContacts(env.DB, { channel: q.get('channel') ?? '', limit: 150 }) : [];
+const templates = tab === 'templates' ? await listTemplates(env.DB) : [];
+const editing = templates.find((t) => t.id === q.get('edit'));
+const report = tab === 'report' ? await engagementReport(env.DB, today) : null;
+const tags = tab === 'report' ? await allTags(env.DB) : [];
+const ERR: Record<string, string> = {
+  title: 'কী করতে হবে লিখুন।', due: 'তারিখ সঠিক নয়।', student: 'ছাত্র বা আবেদন বাছুন।', inquiry: 'আবেদনটি পাওয়া যায়নি।', followup: 'ফলো আপটি আর খোলা নেই।',
+  channel: 'মাধ্যম বাছুন।', summary: 'কী কথা হলো লিখুন।', name: 'টেমপ্লেটের নাম লিখুন।', name_taken: 'এই নামে টেমপ্লেট আছে।', body: 'টেমপ্লেটের লেখা দিন।',
+};
+const err = q.get('error');
+const pre = { student: q.get('student') ?? '', inquiry: q.get('inquiry') ?? '' };
+const STATUS_BN: Record<string, string> = { new: 'নতুন', contacted: 'যোগাযোগ হয়েছে', admitted: 'ভর্তি হয়েছে', closed: 'বন্ধ' };
+---
+
+<Admin title="যোগাযোগ ও ফলো আপ">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">ছাত্র ও ফি</p>
+      <h1>যোগাযোগ ও ফলো আপ</h1>
+      <p>অভিভাবকের সাথে কবে কী কথা হলো, কাকে কবে আবার ফোন করতে হবে, আর বারবার পাঠানো বার্তার টেমপ্লেট। প্রতিটি ছাত্রের পাতায় তার পুরো টাইমলাইন দেখা যায়।</p>
+    </div>
+  </header>
+  {err && <p class="note note--bad" role="alert">{ERR[err] ?? 'কাজটি করা যায়নি।'}</p>}
+
+  <div class="kpis">
+    <a class={`kpi ${counts.overdue ? 'kpi--bad' : ''}`} href="?tab=followups"><span class="kpi__icon"><Icon name="alert" /></span><span class="kpi__label">তারিখ পার হওয়া ফলো আপ</span><strong class="kpi__value">{bnDigits(counts.overdue)}</strong></a>
+    <a class="kpi kpi--warn" href="?tab=followups"><span class="kpi__icon"><Icon name="calendar" /></span><span class="kpi__label">আজকের ফলো আপ</span><strong class="kpi__value">{bnDigits(counts.today)}</strong></a>
+    <a class="kpi" href="?tab=followups"><span class="kpi__icon"><Icon name="clock" /></span><span class="kpi__label">সামনের ফলো আপ</span><strong class="kpi__value">{bnDigits(counts.upcoming)}</strong></a>
+  </div>
+
+  <nav class="tabs crm-tabs" aria-label="অংশ">
+    <a href="?tab=followups" aria-current={tab === 'followups' ? 'page' : undefined}>ফলো আপ</a>
+    <a href="?tab=contacts" aria-current={tab === 'contacts' ? 'page' : undefined}>যোগাযোগের খাতা</a>
+    <a href="?tab=templates" aria-current={tab === 'templates' ? 'page' : undefined}>বার্তার টেমপ্লেট</a>
+    <a href="?tab=report" aria-current={tab === 'report' ? 'page' : undefined}>যোগাযোগ রিপোর্ট</a>
+  </nav>
+
+  {tab === 'followups' && (
+    <>
+      <section class="card">
+        <div class="card__head"><h2>নতুন ফলো আপ</h2></div>
+        <form method="post" class="form-grid">
+          <input type="hidden" name="action" value="followup" />
+          <label class="field wide"><span>কী করতে হবে</span><input name="title" required maxlength="200" placeholder="যেমন বকেয়া নিয়ে অভিভাবককে ফোন" /></label>
+          <label class="field"><span>ছাত্র</span><select name="studentId"><option value="">বাছুন</option>{students.results.map((s) => <option value={s.id} selected={pre.student === s.id}>{s.name} {studentCode(s.no)}</option>)}</select></label>
+          <label class="field"><span>অথবা ভর্তির আবেদন</span><select name="inquiryId"><option value="">বাছুন</option>{inquiries.results.map((i) => <option value={i.id} selected={pre.inquiry === i.id}>{i.name} ({i.phone})</option>)}</select></label>
+          <label class="field"><span>কবে</span><input type="date" name="dueOn" required value={today} min={today} /></label>
+          <label class="field"><span>কে করবেন (ঐচ্ছিক)</span><input name="assignedTo" maxlength="120" placeholder="নাম বা ইমেইল" /></label>
+          <button class="button"><Icon name="plus" /> যোগ করুন</button>
+        </form>
+      </section>
+
+      <section class="card block">
+        <div class="card__head"><h2>খোলা ফলো আপ</h2><span class="pill pill--info">{bnDigits(open.length)}</span></div>
+        {open.length === 0 ? <p class="muted">কোনো ফলো আপ বাকি নেই।</p> : (
+          <ul class="list fu">{open.map((f) => {
+            const wa = f.phone ? waNumber(f.phone) : null;
+            return (
+              <li class={f.dueOn < today ? 'late' : ''}>
+                <div>
+                  <strong>{f.title}</strong>
+                  <small>
+                    {f.studentId ? <a href={`/admin/offline/students/${f.studentId}#crm`}>{f.studentName} {studentCode(f.studentNo)}</a> : f.inquiryName ? <a href="/admin/offline/inquiries">আবেদন: {f.inquiryName}</a> : 'সাধারণ'}
+                    {' · '}<span class={f.dueOn < today ? 'bad' : ''}>{dayBn(f.dueOn)}{f.dueOn < today ? ' (তারিখ পার)' : f.dueOn === today ? ' (আজ)' : ''}</span>
+                    {f.assignedTo && ` · ${f.assignedTo}`}
+                  </small>
+                  {f.phone && <small><a href={`tel:${f.phone}`}>{f.phone}</a>{wa && <> · <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener">WhatsApp</a></>}</small>}
+                </div>
+                <form method="post" class="close">
+                  <input type="hidden" name="action" value="close" /><input type="hidden" name="id" value={f.id} />
+                  <input name="outcome" maxlength="500" placeholder="ফলাফল, যেমন সোমবার দেবেন" aria-label="ফলাফল" />
+                  <select name="channel" aria-label="মাধ্যম">{CHANNELS.map((c) => <option value={c}>{CHANNEL_BN[c]}</option>)}</select>
+                  <button class="button button--sm" name="status" value="done"><Icon name="check" /> শেষ</button>
+                  <button class="button button--sm button--ghost" name="status" value="cancelled">বাতিল</button>
+                </form>
+              </li>
+            );
+          })}</ul>
+        )}
+      </section>
+
+      {closed.length > 0 && (
+        <section class="card block">
+          <div class="card__head"><h2>সম্প্রতি শেষ হয়েছে</h2></div>
+          <ul class="list">{closed.map((f) => (
+            <li><span>{f.title}<small>{f.studentName ?? f.inquiryName ?? ''} · {f.status === 'done' ? 'শেষ' : 'বাতিল'} {dateBn(f.doneAt, true)}{f.outcome && ` · ${f.outcome}`}</small></span></li>
+          ))}</ul>
+        </section>
+      )}
+    </>
+  )}
+
+  {tab === 'contacts' && (
+    <>
+      <section class="card">
+        <div class="card__head"><h2>যোগাযোগ লিখে রাখুন</h2></div>
+        <form method="post" class="form-grid">
+          <input type="hidden" name="action" value="contact" />
+          <label class="field"><span>ছাত্র</span><select name="studentId"><option value="">বাছুন</option>{students.results.map((s) => <option value={s.id} selected={pre.student === s.id}>{s.name} {studentCode(s.no)}</option>)}</select></label>
+          <label class="field"><span>অথবা ভর্তির আবেদন</span><select name="inquiryId"><option value="">বাছুন</option>{inquiries.results.map((i) => <option value={i.id}>{i.name} ({i.phone})</option>)}</select></label>
+          <label class="field"><span>মাধ্যম</span><select name="channel">{CHANNELS.map((c) => <option value={c}>{CHANNEL_BN[c]}</option>)}</select></label>
+          <label class="field"><span>কে যোগাযোগ করলেন</span><select name="direction"><option value="out">আমরা করেছি</option><option value="in">অভিভাবক করেছেন</option></select></label>
+          <label class="field wide"><span>কী কথা হলো</span><textarea name="summary" rows="2" required maxlength="1000"></textarea></label>
+          <button class="button"><Icon name="check" /> লিখে রাখুন</button>
+        </form>
+      </section>
+      <section class="card block">
+        <div class="card__head"><h2>সব যোগাযোগ</h2>
+          <form method="get" class="inline"><input type="hidden" name="tab" value="contacts" />
+            <select name="channel" aria-label="মাধ্যম"><option value="">সব মাধ্যম</option>{CHANNELS.map((c) => <option value={c} selected={q.get('channel') === c}>{CHANNEL_BN[c]}</option>)}</select>
+            <button class="button button--sm button--ghost">দেখুন</button></form>
+        </div>
+        {contacts.length === 0 ? <p class="muted">এখনো কিছু লেখা হয়নি।</p> : (
+          <div class="table-wrap"><table>
+            <thead><tr><th>কখন</th><th>কার সাথে</th><th>মাধ্যম</th><th>কী কথা হলো</th><th>কে লিখেছেন</th></tr></thead>
+            <tbody>{contacts.map((c) => (
+              <tr>
+                <td>{dateBn(c.createdAt, true)}</td>
+                <td>{c.studentId ? <a href={`/admin/offline/students/${c.studentId}#crm`}>{c.studentName} {studentCode(c.studentNo)}</a> : c.inquiryName ? `আবেদন: ${c.inquiryName}` : ''}</td>
+                <td>{CHANNEL_BN[c.channel]}{c.direction === 'in' && <small class="muted"><br />অভিভাবক থেকে</small>}</td>
+                <td>{c.summary}</td><td><small>{c.createdBy}</small></td>
+              </tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </section>
+    </>
+  )}
+
+  {tab === 'templates' && (
+    <div class="cols">
+      <section class="card">
+        <div class="card__head"><h2>টেমপ্লেট</h2></div>
+        {templates.length === 0 ? <p class="muted">এখনো কোনো টেমপ্লেট নেই।</p> : (
+          <ul class="list">{templates.map((t) => (
+            <li>
+              <div><strong>{t.name}</strong> <span class="pill pill--info">{TEMPLATE_CHANNEL_BN[t.channel]}</span><br /><small class="muted pre">{t.body}</small></div>
+              <div class="row-actions">
+                <a class="button button--sm button--ghost" href={`?tab=templates&edit=${t.id}#tpl`}>বদলান</a>
+                <form method="post" data-confirm="টেমপ্লেটটি সরাবেন?"><input type="hidden" name="action" value="archive" /><input type="hidden" name="id" value={t.id} /><button class="button button--sm button--ghost">সরান</button></form>
+              </div>
+            </li>
+          ))}</ul>
+        )}
+      </section>
+      <section class="card" id="tpl">
+        <div class="card__head"><h2>{editing ? 'টেমপ্লেট বদলান' : 'নতুন টেমপ্লেট'}</h2></div>
+        <form method="post" class="form-grid">
+          <input type="hidden" name="action" value="template" />{editing && <input type="hidden" name="id" value={editing.id} />}
+          <label class="field"><span>নাম</span><input name="name" required maxlength="80" value={editing?.name ?? ''} placeholder="যেমন পরীক্ষার ফি মনে করানো" /></label>
+          <label class="field"><span>কোথায় ব্যবহার</span><select name="channel">{(['any', 'sms', 'whatsapp', 'portal'] as const).map((c) => <option value={c} selected={editing?.channel === c}>{TEMPLATE_CHANNEL_BN[c]}</option>)}</select></label>
+          <label class="field wide"><span>লেখা</span><textarea name="body" rows="5" required maxlength="1000">{editing?.body ?? ''}</textarea></label>
+          <p class="wide muted"><small>লেখার মধ্যে এগুলো দিলে প্রত্যেকের জন্য বদলে যাবে: {TEMPLATE_VARS.join(' ')} (নাম, আইডি, বিভাগ, ক্লাস, বকেয়া, আজকের তারিখ)। গ্রুপ বার্তায় {'{name}'} ও {'{id}'} বদলায়।</small></p>
+          <button class="button"><Icon name="check" /> সংরক্ষণ</button>
+          {editing && <a class="button button--ghost" href="?tab=templates">বাতিল</a>}
+        </form>
+      </section>
+    </div>
+  )}
+
+  {report && (
+    <>
+      <div class="cols">
+        <section class="card">
+          <div class="card__head"><h2>শেষ ৩০ দিনের যোগাযোগ</h2></div>
+          {report.channels.length === 0 ? <p class="muted">কিছু নেই।</p> : <ul class="list">{report.channels.map((c) => <li><span>{CHANNEL_BN[c.channel] ?? c.channel}</span><strong>{bnDigits(c.n)}</strong></li>)}</ul>}
+          <h3 class="sub">ফলো আপ</h3>
+          <ul class="list">
+            <li><span>খোলা</span><strong>{bnDigits(report.followups.open)}</strong></li>
+            <li><span>তারিখ পার</span><strong class={report.followups.overdue ? 'bad' : ''}>{bnDigits(report.followups.overdue)}</strong></li>
+            <li><span>৩০ দিনে শেষ</span><strong>{bnDigits(report.followups.done30)} <small class="muted">(সময়মতো {bnDigits(report.followups.onTime30)})</small></strong></li>
+          </ul>
+        </section>
+        <section class="card">
+          <div class="card__head"><h2>পোর্টাল ব্যবহার</h2></div>
+          <ul class="list">
+            <li><span>চালু ছাত্র</span><strong>{bnDigits(report.portal.active)}</strong></li>
+            <li><span>পোর্টালে লগইন আছে</span><strong>{bnDigits(report.portal.withLogin)} <small class="muted">({bnDigits(report.portal.active ? Math.round((report.portal.withLogin / report.portal.active) * 100) : 0)}%)</small></strong></li>
+            <li><span>৩০ দিনের নোটিফিকেশন পড়া হয়েছে</span><strong>{bnDigits(report.reads.read)} / {bnDigits(report.reads.total)}</strong></li>
+          </ul>
+          <h3 class="sub">ভর্তির আবেদন (৯০ দিন)</h3>
+          {report.inquiries.length === 0 ? <p class="muted">কিছু নেই।</p> : <ul class="list">{report.inquiries.map((i) => <li><span>{STATUS_BN[i.status] ?? i.status}</span><strong>{bnDigits(i.n)}</strong></li>)}</ul>}
+        </section>
+        <section class="card">
+          <div class="card__head"><h2>ট্যাগ অনুযায়ী ছাত্র</h2></div>
+          {tags.length === 0 ? <p class="muted">এখনো কোনো ট্যাগ নেই। ছাত্রের পাতায় ট্যাগ দিন।</p> : <ul class="list">{tags.map((t) => <li><span><a href={`/admin/offline/messages?check=1&audience=tag&tag=${encodeURIComponent(t.tag)}`}>{t.tag}</a></span><strong>{bnDigits(t.count)}</strong></li>)}</ul>}
+        </section>
+      </div>
+      <div class="cols">
+        <section class="card">
+          <div class="card__head"><h2>৬০ দিনে কোনো যোগাযোগ হয়নি</h2></div>
+          {report.quiet.length === 0 ? <p class="muted">সবার সাথে যোগাযোগ হয়েছে।</p> : (
+            <ul class="list">{report.quiet.map((s) => (
+              <li><span><a href={`/admin/offline/students/${s.id}#crm`}>{s.name}</a><small>{studentCode(s.studentNo)} · {s.lastContact ? `শেষ ${dateBn(s.lastContact)}` : 'কখনো লেখা হয়নি'}</small></span>
+                <a class="button button--sm button--ghost" href={`?tab=followups&student=${s.id}`}>ফলো আপ</a></li>
+            ))}</ul>
+          )}
+        </section>
+        <section class="card">
+          <div class="card__head"><h2>ক্লাস অনুযায়ী উপস্থিতি (৩০ দিন)</h2></div>
+          {report.attendance.length === 0 ? <p class="muted">এই সময়ে হাজিরা নেওয়া হয়নি।</p> : (
+            <ul class="list">{report.attendance.map((a) => <li><span>{a.name}<small>{bnDigits(a.marked)}টি হাজিরা</small></span><strong class={a.rate < 75 ? 'bad' : ''}>{bnDigits(a.rate)}%</strong></li>)}</ul>
+          )}
+        </section>
+      </div>
+    </>
+  )}
+</Admin>
+<style>
+  .crm-tabs { margin: var(--space-5) 0 var(--space-4); }
+  .block { margin-top: var(--space-5); }
+  .bad { color: var(--bad-600); }
+  .fu li { align-items: start; flex-wrap: wrap; gap: var(--space-3); }
+  .fu li > div { display: grid; gap: 2px; flex: 1 1 260px; }
+  .fu li.late { box-shadow: inset 3px 0 0 var(--bad-600); padding-left: var(--space-3); }
+  .close { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+  .close input { min-width: 160px; }
+  .inline { display: flex; gap: var(--space-2); align-items: center; }
+  .row-actions { display: flex; gap: var(--space-2); }
+  .pre { white-space: pre-wrap; }
+  .sub { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-sm); }
+</style>

@@ -9,5 +9,5 @@ await applyD1Migrations(env.DB, TEST_MIGRATIONS);
 // between tests. Clear them first (setup file hooks run before each file's own).
 import { beforeEach } from 'vitest';
 beforeEach(async () => {
-  await env.DB.prepare('DELETE FROM portal_notifications').run();
+  await env.DB.batch(['portal_notifications', 'crm_contacts', 'crm_followups', 'crm_tags'].map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
 });

@@ -35,7 +35,8 @@ const gatewayOn = sslConfigured(await gatewayEnv(env.DB, env));
         <span>বিনা বেতনের ছুটিতে এক দিনের বেতন কীভাবে হিসাব হবে</span>
         <select name="salaryBasis">{SALARY_BASES.map((b) => <option value={b} selected={b === s.salaryBasis}>{SALARY_BASIS_BN[b]}</option>)}</select>
       </label>
-      <label class="field"><span>কত টাকার বেশি খরচে মালিকের অনুমোদন লাগবে (০ হলে লাগবে না)</span><input name="expenseApprovalOver" inputmode="numeric" value={s.expenseApprovalOver} /></label>
+      <label class="field"><span>১ম ধাপ: কত টাকার বেশি খরচে হিসাবরক্ষক (হিসাবে সম্পূর্ণ ক্ষমতা) বা মালিকের অনুমোদন লাগবে (০ হলে লাগবে না)</span><input name="expenseApprovalOver" inputmode="numeric" value={s.expenseApprovalOver} /></label>
+      <label class="field"><span>২য় ধাপ: কত টাকার বেশি খরচে হিসাবরক্ষক যাচাইয়ের পরে মালিকের চূড়ান্ত অনুমোদনও লাগবে (০ হলে লাগবে না)</span><input name="expenseOwnerOver" inputmode="numeric" value={s.expenseOwnerOver} /></label>
       <p class="wide muted"><small>উদাহরণ: মূল বেতন ১২,০০০ টাকা, মাসে ১২টি ক্লাসের দিন, ৩ দিন বিনা বেতনের ছুটি হলে কাটা যাবে ১২,০০০ ÷ ১২ × ৩ = ৩,০০০ টাকা।</small></p>
     </fieldset>
 
