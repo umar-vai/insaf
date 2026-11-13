@@ -3,7 +3,11 @@ import '../styles/base.css';
 import '../styles/panel.css';
 import Icon from '../components/Icon.astro';
 import FontPicker from '../components/FontPicker.astro';
+import { env } from 'cloudflare:workers';
 import { adminModule, homeFor, inArea, mayOpenPath, MODULE_BN } from '../server/staff';
+import { badgesFor, workCountsFor, type Badge } from '../server/nav-badges';
+import { todayDhaka } from '../lib/offline';
+import { bnDigits } from '../lib/format';
 
 interface Props {
   title: string;
@@ -149,6 +153,16 @@ const keep = (g: Group): Group => ({ ...g, items: g.items.filter((n) => mayOpenP
 const groups = [...(mode === 'offline' ? OFFLINE : ONLINE), SHARED].map(keep).filter((g) => g.items.length);
 const all = groups.flatMap((g) => g.items);
 const current = all.filter((n) => path === n.href || path.startsWith(`${n.href}/`)).sort((a, b) => b.href.length - a.href.length)[0];
+// Cart style counts of work waiting, only on links this person may open.
+// A failed count must never break the page, so it just shows no badges.
+const allBadges: Record<string, Badge> = await workCountsFor(Astro.locals, env.DB, todayDhaka())
+  .then(badgesFor)
+  .catch(() => ({}));
+const badgeOf = (href: string) => (mayOpenPath(access, href) ? allBadges[href] : undefined);
+const areaTotal = (list: Group[]) => list.flatMap((g) => g.items).reduce((sum, n) => sum + (badgeOf(n.href)?.n ?? 0), 0);
+const areaBadge = { online: areaTotal(ONLINE), offline: areaTotal(OFFLINE) };
+const menuTotal = all.reduce((sum, n) => sum + (badgeOf(n.href)?.n ?? 0), 0);
+const shortCount = (n: number) => (n > 99 ? '৯৯+' : bnDigits(n));
 const flash = Astro.url.searchParams.get('saved');
 const problem = Astro.url.searchParams.get('error');
 ---
@@ -166,6 +180,7 @@ const problem = Astro.url.searchParams.get('error');
     <header class="top">
       <button type="button" class="top__menu" data-side-open aria-label="মেনু খুলুন" aria-controls="admin-side" aria-expanded="false">
         <Icon name="menu" size={22} />
+        {menuTotal > 0 && <span class="count count--dot" aria-label={`${bnDigits(menuTotal)}টি কাজ বাকি`}>{shortCount(menuTotal)}</span>}
       </button>
       <span class="top__here">{current?.label ?? title}</span>
       <span class="top__mode">{mode === 'offline' ? 'মাদরাসা' : 'দান'}</span>
@@ -181,9 +196,11 @@ const problem = Astro.url.searchParams.get('error');
           <nav class="switch" aria-label="অংশ বাছুন">
             <a href="/admin/dashboard" aria-current={mode === 'online' ? 'true' : undefined} data-area="online">
               <Icon name="heart" size={16} /> দান
+              {mode !== 'online' && areaBadge.online > 0 && <span class="count" title="দান অংশে কাজ বাকি">{shortCount(areaBadge.online)}</span>}
             </a>
             <a href="/admin/offline" aria-current={mode === 'offline' ? 'true' : undefined} data-area="offline">
               <Icon name="home" size={16} /> মাদরাসা
+              {mode !== 'offline' && areaBadge.offline > 0 && <span class="count" title="মাদরাসা অংশে কাজ বাকি">{shortCount(areaBadge.offline)}</span>}
             </a>
           </nav>
         )
@@ -198,18 +215,26 @@ const problem = Astro.url.searchParams.get('error');
           groups.map((g) => (
             <div class="side__group" data-task-group>
               <p class="side__label">{g.label}</p>
-              {g.items.map((n) => (
-                <a
-                  href={n.href}
-                  aria-current={n === current ? 'page' : undefined}
-                  data-task-link
-                  data-task-search={`${g.label} ${n.label} ${TASK_HINTS[n.href] ?? ''}`}
-                  title={TASK_HINTS[n.href]}
-                >
-                  <Icon name={n.icon} size={19} />
-                  <span>{n.label}</span>
-                </a>
-              ))}
+              {g.items.map((n) => {
+                const b = badgeOf(n.href);
+                return (
+                  <a
+                    href={n.href}
+                    aria-current={n === current ? 'page' : undefined}
+                    data-task-link
+                    data-task-search={`${g.label} ${n.label} ${TASK_HINTS[n.href] ?? ''}`}
+                    title={b ? `${b.hint}: ${bnDigits(b.n)}টি` : TASK_HINTS[n.href]}
+                  >
+                    <Icon name={n.icon} size={19} />
+                    <span>{n.label}</span>
+                    {b && (
+                      <span class={`count count--${b.tone}`} aria-label={`${b.hint}: ${bnDigits(b.n)}টি`}>
+                        {shortCount(b.n)}
+                      </span>
+                    )}
+                  </a>
+                );
+              })}
             </div>
           ))
         }
@@ -300,6 +325,34 @@ const problem = Astro.url.searchParams.get('error');
         }
       };
       taskInput?.addEventListener('input', filterTasks);
+
+      // Keep the open page's menu link in sight. The menu first returns to
+      // where it was on the last page (so it does not jump around), and only
+      // scrolls when the current link would be hidden above or below.
+      const nav = document.getElementById('admin-nav-groups');
+      if (nav) {
+        const KEY = 'admin-nav-scroll';
+        try {
+          const saved = Number(sessionStorage.getItem(KEY));
+          if (saved > 0) nav.scrollTop = saved;
+        } catch {}
+        const here = nav.querySelector<HTMLElement>('[aria-current="page"]');
+        if (here) {
+          const box = nav.getBoundingClientRect();
+          const link = here.getBoundingClientRect();
+          if (link.top < box.top + 8 || link.bottom > box.bottom - 8) {
+            nav.scrollTop += link.top - box.top - (box.height - link.height) / 2;
+          }
+        }
+        const remember = () => {
+          try {
+            sessionStorage.setItem(KEY, String(Math.round(nav.scrollTop)));
+          } catch {}
+        };
+        nav.addEventListener('scroll', remember, { passive: true });
+        window.addEventListener('pagehide', remember);
+      }
+
       const side = document.getElementById('admin-side')!;
       const scrim = document.querySelector<HTMLElement>('.scrim')!;
       const btn = document.querySelector<HTMLButtonElement>('[data-side-open]')!;
@@ -454,6 +507,53 @@ const problem = Astro.url.searchParams.get('error');
       .side a[aria-current='page'] {
         background: var(--leaf-500);
         color: var(--green-950);
+      }
+      /* Cart style count of work waiting in a section. */
+      .count {
+        margin-left: auto;
+        flex: none;
+        min-width: 22px;
+        height: 22px;
+        padding: 0 6px;
+        display: inline-grid;
+        place-items: center;
+        border-radius: 999px;
+        background: var(--leaf-500);
+        color: var(--green-950);
+        font: 700 0.74rem / 1 var(--font-display);
+        box-shadow: 0 0 0 2px var(--green-950);
+      }
+      .count--bad {
+        background: var(--bad-600);
+        color: var(--white);
+      }
+      .side a[aria-current='page'] .count--warn {
+        background: var(--green-950);
+        color: var(--leaf-400);
+      }
+      .side .switch a .count {
+        margin-left: 2px;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 5px;
+        font-size: 0.68rem;
+        background: var(--bad-600);
+        color: var(--white);
+        box-shadow: none;
+      }
+      .top__menu {
+        position: relative;
+      }
+      .count--dot {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 4px;
+        font-size: 0.66rem;
+        background: var(--bad-600);
+        color: var(--white);
       }
       .side__foot {
         margin-top: auto;

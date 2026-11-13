@@ -11,5 +11,7 @@ declare namespace App {
     staffOwner?: boolean;
     /** Level per module (view, edit, full). */
     staffGrants?: import('./server/staff').Grants;
+    /** Work waiting per section, counted once per request (sidebar badges, dashboard alerts). */
+    workCounts?: Promise<import('./server/nav-badges').WorkCounts>;
   }
 }

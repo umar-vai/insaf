@@ -5,11 +5,12 @@ import Icon from '../../../components/Icon.astro';
 import BarChart from '../../../components/admin/BarChart.astro';
 import { offlineOverview } from '../../../server/offline';
 import { classesOn, monthlyFigures, recentPayments, todayMoney } from '../../../server/office';
-import { feePaymentsToReview } from '../../../server/fee-pay';
-import { openTicketCount } from '../../../server/tickets';
-import { followupCounts } from '../../../server/crm';
+import { workCountsFor } from '../../../server/nav-badges';
+import { mayOpenPath } from '../../../server/staff';
 import { addMonths, DAY_BN, dayBn, METHOD_BN, monthBn, studentCode, timeBn, todayDhaka, weekday, type PayMethod } from '../../../lib/offline';
 import { bnDigits, taka } from '../../../lib/format';
+
+const access = { modules: Astro.locals.staffModules ?? [], owner: Astro.locals.staffOwner ?? false, grants: Astro.locals.staffGrants };
 
 const today = todayDhaka();
 const month = today.slice(0, 7);
@@ -20,14 +21,21 @@ const [o, money, classes, months, recent] = await Promise.all([
   monthlyFigures(env.DB, addMonths(`${month}-01`, -5).slice(0, 7), month, { online: false, offline: true }),
   recentPayments(env.DB, 6),
 ]);
-const [reviews, pendingLeave, pendingSpend, openTickets, fu] = await Promise.all([
-  feePaymentsToReview(env.DB),
-  env.DB.prepare(`SELECT count(*) AS n FROM leave_requests WHERE status = 'pending'`).first<{ n: number }>(),
-  env.DB.prepare(`SELECT count(*) AS n FROM expenses WHERE status = 'pending' AND voided_at IS NULL`).first<{ n: number }>(),
-  openTicketCount(env.DB),
-  followupCounts(env.DB, today),
-]);
-const fuDue = fu.overdue + fu.today;
+const w = await workCountsFor(Astro.locals, env.DB, today);
+const fuDue = w.followupsOverdue + w.followupsToday;
+// Same counts as the sidebar badges; each alert opens the place to act on it.
+type Alert = { href: string; icon: 'phone' | 'mail' | 'alert' | 'wallet' | 'calendar' | 'child' | 'book'; tone: 'warn' | 'bad'; text: string; show: boolean };
+const alerts = ([
+  { show: fuDue > 0, href: '/admin/offline/crm', icon: 'phone', tone: w.followupsOverdue ? 'bad' : 'warn', text: `আজ ${bnDigits(fuDue)} জনকে ফলো আপ করতে হবে${w.followupsOverdue > 0 ? ` (${bnDigits(w.followupsOverdue)}টির তারিখ পার)` : ''}।` },
+  { show: w.feeReviews > 0, href: '/admin/offline/online-payments', icon: 'alert', tone: 'bad', text: `অনলাইনে আসা ${bnDigits(w.feeReviews)}টি ফি যাচাই করা দরকার।` },
+  { show: w.lateBooks > 0, href: '/admin/offline/library', icon: 'book', tone: 'bad', text: `${bnDigits(w.lateBooks)}টি বইয়ের ফেরতের তারিখ পার হয়ে গেছে।` },
+  { show: w.newInquiries > 0, href: '/admin/offline/inquiries', icon: 'child', tone: 'warn', text: `${bnDigits(w.newInquiries)}টি নতুন ভর্তির আবেদন দেখা বাকি।` },
+  { show: w.openTickets > 0, href: '/admin/offline/tickets?status=open', icon: 'mail', tone: 'warn', text: `ছাত্র বা শিক্ষকের ${bnDigits(w.openTickets)}টি টিকেট উত্তরের অপেক্ষায়।` },
+  { show: w.pendingExpenses > 0, href: '/admin/offline/expenses', icon: 'wallet', tone: 'warn', text: `${bnDigits(w.pendingExpenses)}টি বড় খরচ অনুমোদনের অপেক্ষায়।` },
+  { show: w.pendingLeave > 0, href: '/admin/offline/leave', icon: 'calendar', tone: 'warn', text: `${bnDigits(w.pendingLeave)}টি ছুটির আবেদন অনুমোদনের অপেক্ষায়।` },
+  { show: w.pendingStudentLeave > 0, href: '/admin/offline/student-leave', icon: 'calendar', tone: 'warn', text: `ছাত্রের ${bnDigits(w.pendingStudentLeave)}টি ছুটির আবেদন অনুমোদনের অপেক্ষায়।` },
+  { show: w.homeworkToCheck > 0, href: '/admin/offline/homework', icon: 'book', tone: 'warn', text: `${bnDigits(w.homeworkToCheck)}টি জমা দেওয়া হোমওয়ার্ক দেখা বাকি।` },
+] as Alert[]).filter((a) => a.show && mayOpenPath(access, a.href.split('?')[0]!));
 const net = o.collectedThisMonthMinor - money.spentMonth;
 ---
 
@@ -47,13 +55,13 @@ const net = o.collectedThisMonthMinor - money.spentMonth;
   </header>
 
   {
-    (reviews.length > 0 || (pendingLeave?.n ?? 0) > 0 || (pendingSpend?.n ?? 0) > 0 || openTickets > 0 || fuDue > 0) && (
+    alerts.length > 0 && (
       <div class="alerts">
-        {fuDue > 0 && <a class="note note--warn" href="/admin/offline/crm"><Icon name="phone" /> আজ {bnDigits(fuDue)} জনকে ফলো আপ করতে হবে{fu.overdue > 0 ? ` (${bnDigits(fu.overdue)}টির তারিখ পার)` : ''}।</a>}
-        {openTickets > 0 && <a class="note note--warn" href="/admin/offline/tickets?status=open"><Icon name="mail" /> ছাত্র বা শিক্ষকের {bnDigits(openTickets)}টি টিকেট উত্তরের অপেক্ষায়।</a>}
-        {reviews.length > 0 && <a class="note note--bad" href="/admin/offline/online-payments"><Icon name="alert" /> অনলাইনে আসা {bnDigits(reviews.length)}টি ফি যাচাই করা দরকার।</a>}
-        {(pendingSpend?.n ?? 0) > 0 && <a class="note note--warn" href="/admin/offline/expenses"><Icon name="wallet" /> {bnDigits(pendingSpend!.n)}টি বড় খরচ অনুমোদনের অপেক্ষায়।</a>}
-        {(pendingLeave?.n ?? 0) > 0 && <a class="note note--warn" href="/admin/offline/leave"><Icon name="calendar" /> {bnDigits(pendingLeave!.n)}টি ছুটির আবেদন অনুমোদনের অপেক্ষায়।</a>}
+        {alerts.map((a) => (
+          <a class={`note note--${a.tone}`} href={a.href}>
+            <Icon name={a.icon} /> {a.text}
+          </a>
+        ))}
       </div>
     )
   }
