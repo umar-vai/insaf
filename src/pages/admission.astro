@@ -14,7 +14,7 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=3600')
 ---
 
 <Base title="ভর্তি তথ্য" description="মাদরাসাতুল ইনসাফে নুরানি, নাজেরা ও হিফজুল কুরআন এবং কিতাব বিভাগে ভর্তি সম্পর্কে জানুন। আবাসিক সুবিধা ও স্কলারশিপ।">
-  <PageHero image="reception" crumbs={[{ href: '/admission', label: 'ভর্তি' }]} eyebrow="ভর্তি" title="আপনার সন্তানের ইলমিযাত্রা শুরু হোক এখান থেকে" lead="ভর্তি, আসন ও ফি সম্পর্কে জানতে অফিসে যোগাযোগ করুন বা সরাসরি মাদরাসায় আসুন।">
+  <PageHero image="admission-hero" crumbs={[{ href: '/admission', label: 'ভর্তি' }]} eyebrow="ভর্তি" title="আপনার সন্তানের ইলমিযাত্রা শুরু হোক এখান থেকে" lead="ভর্তি, আসন ও ফি সম্পর্কে জানতে অফিসে যোগাযোগ করুন বা সরাসরি মাদরাসায় আসুন।">
     <div class="hero-cta">
       <a class="button button--gold" href="/admission/apply"><Icon name="check" size={18} /> অনলাইনে আবেদন</a>
       <a class="button button--gold" href={`tel:${SITE.phone.tel}`}><Icon name="phone" size={18} /> {bnDigits(SITE.phone.display)}</a>
