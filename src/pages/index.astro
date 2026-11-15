@@ -23,27 +23,7 @@ Astro.response.headers.set('Cache-Control', error ? 'no-store' : 'public, max-ag
 ---
 
 <Base title={SITE.name}>
-  <section class="hero on-dark">
-    <div class="container hero__grid">
-      <div class="hero__copy">
-        <p class="hero__ar arabic" lang="ar">{SITE.nameAr}</p>
-        <h1>আগামী প্রজন্মের <em>ইলমিযাত্রা</em></h1>
-        <p class="hero__lead">কুরআন ও সুন্নাহভিত্তিক ইলমি মারকাজ। সহিহ আকিদা, বিশুদ্ধ ইলম ও আমলের পথে নতুন প্রজন্মকে গড়ে তোলার প্রয়াস।</p>
-        <div class="hero__cta">
-          <a class="button button--gold" href="/admission">ভর্তি তথ্য <Icon name="arrow" /></a>
-          <a class="button button--ghost" href="/land"><Icon name="heart" size={18} /> জমি প্রজেক্টে দান</a>
-        </div>
-        <ul class="hero__facts">
-          <li><Icon name="book" size={18} /> নুরানি, নাজেরা ও হিফজ, কিতাব বিভাগ</li>
-          <li><Icon name="home" size={18} /> আবাসিক ছাত্রাবাস</li>
-          <li><Icon name="star" size={18} /> মেধাবী ও এতিমদের স্কলারশিপ</li>
-        </ul>
-      </div>
-      <div class="hero__visual">
-        <HomeHeroSlider />
-      </div>
-    </div>
-  </section>
+  <HomeHeroSlider />
 
   {
     posts.length > 0 && (
@@ -185,93 +165,6 @@ Astro.response.headers.set('Cache-Control', error ? 'no-store' : 'public, max-ag
 </Base>
 
 <style>
-  .hero {
-    position: relative;
-    overflow: hidden;
-    padding-block: clamp(2.5rem, 2rem + 4vw, 5.5rem);
-    background-image:
-      radial-gradient(ellipse 50% 60% at 80% 30%, rgb(201 162 78 / 0.2), transparent 70%),
-      var(--pattern-dark);
-  }
-  .hero__grid {
-    display: grid;
-    gap: var(--space-10);
-    align-items: center;
-  }
-  @media (min-width: 900px) {
-    .hero__grid {
-      grid-template-columns: 1.1fr 0.9fr;
-    }
-  }
-  .hero__ar {
-    margin: 0;
-    font-size: clamp(1.6rem, 1.2rem + 1.5vw, 2.4rem);
-    color: var(--gold-300);
-  }
-  h1 {
-    font-size: var(--text-3xl);
-    line-height: 1.2;
-    margin: var(--space-2) 0 var(--space-4);
-    color: var(--white);
-  }
-  h1 em {
-    font-style: normal;
-    color: var(--gold-300);
-  }
-  .hero__lead {
-    font-size: var(--text-lg);
-    color: var(--color-on-dark);
-    max-width: 36rem;
-  }
-  .hero__cta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-3);
-    margin: var(--space-6) 0;
-  }
-  .hero__facts {
-    display: grid;
-    gap: var(--space-2);
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    color: var(--color-on-dark-muted);
-  }
-  .hero__facts li {
-    display: flex;
-    gap: var(--space-2);
-    align-items: center;
-  }
-  .hero__facts :global(svg) {
-    color: var(--gold-300);
-  }
-  .hero__visual {
-    position: relative;
-    justify-self: center;
-    width: min(100%, 520px);
-  }
-  .arch {
-    border-radius: var(--radius-arch);
-    overflow: hidden;
-    border: 6px solid rgb(255 255 255 / 0.08);
-    box-shadow: var(--shadow-lg);
-    aspect-ratio: 4 / 4.4;
-  }
-  .arch img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .hero__emblem {
-    position: absolute;
-    inset: auto auto -18px -18px;
-    width: 110px;
-    height: 110px;
-    padding: 12px;
-    border-radius: 50%;
-    background: var(--ivory);
-    box-shadow: var(--shadow-lg);
-  }
   .notices {
     display: grid;
     grid-template-columns: auto 1fr auto;

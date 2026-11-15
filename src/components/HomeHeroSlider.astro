@@ -1,131 +1,525 @@
 ---
+import Icon from './Icon.astro';
+import { SITE } from '../lib/site';
+import { bnDigits } from '../lib/format';
+
+// Full width home hero. Each slide has a wide photo (desktop, laptop, tablet
+// landscape) and a tall photo (phone, tablet portrait). Both photos leave a
+// green area for the text: on the left when wide, on top when tall.
+const AUTOPLAY_MS = 3000;
+
 const slides = [
-  { image: 'students-quran', caption: 'কুরআন শিক্ষার মুহূর্ত', alt: 'মাদরাসাতুল ইনসাফের শিক্ষার্থীরা কুরআন নিয়ে পড়ছে' },
-  { image: 'students-books', caption: 'ইলম অর্জনের পরিবেশ', alt: 'মাদরাসাতুল ইনসাফের শিক্ষার্থীদের পাঠ্যবই ও পড়াশোনা' },
-  { image: 'students-outdoor', caption: 'শিক্ষার্থীদের দৈনন্দিন জীবন', alt: 'মাদরাসাতুল ইনসাফের শিক্ষার্থীরা বাইরের পরিবেশে' },
+  {
+    image: 'quran',
+    alt: 'মাদরাসাতুল ইনসাফের শিক্ষার্থীরা রেহালে কুরআন রেখে তিলাওয়াত করছে',
+    kicker: 'নুরানি, নাজেরা ও হিফজুল কুরআন',
+    title: ['কুরআনের আলোয় গড়ে উঠুক', 'আগামী প্রজন্ম'],
+    lead: 'যত্ন, তারতিব ও সহিহ মাখরাজের সাথে কুরআন শিক্ষা। প্রতিটি শিক্ষার্থীর হৃদয়ে কুরআনের ভালোবাসা জাগিয়ে তোলাই আমাদের লক্ষ্য।',
+    primary: { href: '/admission', label: 'ভর্তি তথ্য', icon: 'arrow' },
+    secondary: { href: '/about', label: 'আমাদের পরিচয়', icon: 'book' },
+  },
+  {
+    image: 'campus',
+    alt: 'মাদরাসাতুল ইনসাফের ভবনের সামনের পথ ধরে হেঁটে যাচ্ছে শিক্ষার্থীরা',
+    kicker: 'কিতাব বিভাগ (মাদানি নেসাব) ও আবাসিক ছাত্রাবাস',
+    title: ['সহিহ আকিদা, বিশুদ্ধ ইলম ও', 'আমলের পথে'],
+    lead: 'কুরআন ও সুন্নাহভিত্তিক ইলমি মারকাজ। শান্ত ও নিরাপদ পরিবেশে আদব, আখলাক ও ইলমচর্চায় নতুন প্রজন্মকে গড়ে তোলার প্রয়াস।',
+    primary: { href: '/admission/apply', label: 'অনলাইনে ভর্তি আবেদন', icon: 'arrow' },
+    secondary: { href: '/contact', label: 'যোগাযোগ', icon: 'phone' },
+  },
+  {
+    image: 'field',
+    alt: 'সবুজ মাঠের শেষে মাদরাসার ভবন, ভোরের আলোয়',
+    kicker: 'জমি প্রজেক্ট',
+    title: ['একখণ্ড জমি,', 'সাদাকায়ে জারিয়ার পথ'],
+    lead: 'মসজিদ, মাদরাসা ও ইসলামিক সেন্টারের জন্য উপযুক্ত জমি কেনার তহবিল সংগ্রহ চলছে। এই কল্যাণের উদ্যোগে আপনিও শরিক হোন।',
+    primary: { href: '/land', label: 'জমি প্রজেক্টে দান', icon: 'heart' },
+    secondary: { href: '/donate', label: 'অন্যান্য তহবিল', icon: 'arrow' },
+  },
 ] as const;
+
+const pad = (n: number) => bnDigits(String(n).padStart(2, '0'));
 ---
-<div class="home-hero-slider" data-home-hero-slider aria-roledescription="carousel" aria-label="মাদরাসাতুল ইনসাফের তিনটি ছবি">
-  <div class="home-hero-slider__viewport" aria-live="off">
-    {slides.map((slide, i) => (
-      <figure class:list={['home-hero-slider__slide', i === 0 && 'is-active']} data-slide aria-hidden={i === 0 ? 'false' : 'true'}>
+<section
+  class="hh on-dark"
+  data-home-hero
+  data-interval={AUTOPLAY_MS}
+  aria-roledescription="carousel"
+  aria-label="মাদরাসাতুল ইনসাফ পরিচিতি"
+  style={`--hh-interval:${AUTOPLAY_MS}ms`}
+>
+  {slides.map((slide, i) => (
+    <article
+      class:list={['hh__slide', i === 0 && 'is-active']}
+      data-slide
+      aria-roledescription="slide"
+      aria-label={`${bnDigits(i + 1)} / ${bnDigits(slides.length)}`}
+      aria-hidden={i === 0 ? 'false' : 'true'}
+      inert={i === 0 ? undefined : true}
+    >
+      <picture class="hh__media">
+        <source
+          media="(max-width: 767px), (orientation: portrait) and (max-width: 1024px)"
+          srcset={`/images/hero/${slide.image}-tall-600.webp 600w, /images/hero/${slide.image}-tall-941.webp 941w`}
+          sizes="100vw"
+          width="941" height="1672"
+        />
         <img
-          src={`/images/${slide.image}-1280.webp`}
-          srcset={`/images/${slide.image}-640.webp 640w, /images/${slide.image}-1280.webp 1280w`}
-          sizes="(max-width: 900px) 90vw, 520px"
+          src={`/images/hero/${slide.image}-wide-1672.webp`}
+          srcset={`/images/hero/${slide.image}-wide-960.webp 960w, /images/hero/${slide.image}-wide-1672.webp 1672w`}
+          sizes="100vw"
           alt={slide.alt}
-          width="1280" height="853"
+          width="1672" height="941"
           loading={i === 0 ? 'eager' : 'lazy'}
           fetchpriority={i === 0 ? 'high' : 'auto'}
+          decoding="async"
         />
-        <figcaption>{slide.caption}</figcaption>
-      </figure>
-    ))}
-  </div>
-  <div class="home-hero-slider__controls">
-    <button class="home-hero-slider__arrow" data-slide-prev type="button" aria-label="আগের ছবি">‹</button>
-    <div class="home-hero-slider__dots" role="group" aria-label="ছবি নির্বাচন">
+      </picture>
+
+      <div class="hh__copy container">
+        <div class="hh__text">
+          <p class="hh__ar arabic hh__rise" lang="ar" style="--d:0">{SITE.nameAr}</p>
+          <p class="hh__kicker hh__rise" style="--d:1"><span aria-hidden="true"></span>{slide.kicker}</p>
+          {i === 0 ? (
+            <h1 class="hh__title">
+              <span class="hh__line"><span class="hh__rise" style="--d:2">{slide.title[0]}</span></span>
+              <span class="hh__line"><em class="hh__rise" style="--d:3">{slide.title[1]}</em></span>
+            </h1>
+          ) : (
+            <h2 class="hh__title">
+              <span class="hh__line"><span class="hh__rise" style="--d:2">{slide.title[0]}</span></span>
+              <span class="hh__line"><em class="hh__rise" style="--d:3">{slide.title[1]}</em></span>
+            </h2>
+          )}
+          <p class="hh__lead hh__rise" style="--d:4">{slide.lead}</p>
+          <div class="hh__cta hh__rise" style="--d:5">
+            <a class="button button--gold" href={slide.primary.href}>
+              {slide.primary.icon === 'heart' && <Icon name="heart" size={18} />}
+              {slide.primary.label}
+              {slide.primary.icon === 'arrow' && <Icon name="arrow" />}
+            </a>
+            <a class="button button--ghost" href={slide.secondary.href}><Icon name={slide.secondary.icon} size={18} /> {slide.secondary.label}</a>
+          </div>
+        </div>
+      </div>
+    </article>
+  ))}
+
+  <div class="hh__bar container">
+    <p class="hh__count" aria-hidden="true"><b data-slide-count>{pad(1)}</b><span>/ {pad(slides.length)}</span></p>
+    <div class="hh__dots" role="group" aria-label="স্লাইড নির্বাচন">
       {slides.map((slide, i) => (
         <button
           type="button"
-          class:list={['home-hero-slider__dot', i === 0 && 'is-active']}
+          class:list={['hh__dot', i === 0 && 'is-active']}
           data-slide-dot={i}
-          aria-label={`${i + 1} নম্বর ছবি: ${slide.caption}`}
+          aria-label={`${bnDigits(i + 1)} নম্বর স্লাইড: ${slide.kicker}`}
           aria-current={i === 0 ? 'true' : 'false'}
         ><span aria-hidden="true"></span></button>
       ))}
     </div>
-    <button class="home-hero-slider__arrow" data-slide-next type="button" aria-label="পরের ছবি">›</button>
+    <div class="hh__arrows">
+      <button class="hh__arrow" type="button" data-slide-prev aria-label="আগের স্লাইড"><span aria-hidden="true">‹</span></button>
+      <button class="hh__arrow" type="button" data-slide-next aria-label="পরের স্লাইড"><span aria-hidden="true">›</span></button>
+    </div>
   </div>
-</div>
+</section>
 
 <script>
-  const carousel = document.querySelector<HTMLElement>('[data-home-hero-slider]');
-  if (carousel) {
-    const slides = Array.from(carousel.querySelectorAll<HTMLElement>('[data-slide]'));
-    const dots = Array.from(carousel.querySelectorAll<HTMLButtonElement>('[data-slide-dot]'));
+  const BN = '০১২৩৪৫৬৭৮৯';
+  const bn = (n: number) => String(n).padStart(2, '0').replace(/\d/g, (d) => BN[Number(d)]!);
+  const hero = document.querySelector<HTMLElement>('[data-home-hero]');
+  if (hero) {
+    const slides = Array.from(hero.querySelectorAll<HTMLElement>('[data-slide]'));
+    const dots = Array.from(hero.querySelectorAll<HTMLButtonElement>('[data-slide-dot]'));
+    const count = hero.querySelector<HTMLElement>('[data-slide-count]');
+    const interval = Number(hero.dataset.interval) || 3000;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let current = 0;
     let timer: number | undefined;
     let visible = true;
+    let held = false;
     let startX: number | null = null;
 
     const show = (next: number) => {
+      const prev = current;
       current = (next + slides.length) % slides.length;
       slides.forEach((slide, i) => {
         const active = i === current;
         slide.classList.toggle('is-active', active);
+        slide.classList.toggle('is-leaving', i === prev && !active);
         slide.setAttribute('aria-hidden', String(!active));
+        slide.toggleAttribute('inert', !active);
       });
       dots.forEach((dot, i) => {
         const active = i === current;
         dot.classList.toggle('is-active', active);
         dot.setAttribute('aria-current', String(active));
       });
+      if (count) count.textContent = bn(current + 1);
     };
-    const pause = () => {
-      if (timer !== undefined) window.clearInterval(timer);
+    const stop = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
       timer = undefined;
     };
     const play = () => {
-      pause();
-      if (reducedMotion.matches || document.hidden || !visible || carousel.matches(':hover') || carousel.contains(document.activeElement)) return;
-      timer = window.setInterval(() => show(current + 1), 5500);
+      stop();
+      const paused = reducedMotion.matches || document.hidden || !visible || held;
+      hero.classList.toggle('is-paused', paused);
+      if (paused) return;
+      // Restart the dot's progress fill so it matches the timer.
+      const dot = dots[current];
+      if (dot) { dot.classList.remove('is-active'); void dot.offsetWidth; dot.classList.add('is-active'); }
+      timer = window.setTimeout(() => { show(current + 1); play(); }, interval);
     };
+    const go = (n: number) => { show(n); play(); };
 
-    carousel.querySelector('[data-slide-prev]')?.addEventListener('click', () => { show(current - 1); play(); });
-    carousel.querySelector('[data-slide-next]')?.addEventListener('click', () => { show(current + 1); play(); });
-    dots.forEach((dot, i) => dot.addEventListener('click', () => { show(i); play(); }));
-    carousel.addEventListener('mouseenter', pause);
-    carousel.addEventListener('mouseleave', play);
-    carousel.addEventListener('focusin', pause);
-    carousel.addEventListener('focusout', () => window.requestAnimationFrame(play));
-    carousel.addEventListener('touchstart', (event) => { startX = event.touches[0]?.clientX ?? null; }, { passive: true });
-    carousel.addEventListener('touchend', (event) => {
+    hero.querySelector('[data-slide-prev]')?.addEventListener('click', () => go(current - 1));
+    hero.querySelector('[data-slide-next]')?.addEventListener('click', () => go(current + 1));
+    dots.forEach((dot, i) => dot.addEventListener('click', () => go(i)));
+    // Hold while someone is reading or using a link, so the text does not move away.
+    const copyAreas = hero.querySelectorAll<HTMLElement>('.hh__text, .hh__bar');
+    copyAreas.forEach((el) => {
+      el.addEventListener('mouseenter', () => { held = true; play(); });
+      el.addEventListener('mouseleave', () => { held = false; play(); });
+    });
+    hero.addEventListener('focusin', () => { held = true; play(); });
+    hero.addEventListener('focusout', () => window.requestAnimationFrame(() => { held = hero.contains(document.activeElement); play(); }));
+    hero.addEventListener('touchstart', (event) => { startX = event.touches[0]?.clientX ?? null; }, { passive: true });
+    hero.addEventListener('touchend', (event) => {
       if (startX === null) return;
       const delta = (event.changedTouches[0]?.clientX ?? startX) - startX;
       startX = null;
-      if (Math.abs(delta) >= 45) { show(current + (delta < 0 ? 1 : -1)); play(); }
+      if (Math.abs(delta) >= 45) go(current + (delta < 0 ? 1 : -1));
     }, { passive: true });
     document.addEventListener('visibilitychange', play);
     reducedMotion.addEventListener('change', play);
     if ('IntersectionObserver' in window) {
-      new IntersectionObserver(([entry]) => { visible = Boolean(entry?.isIntersecting); play(); }, { threshold: 0.1 }).observe(carousel);
+      new IntersectionObserver(([entry]) => { visible = Boolean(entry?.isIntersecting); play(); }, { threshold: 0.15 }).observe(hero);
     }
+    hero.classList.add('is-ready');
     play();
   }
 </script>
 
 <style>
-  .home-hero-slider {
+  .hh {
+    --hh-ease: cubic-bezier(0.22, 1, 0.36, 1);
     position: relative;
-    border-radius: 27px;
-    border: 5px solid rgba(255,255,255,.13);
-    box-shadow: 0 22px 60px rgba(0,0,0,.25);
-    aspect-ratio: 4 / 4.15;
-    overflow: hidden;
-    background: #143e33;
     isolation: isolate;
+    overflow: hidden;
+    display: grid;
+    height: clamp(560px, 52vw, 820px);
+    max-height: calc(100svh - 64px);
+    min-height: 520px;
+    background: var(--green-950);
+    color: var(--white);
   }
-  .home-hero-slider__viewport { position: absolute; inset: 0; }
-  .home-hero-slider__slide { position: absolute; inset: 0; margin: 0; opacity: 0; visibility: hidden; transition: opacity .75s ease, visibility .75s ease; pointer-events: none; }
-  .home-hero-slider__slide.is-active { opacity: 1; visibility: visible; pointer-events: auto; }
-  .home-hero-slider__slide::after { content: ''; position: absolute; inset: 54% 0 0; background: linear-gradient(transparent,rgba(0,17,15,.72)); }
-  .home-hero-slider__slide img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
-  .home-hero-slider__slide figcaption { position: absolute; left: 24px; bottom: 26px; right: 150px; z-index: 1; color: #fff; font-size: clamp(.9rem,1.4vw,1.15rem); font-weight: 700; text-shadow: 0 1px 5px rgba(0,0,0,.25); }
-  .home-hero-slider__controls { position: absolute; right: 12px; bottom: 14px; z-index: 2; display: flex; gap: 6px; align-items: center; border: 1px solid rgba(255,255,255,.23); border-radius: 999px; padding: 5px; background: rgba(4,39,36,.62); backdrop-filter: blur(10px); }
-  .home-hero-slider__arrow { border: 0; background: transparent; color: #fff; border-radius: 50%; font-size: 1.8rem; line-height: 1; width: 36px; height: 36px; display: grid; place-items: center; cursor: pointer; }
-  .home-hero-slider__dots { display: flex; align-items: center; gap: 3px; }
-  .home-hero-slider__dot { background: transparent; border: 0; display: grid; place-items: center; width: 25px; height: 34px; cursor: pointer; padding: 0; }
-  .home-hero-slider__dot span { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.48); transition: all .25s ease; }
-  .home-hero-slider__dot.is-active span { background: #fff; width: 17px; border-radius: 10px; }
-  .home-hero-slider__arrow:hover,.home-hero-slider__arrow:focus-visible { background: rgba(255,255,255,.18); }
-  @media(max-width:520px) {
-    .home-hero-slider { aspect-ratio: 4 / 3.5; border-radius: 19px; }
-    .home-hero-slider__slide figcaption { left: 14px; right: 12px; bottom: 65px; font-size: .92rem; }
-    .home-hero-slider__controls { right: 10px; bottom: 10px; }
+
+  /* Slides */
+  .hh__slide {
+    grid-area: 1 / 1;
+    position: relative;
+    display: grid;
+    align-items: center;
+    opacity: 0;
+    visibility: hidden;
+    z-index: 0;
+    transition: opacity 1.1s var(--hh-ease), visibility 0s linear 1.1s;
   }
-  @media(prefers-reduced-motion:reduce) {
-    .home-hero-slider__slide,.home-hero-slider__dot span { transition: none; }
+  .hh__slide.is-active {
+    opacity: 1;
+    visibility: visible;
+    z-index: 1;
+    transition: opacity 1.1s var(--hh-ease), visibility 0s;
+  }
+  .hh__media {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    overflow: hidden;
+  }
+  .hh__media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: right center;
+    transform: scale(1.08);
+    transition: transform 1.4s var(--hh-ease);
+  }
+  .hh__slide.is-active .hh__media img {
+    transform: scale(1);
+    transition: transform calc(var(--hh-interval) + 1.4s) ease-out;
+  }
+  /* Keeps the text readable when the photo is cropped on very wide screens. */
+  .hh__media::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(90deg, rgb(11 43 31 / 0.55) 0%, rgb(11 43 31 / 0.25) 38%, transparent 55%),
+      linear-gradient(0deg, rgb(8 30 22 / 0.55) 0%, transparent 22%);
+  }
+
+  /* Copy */
+  .hh__copy {
+    padding-block: var(--space-12) calc(var(--space-16) + var(--space-4));
+  }
+  .hh__text {
+    max-width: min(36rem, 46%);
+  }
+  .hh__ar {
+    margin: 0;
+    text-align: left;
+    font-family: var(--font-kufi);
+    font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2.4rem);
+    line-height: 1.3;
+    color: var(--gold-300);
+  }
+  .hh__kicker {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin: var(--space-3) 0 var(--space-4);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--leaf-200);
+  }
+  .hh__kicker span {
+    flex: none;
+    width: 34px;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--gold-300), transparent);
+  }
+  .hh__title {
+    margin: 0 0 var(--space-5);
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 1.2rem + 2.9vw, 3.9rem);
+    font-weight: 700;
+    line-height: 1.22;
+    letter-spacing: -0.005em;
+    color: var(--white);
+    text-wrap: balance;
+  }
+  .hh__line {
+    display: block;
+    overflow: hidden;
+    padding-block: 0.06em;
+  }
+  .hh__line > * {
+    display: inline-block;
+  }
+  .hh__title em {
+    font-style: normal;
+    background: linear-gradient(100deg, var(--gold-300), var(--leaf-200) 55%, var(--gold-300));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hh__lead {
+    margin: 0;
+    max-width: 32rem;
+    font-size: clamp(1rem, 0.92rem + 0.35vw, 1.2rem);
+    line-height: 1.8;
+    color: var(--color-on-dark);
+  }
+  .hh__cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-top: var(--space-6);
+  }
+  .hh__cta .button--ghost {
+    background: rgb(255 255 255 / 0.06);
+    backdrop-filter: blur(6px);
+  }
+
+  /* Text animation: every piece rises into place one after another. */
+  .hh__rise {
+    opacity: 0;
+    transform: translateY(26px);
+    filter: blur(6px);
+    transition: opacity 0.4s ease, transform 0.4s ease, filter 0.4s ease;
+  }
+  .hh__line .hh__rise {
+    transform: translateY(105%);
+    filter: none;
+  }
+  .hh__slide.is-active .hh__rise {
+    opacity: 1;
+    transform: none;
+    filter: none;
+    transition:
+      opacity 0.8s var(--hh-ease) calc(0.25s + var(--d) * 0.11s),
+      transform 0.9s var(--hh-ease) calc(0.25s + var(--d) * 0.11s),
+      filter 0.8s var(--hh-ease) calc(0.25s + var(--d) * 0.11s);
+  }
+
+  /* Controls */
+  .hh__bar {
+    position: absolute;
+    inset: auto 0 calc(var(--space-8) + clamp(0.5rem, 0.2rem + 1vw, 1.25rem));
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: var(--space-5);
+  }
+  .hh__count {
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-1);
+    font-variant-numeric: tabular-nums;
+    color: var(--color-on-dark-muted);
+  }
+  .hh__count b {
+    font-size: var(--text-xl);
+    color: var(--white);
+  }
+  .hh__dots {
+    display: flex;
+    gap: var(--space-2);
+  }
+  .hh__dot {
+    display: grid;
+    align-items: center;
+    width: 46px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+  .hh__dot span {
+    position: relative;
+    height: 3px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: rgb(255 255 255 / 0.28);
+  }
+  .hh__dot span::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--gold-300);
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+  .hh__dot.is-active span::after {
+    animation: hh-progress var(--hh-interval) linear forwards;
+  }
+  .hh.is-paused .hh__dot.is-active span::after,
+  .hh:not(.is-ready) .hh__dot.is-active span::after {
+    animation: none;
+    transform: scaleX(1);
+  }
+  @keyframes hh-progress {
+    to { transform: scaleX(1); }
+  }
+  .hh__arrows {
+    display: flex;
+    gap: var(--space-2);
+    margin-inline-start: auto;
+  }
+  .hh__arrow {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 1px solid rgb(255 255 255 / 0.3);
+    background: rgb(8 30 22 / 0.35);
+    backdrop-filter: blur(8px);
+    color: var(--white);
+    font-size: 1.7rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.2s ease, border-color 0.2s ease;
+  }
+  .hh__arrow span { margin-top: -3px; }
+  .hh__arrow:hover,
+  .hh__arrow:focus-visible {
+    background: rgb(255 255 255 / 0.16);
+    border-color: var(--gold-300);
+  }
+
+  /* Tall photos: phones and tablets held upright. Text sits in the green sky. */
+  @media (max-width: 767px), (orientation: portrait) and (max-width: 1024px) {
+    .hh {
+      height: auto;
+      aspect-ratio: 941 / 1672;
+      max-height: calc(100svh - 56px);
+      min-height: 640px;
+    }
+    .hh__slide {
+      align-items: start;
+    }
+    .hh__media img {
+      object-position: center bottom;
+    }
+    .hh__media::after {
+      background:
+        linear-gradient(180deg, rgb(11 43 31 / 0.55) 0%, rgb(11 43 31 / 0.3) 40%, transparent 60%),
+        linear-gradient(0deg, rgb(8 30 22 / 0.5) 0%, transparent 18%);
+    }
+    .hh__copy {
+      padding-block: clamp(1.75rem, 6vw, 3.5rem) 0;
+    }
+    .hh__text {
+      max-width: 34rem;
+      margin-inline: auto;
+      text-align: center;
+    }
+    .hh__ar {
+      text-align: center;
+    }
+    .hh__kicker {
+      justify-content: center;
+      margin: var(--space-2) 0 var(--space-3);
+    }
+    .hh__kicker span:first-child { display: none; }
+    .hh__title {
+      font-size: clamp(1.75rem, 1rem + 4.6vw, 3rem);
+      margin-bottom: var(--space-3);
+    }
+    .hh__lead {
+      margin-inline: auto;
+      font-size: clamp(0.95rem, 0.85rem + 0.6vw, 1.15rem);
+      line-height: 1.7;
+    }
+    .hh__cta {
+      justify-content: center;
+      margin-top: var(--space-5);
+    }
+    .hh__cta .button {
+      padding: 0.6rem 1rem;
+      font-size: var(--text-sm);
+    }
+    .hh__bar {
+      justify-content: center;
+    }
+    .hh__count,
+    .hh__arrows {
+      display: none;
+    }
+  }
+  @media (max-width: 380px) {
+    .hh__lead { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .hh__cta .button { padding-inline: var(--space-4); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hh__slide,
+    .hh__slide.is-active,
+    .hh__media img,
+    .hh__slide.is-active .hh__media img,
+    .hh__rise,
+    .hh__slide.is-active .hh__rise {
+      transition: none;
+      transform: none;
+      filter: none;
+    }
   }
 </style>
