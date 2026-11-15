@@ -101,6 +101,29 @@ const FAQ = [
     </div>
   </section>
 
+  <section class="foundation-founder" aria-labelledby="founder-title">
+    <div class="container foundation-founder__grid">
+      <div class="foundation-founder__media">
+        <iframe
+          src={chairmanVideoEmbed}
+          title={`তামরিন ফাউন্ডেশনের চেয়ারম্যান ${FOUNDER.name}-এর জমি প্রকল্পের ভিডিও বক্তব্য`}
+          loading="lazy"
+          referrerpolicy="strict-origin-when-cross-origin"
+          allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowfullscreen
+        ></iframe>
+      </div>
+      <div class="foundation-founder__copy">
+        <p>চেয়ারম্যানের আহ্বান</p>
+        <h2 id="founder-title">মসজিদ, মাদরাসা ও ইসলামিক সেন্টারের জন্য জমি ক্রয়ে অংশ নিন</h2>
+        <p>তামরিন ফাউন্ডেশনের সম্মানিত চেয়ারম্যান {FOUNDER.name} এই মহতী উদ্যোগ বাস্তবায়নে সকলের প্রতি সাদাকা ও আন্তরিক সহযোগিতার আহ্বান জানিয়েছেন।</p>
+        <p>আপনার সামর্থ্য অনুযায়ী ছোট-বড় যেকোনো অনুদান এই দীনি প্রতিষ্ঠানের ভিত্তি গড়ে তুলতে সাহায্য করবে, ইন শা আল্লাহ। সাদকায়ে জারিয়ার নিয়তে দান করুন এবং আত্মীয়-পরিচিতজনদেরও অংশ নিতে উৎসাহিত করুন।</p>
+        <div class="foundation-founder__name"><strong>{FOUNDER.name}</strong><span>সম্মানিত চেয়ারম্যান, তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশন</span></div>
+        <p class="foundation-founder__watch"><a href={chairmanVideoUrl} target="_blank" rel="noopener noreferrer">ভিডিওটি YouTube-এ দেখুন</a></p>
+      </div>
+    </div>
+  </section>
+
   <section class="foundation-donate" aria-labelledby="donate-title">
     <div class="container foundation-donate__grid">
       <div class="foundation-donate__copy">
@@ -175,28 +198,6 @@ const FAQ = [
   </section>
 
 
-  <section class="foundation-founder" aria-labelledby="founder-title">
-    <div class="container foundation-founder__grid">
-      <div class="foundation-founder__media">
-        <iframe
-          src={chairmanVideoEmbed}
-          title={`তামরিন ফাউন্ডেশনের চেয়ারম্যান ${FOUNDER.name}-এর জমি প্রকল্পের ভিডিও বক্তব্য`}
-          loading="lazy"
-          referrerpolicy="strict-origin-when-cross-origin"
-          allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; web-share"
-          allowfullscreen
-        ></iframe>
-      </div>
-      <div class="foundation-founder__copy">
-        <p>চেয়ারম্যানের আহ্বান</p>
-        <h2 id="founder-title">মসজিদ, মাদরাসা ও ইসলামিক সেন্টারের জন্য জমি ক্রয়ে অংশ নিন</h2>
-        <p>তামরিন ফাউন্ডেশনের সম্মানিত চেয়ারম্যান {FOUNDER.name} এই মহতী উদ্যোগ বাস্তবায়নে সকলের প্রতি সাদাকা ও আন্তরিক সহযোগিতার আহ্বান জানিয়েছেন।</p>
-        <p>আপনার সামর্থ্য অনুযায়ী ছোট-বড় যেকোনো অনুদান এই দীনি প্রতিষ্ঠানের ভিত্তি গড়ে তুলতে সাহায্য করবে, ইন শা আল্লাহ। সাদকায়ে জারিয়ার নিয়তে দান করুন এবং আত্মীয়-পরিচিতজনদেরও অংশ নিতে উৎসাহিত করুন।</p>
-        <div class="foundation-founder__name"><strong>{FOUNDER.name}</strong><span>সম্মানিত চেয়ারম্যান, তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশন</span></div>
-        <p class="foundation-founder__watch"><a href={chairmanVideoUrl} target="_blank" rel="noopener noreferrer">ভিডিওটি YouTube-এ দেখুন</a></p>
-      </div>
-    </div>
-  </section>
 
   {
     members && (
