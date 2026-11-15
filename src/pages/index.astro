@@ -58,7 +58,7 @@ Astro.response.headers.set('Cache-Control', error ? 'no-store' : 'public, max-ag
               <a class="button" href="/land">প্রজেক্ট দেখুন ও দান করুন <Icon name="arrow" /></a>
             </div>
           </div>
-          <img class="land__img" src="/images/students-outdoor-640.webp" alt="" width="640" height="427" loading="lazy" />
+          <img class="land__img" src="/images/home-campus-project-640.webp" srcset="/images/home-campus-project-640.webp 640w, /images/home-campus-project-1280.webp 1280w" sizes="(max-width: 900px) 100vw, 45vw" alt="মাদরাসার সবুজ মাঠে বসে থাকা শিক্ষার্থীরা" width="640" height="427" loading="lazy" />
         </div>
       </section>
     )
@@ -76,7 +76,7 @@ Astro.response.headers.set('Cache-Control', error ? 'no-store' : 'public, max-ag
         <a class="button button--ghost" href="/about">বিস্তারিত পড়ুন <Icon name="arrow" /></a>
       </div>
       <div class="about__img" data-reveal>
-        <img src="/images/reception-640.webp" srcset="/images/reception-640.webp 640w, /images/reception-1280.webp 1280w" sizes="(max-width: 900px) 100vw, 40vw" alt="মাদরাসাতুল ইনসাফের অফিস" width="640" height="427" loading="lazy" />
+        <img src="/images/home-why-insaf-640.webp" srcset="/images/home-why-insaf-640.webp 640w, /images/home-why-insaf-1280.webp 1280w" sizes="(max-width: 900px) 100vw, 40vw" alt="আলোচনায় বসা মাদরাসার উস্তাদগণ" width="640" height="427" loading="lazy" />
       </div>
     </div>
   </section>
@@ -270,7 +270,11 @@ Astro.response.headers.set('Cache-Control', error ? 'no-store' : 'public, max-ag
   .land__img {
     width: 100%;
     height: auto;
-    border-radius: var(--radius-arch);
+    aspect-ratio: 3 / 2;
+    object-fit: cover;
+    object-position: center;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
   }
   .section--tint {
     background: var(--color-tint);
@@ -289,6 +293,9 @@ Astro.response.headers.set('Cache-Control', error ? 'no-store' : 'public, max-ag
   .about__img img {
     width: 100%;
     height: auto;
+    aspect-ratio: 3 / 2;
+    object-fit: cover;
+    object-position: center;
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
   }
