@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   applyDonationValidation,
+  assignReceiptNo,
   createDonation,
   decideReview,
   donationByReference,
@@ -168,3 +169,40 @@ describe('donors, lists and the graph', () => {
     ]);
   });
 });
+
+describe('serial receipt numbers', () => {
+  const valid = (reference: string, amount: string) => ({ status: 'VALID', tran_id: reference, amount, currency: 'BDT', val_id: `v_${reference}` }) as never;
+
+  it('numbers a gift once when it first counts, in order, and never twice', async () => {
+    await env.DB.prepare('DELETE FROM donations').run();
+    const fund = await env.DB.prepare('SELECT slug FROM funds LIMIT 1').first<{ slug: string }>();
+    const make = async () => {
+      const r = await createDonation(env.DB, { fundSlug: fund!.slug, amountTaka: 500, name: 'A', contact: '01711111111', onBehalf: '', anonymous: false, utmSource: '', utmCampaign: '' } as never);
+      if (!r.ok) throw new Error('fund');
+      return r.donation.reference;
+    };
+    const a = await make();
+    const b = await make();
+    expect((await donationByReference(env.DB, a))!.receiptNo).toBeNull(); // pending: no number
+    await applyDonationValidation(env.DB, valid(b, '500'), b);
+    await applyDonationValidation(env.DB, valid(a, '500'), a);
+    await applyDonationValidation(env.DB, valid(a, '500'), a); // IPN again
+    expect((await donationByReference(env.DB, b))!.receiptNo).toBe(1);
+    expect((await donationByReference(env.DB, a))!.receiptNo).toBe(2);
+    await assignReceiptNo(env.DB, a);
+    expect((await donationByReference(env.DB, a))!.receiptNo).toBe(2);
+  });
+
+  it('gives no number to a mismatched gift, and one when staff accept it', async () => {
+    await env.DB.prepare('DELETE FROM donations').run();
+    const fund = await env.DB.prepare('SELECT slug FROM funds LIMIT 1').first<{ slug: string }>();
+    const r = await createDonation(env.DB, { fundSlug: fund!.slug, amountTaka: 500, name: 'B', contact: '01722222222', onBehalf: '', anonymous: false, utmSource: '', utmCampaign: '' } as never);
+    if (!r.ok) throw new Error('fund');
+    const ref = r.donation.reference;
+    await applyDonationValidation(env.DB, valid(ref, '400'), ref);
+    expect((await donationByReference(env.DB, ref))!.receiptNo).toBeNull();
+    await decideReview(env.DB, 'owner@x', ref, true, 'checked with bank');
+    expect((await donationByReference(env.DB, ref))!.receiptNo).toBe(1);
+  });
+});
+

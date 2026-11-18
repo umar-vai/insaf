@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { listDonations } from '../../../server/donations';
 import { toCsv } from '../../../lib/offline';
+import { receiptLabel } from '../../../lib/format';
 
 /** "2026-11-18 21:30" in Dhaka time; the books use Dhaka days, so the sheet must too. */
 function dhakaStamp(iso: string): string {
@@ -24,9 +25,10 @@ export const GET: APIRoute = async ({ url }) => {
     2000,
   );
   const body = toCsv([
-    ['Date (Dhaka)', 'Reference', 'Fund', 'Amount (Tk)', 'Donor', 'Phone', 'Email', 'On behalf of', 'Status', 'Voided', 'Gateway', 'Method', 'Source', 'Campaign', 'Recorded by', 'Note'],
+    ['Date (Dhaka)', 'Receipt no', 'Reference', 'Fund', 'Amount (Tk)', 'Donor', 'Phone', 'Email', 'On behalf of', 'Status', 'Voided', 'Gateway', 'Method', 'Source', 'Campaign', 'Recorded by', 'Note'],
     ...rows.map((d) => [
       dhakaStamp(d.paidAt ?? d.createdAt),
+      receiptLabel(d.receiptNo),
       d.reference,
       d.fundTitle,
       d.amountMinor / 100,

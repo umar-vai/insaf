@@ -4,7 +4,7 @@ import Base from '../../layouts/Base.astro';
 import Icon from '../../components/Icon.astro';
 import { donationByReference, isDonationReference } from '../../server/donations';
 import { SITE, whatsappUrl } from '../../lib/site';
-import { bnDigits, dateBn, taka } from '../../lib/format';
+import { bnDigits, dateBn, receiptLabel, taka } from '../../lib/format';
 
 // Where SSLCommerz sends the donor back. The reference is long and random, so
 // only the donor (who has the link) sees this receipt. The phone number is
@@ -53,7 +53,8 @@ const maskedPhone = d?.donorPhone ? `${d.donorPhone.slice(0, 3)}••••${d.
             )}
 
             <dl class="receipt">
-              <div><dt>রসিদ নম্বর</dt><dd class="mono">{d.reference}</dd></div>
+              {paid && d.receiptNo && <div><dt>রসিদ নম্বর</dt><dd class="mono">{receiptLabel(d.receiptNo)}</dd></div>}
+              <div><dt>পেমেন্ট রেফারেন্স</dt><dd class="mono">{d.reference}</dd></div>
               <div><dt>তহবিল</dt><dd>{d.fundTitle}</dd></div>
               <div><dt>পরিমাণ</dt><dd class="amount">{taka(d.amountMinor)}</dd></div>
               <div><dt>দাতা</dt><dd>{d.donorName}</dd></div>
@@ -65,7 +66,7 @@ const maskedPhone = d?.donorPhone ? `${d.donorPhone.slice(0, 3)}••••${d.
             </dl>
 
             <div class="actions">
-              {paid && <button class="button button--ghost" type="button" onclick="print()"><Icon name="printer" size={18} /> রসিদ প্রিন্ট / সেভ</button>}
+              {paid && <button class="button button--ghost" type="button" onclick="print()"><Icon name="printer" size={18} /> রসিদ প্রিন্ট / PDF সেভ</button>}
               <a class="button button--ghost" href={whatsappUrl(`আমার দানের রসিদ নম্বর ${d.reference}`)} rel="noopener"><Icon name="whatsapp" size={18} /> অফিসে জানান</a>
               <a class="button" href="/donate">অন্য তহবিলে দান</a>
             </div>
