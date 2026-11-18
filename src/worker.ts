@@ -1,3 +1,4 @@
+import { runBackup, type BackupEnv } from './server/backup';
 import { handle } from '@astrojs/cloudflare/handler';
 import { api } from './api';
 import { isPrelaunch } from './lib/envs';
@@ -79,6 +80,8 @@ export default {
     );
     ctx.waitUntil(pruneActivity(env.DB, todayDhaka()));
     ctx.waitUntil(remindOverdueBooks(env.DB, todayDhaka()));
+    // Nightly database copy to the backup bucket; the result is always written to the audit log.
+    ctx.waitUntil(runBackup(env as unknown as BackupEnv));
   },
 
   async fetch(request, env, ctx) {

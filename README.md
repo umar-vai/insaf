@@ -78,7 +78,20 @@ Old WordPress addresses redirect (`src/lib/legacy-redirects.ts`): fund pages, Ba
 
 ## Backups
 
-D1 keeps 30 days of Time Travel (`wrangler d1 time-travel info insaf --env production`). `node scripts/backup-d1.mjs --env production --out ../backup` exports the live database and proves it restores.
+Where the data lives: the database (donations, students, fees, accounts, staff) is D1 `insaf`; uploaded pictures, vouchers and files are R2 `insaf-media`.
+
+Three layers:
+1. **D1 Time Travel**, 30 days, any minute. For a mistake noticed soon: `npx wrangler d1 time-travel info insaf --env production`, and `restore` to a timestamp or bookmark. This rewinds the whole database, so ask the owner first and take a bookmark before.
+2. **Nightly copy** (`src/server/backup.ts`, cron 18:15 UTC, 00:15 in Dhaka). Cloudflare's D1 export API makes a full SQL dump; the Worker checks it and stores it in R2 bucket `insaf-backups` as `daily/YYYY-MM-DD.sql`, plus `monthly/YYYY-MM.sql` on the 1st. Daily copies are kept 30 days, monthly 12 months. Every run is in the audit log as `backup.ok` or `backup.failed` (that is the history). If there is no good copy for 26 hours the owner sees a red warning at the top of every admin page. The export briefly holds the database, so it runs at night.
+3. **A copy on the owner's computer**: `node scripts/backup-d1.mjs --env production --out ../backup` exports, restores into a throwaway local database and compares counts.
+
+One time setup (needs the owner): create the bucket (`npx wrangler r2 bucket create insaf-backups`), make an API token with only D1 read and export for this database, then `npx wrangler secret put CF_BACKUP_TOKEN --env production` and `npx wrangler secret put CF_ACCOUNT_ID --env production`. Until then each night is recorded as failed and the warning shows. Not covered yet: the R2 media files (vouchers, pictures) are not copied, and a Google Sheet of daily totals is not built.
+
+Check a copy restores (touches nothing online): download a file from the bucket, then `node scripts/restore-check.mjs <file.sql>`. It loads the file into a throwaway local database and compares every table with the file.
+
+Restore after a mistake or loss (always ask the owner first, it replaces data):
+- Deleted or changed something recently: Time Travel as above.
+- Database lost or damaged beyond 30 days: create a new D1 database, apply the migrations (`wrangler d1 migrations apply`), load the newest good `daily/` file in two parts as `restore-check.mjs` does (all `CREATE` lines first, then the `INSERT` lines after `PRAGMA defer_foreign_keys=TRUE;`) with `wrangler d1 execute --remote --file`, run `restore-check.mjs` on the same file first, point `database_id` in `wrangler.jsonc` at the new database and deploy. The old WordPress site is not involved.
 
 ## Layout
 
@@ -93,5 +106,6 @@ D1 keeps 30 days of Time Travel (`wrangler d1 time-travel info insaf --env produ
 | `src/server/sslcommerz.ts`, `fee-pay.ts` | The gateway; fees paid online. |
 | `src/pages/land.astro`, `src/pages/donate/` | Donation pages. |
 | `src/pages/admin/` | Admin: `dashboard`, `donations`, `donors`, `funds` (CRM); `offline/` (ERP). |
+| `src/server/backup.ts`, `scripts/restore-check.mjs` | Nightly database copy and the restore check. |
 | `scripts/import-wordpress.mjs` | WordPress importer (data only). |
 | `test/` | Tests. |
