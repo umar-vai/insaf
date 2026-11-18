@@ -29,6 +29,9 @@
     "SITE_NAME": "Madrasatul Insaf",
     "ENVIRONMENT": "local",
     "META_PIXEL_ID": "1270876547892049",
+    // Marketing ids, public. Empty means the tool stays off.
+    "GA4_ID": "",
+    "CLARITY_ID": "",
     "ACCESS_TEAM_DOMAIN": "",
     "ACCESS_AUD": ""
     // Owners (ADMIN_EMAILS) are a secret: .dev.vars locally, wrangler secret elsewhere.
@@ -65,6 +68,8 @@
         "SITE_NAME": "Madrasatul Insaf",
         "ENVIRONMENT": "production",
         "META_PIXEL_ID": "1270876547892049",
+        "GA4_ID": "",
+        "CLARITY_ID": "",
         // Live SSLCommerz store; its id and password are secrets.
         "SSLCZ_SANDBOX": "0",
         "ACCESS_TEAM_DOMAIN": "",

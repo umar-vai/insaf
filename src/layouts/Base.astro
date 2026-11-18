@@ -7,6 +7,7 @@ import BottomNav from '../components/BottomNav.astro';
 import FontPicker from '../components/FontPicker.astro';
 import EnvBanner from '../components/EnvBanner.astro';
 import MetaPixel from '../components/MetaPixel.astro';
+import Analytics from '../components/Analytics.astro';
 import { SITE } from '../lib/site';
 
 interface Props {
@@ -45,6 +46,7 @@ const fullTitle = title === SITE.name ? `${SITE.nameBn} | ${SITE.slogan}` : `${t
     <meta property="og:image" content={new URL(image, Astro.site)} />
     <script is:inline>document.documentElement.classList.add('js');</script>
     <MetaPixel />
+    <Analytics />
     <slot name="head" />
   </head>
   <body class={foundationTheme ? 'foundation-theme' : undefined}>

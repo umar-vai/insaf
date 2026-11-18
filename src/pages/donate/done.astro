@@ -79,11 +79,19 @@ const maskedPhone = d?.donorPhone ? `${d.donorPhone.slice(0, 3)}••••${d.
   {
     paid && (
       <script is:inline define:vars={{ ref: d!.reference, value: d!.amountMinor / 100 }}>
+        // One conversion per payment on this browser, even after the tab is closed
+        // and the receipt link is opened again (localStorage, not sessionStorage).
+        // The reference is also the event id, so a later server side event for the
+        // same gift is counted once by Meta, and the GA4 transaction id.
         try {
-          if (!sessionStorage.getItem('fbq:' + ref)) {
-            window.fbq?.('track', 'Donate', { value, currency: 'BDT' });
-            window.fbq?.('track', 'Purchase', { value, currency: 'BDT' });
-            sessionStorage.setItem('fbq:' + ref, '1');
+          var key = 'conv:' + ref;
+          var seen = false;
+          try { seen = !!localStorage.getItem(key); } catch (e) {}
+          if (!seen) {
+            window.fbq?.('track', 'Donate', { value, currency: 'BDT' }, { eventID: 'donate-' + ref });
+            window.fbq?.('track', 'Purchase', { value, currency: 'BDT' }, { eventID: 'purchase-' + ref });
+            window.gtag?.('event', 'purchase', { transaction_id: ref, value, currency: 'BDT' });
+            try { localStorage.setItem(key, '1'); } catch (e) {}
           }
         } catch (e) {}
       </script>

@@ -20,11 +20,11 @@ const SECURITY_HEADERS: Record<string, string> = {
   // donations from ads: its script, its image beacon and its event calls.
   'Content-Security-Policy': [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' https://connect.facebook.net https://static.cloudflareinsights.com",
+    "script-src 'self' 'unsafe-inline' https://connect.facebook.net https://static.cloudflareinsights.com https://www.googletagmanager.com https://www.clarity.ms https://scripts.clarity.ms",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https://i.ytimg.com https://www.facebook.com",
+    "img-src 'self' data: https://i.ytimg.com https://www.facebook.com https://www.google-analytics.com https://www.googletagmanager.com https://*.clarity.ms https://c.bing.com",
     "font-src 'self' data:",
-    "connect-src 'self' https://cloudflareinsights.com https://www.facebook.com https://connect.facebook.net",
+    "connect-src 'self' https://cloudflareinsights.com https://www.facebook.com https://connect.facebook.net https://www.google-analytics.com https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com https://*.clarity.ms https://c.bing.com",
     'frame-src https://www.youtube-nocookie.com https://www.google.com',
     "frame-ancestors 'none'",
     "base-uri 'self'",
