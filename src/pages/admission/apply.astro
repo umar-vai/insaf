@@ -3,59 +3,194 @@ import { env } from 'cloudflare:workers';
 import Base from '../../layouts/Base.astro';
 import PageHero from '../../components/PageHero.astro';
 import Icon from '../../components/Icon.astro';
+import AdmissionFields from '../../components/AdmissionFields.astro';
 import '../../styles/panel.css';
-import { createInquiry, parseInquiryForm } from '../../server/inquiries';
+import { applicationCode, createApplication, parseApplicationDetails, parseSignatures, type ApplicationDetails } from '../../server/admission';
+import { IMAGE_TYPES, storeUpload } from '../../server/files';
 import { sameOrigin } from '../../server/session';
-import { DEPARTMENTS } from '../../lib/madrasa';
+import { GUARDIAN_PLEDGE, STUDENT_PLEDGE } from '../../lib/pledges';
+import { todayDhaka } from '../../lib/offline';
 
-// A parent leaves contact details; the office calls back. Rate limited per
-// address, with a hidden field that only bots fill. Never cached.
+// The full admission form: student and guardian details, a photo, then both
+// pledges signed by typed name. Rate limited per address, with a hidden field
+// only bots fill. Never cached. Nothing becomes a student until the office
+// accepts it (see src/server/admission.ts).
 Astro.response.headers.set('Cache-Control', 'no-store');
 const here = '/admission/apply';
+const ERR: Record<string, string> = {
+  studentName: 'শিক্ষার্থীর নাম লিখুন।',
+  birthDate: 'সঠিক জন্ম তারিখ দিন।',
+  guardianName: 'অভিভাবকের নাম লিখুন।',
+  phone: 'সঠিক মোবাইল নম্বর লিখুন।',
+  pickupPhone: 'আনা-নেওয়ার ব্যক্তির মোবাইল নম্বর সঠিক নয়।',
+  permDistrict: 'স্থায়ী ঠিকানার জেলা লিখুন।',
+  department: 'বিভাগ বাছাই করুন।',
+  desiredClass: 'যে শ্রেণিতে ভর্তি হতে চান তা লিখুন।',
+  residence: 'আবাসিক, অনাবাসিক বা ডে-কেয়ার বাছাই করুন।',
+  bloodGroup: 'রক্তের গ্রুপ সঠিক নয়।',
+  guardianNid: 'জাতীয় পরিচয়পত্র নম্বর সঠিক নয়।',
+  chars: 'লেখায় < বা > চিহ্ন দেওয়া যাবে না।',
+  photo: 'শিক্ষার্থীর ছবি দিন (JPG, PNG বা WebP)।',
+  photoSize: 'ছবিটি অনেক বড়। ৪ MB এর ছোট ছবি দিন।',
+  studentSign: 'শিক্ষার্থীর অঙ্গীকারনামায় সম্মতি দিয়ে শিক্ষার্থীর নাম লিখুন।',
+  guardianSign: 'অভিভাবকের অঙ্গীকারনামায় সম্মতি দিয়ে অভিভাবকের নাম লিখুন।',
+  too_many: 'অল্প সময়ে অনেকবার পাঠানো হয়েছে। এক মিনিট পরে আবার চেষ্টা করুন।',
+  failed: 'পাঠানো যায়নি, আবার চেষ্টা করুন।',
+};
+let error = '';
+let values: Partial<ApplicationDetails> = {};
+let signNames = { student: '', guardian: '' };
+
 if (Astro.request.method === 'POST') {
   if (!sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
   const ip = Astro.request.headers.get('CF-Connecting-IP') ?? 'local';
-  if (env.LOGIN_LIMITER && !(await env.LOGIN_LIMITER.limit({ key: `inquiry:${ip}` })).success) return Astro.redirect(`${here}?error=too_many`, 303);
-  const v = parseInquiryForm(await Astro.request.formData());
-  // A bot filling the hidden field is shown the same thanks, and nothing is kept.
-  if (!v.ok) return Astro.redirect(v.error === 'spam' ? `${here}?sent=1` : `${here}?error=${v.error}`, 303);
-  await createInquiry(env.DB, v.value);
-  return Astro.redirect(`${here}?sent=1`, 303);
+  if (env.LOGIN_LIMITER && !(await env.LOGIN_LIMITER.limit({ key: `apply:${ip}` })).success) {
+    error = 'too_many';
+  } else {
+    const form = await Astro.request.formData();
+    // A bot filling the hidden field is shown the same thanks, and nothing is kept.
+    if (String(form.get('website') ?? '') !== '') return Astro.redirect(`${here}?done=0`, 303);
+    values = Object.fromEntries([...form.entries()].filter(([, v]) => typeof v === 'string')) as Partial<ApplicationDetails>;
+    signNames = { student: String(form.get('studentSignName') ?? ''), guardian: String(form.get('guardianSignName') ?? '') };
+    const d = parseApplicationDetails(form, todayDhaka());
+    const s = parseSignatures(form);
+    if (!d.ok) error = d.error;
+    else if (!s.ok) error = s.error;
+    else {
+      const stored = await storeUpload(env.MEDIA, form.get('photo'), 'private/admission', IMAGE_TYPES, 4 * 1024 * 1024);
+      if (!stored.ok) error = stored.reason === 'size' ? 'photoSize' : 'photo';
+      else {
+        const made = await createApplication(env.DB, d.value, s.value, stored.file.key);
+        return Astro.redirect(`${here}?done=${made.appNo}`, 303);
+      }
+    }
+  }
 }
 const q = Astro.url.searchParams;
-const picked = DEPARTMENTS.find((d) => d.key === q.get('dept'))?.key ?? '';
-const ERR: Record<string, string> = { name: 'ছাত্রের নাম সঠিকভাবে লিখুন।', phone: 'সঠিক মোবাইল নম্বর লিখুন।', too_many: 'অল্প সময়ে অনেকবার পাঠানো হয়েছে। এক মিনিট পরে আবার চেষ্টা করুন।' };
+const done = q.get('done');
+const doneNo = done && /^\d{1,6}$/.test(done) ? Number(done) : 0;
 ---
 
-<Base title="ভর্তির আবেদন" description="মাদরাসাতুল ইনসাফে ভর্তির জন্য যোগাযোগের তথ্য পাঠান, অফিস আপনাকে ফোন করবে।">
-  <PageHero crumbs={[{ href: '/admission', label: 'ভর্তি' }, { href: here, label: 'আবেদন' }]} eyebrow="ভর্তি" title="ভর্তির আবেদন" lead="তথ্য পাঠালে মাদরাসার অফিস আপনাকে ফোন করে ভর্তির নিয়ম, ফি ও তারিখ জানাবে।" />
+<Base title="ভর্তির আবেদন" description="মাদরাসাতুল ইনসাফে ভর্তির আবেদন ফরম, শিক্ষার্থী ও অভিভাবকের অঙ্গীকারনামাসহ অনলাইনে জমা দিন।">
+  <PageHero crumbs={[{ href: '/admission', label: 'ভর্তি' }, { href: here, label: 'আবেদন' }]} eyebrow="ভর্তি" title="ভর্তির আবেদনপত্র" lead="শিক্ষার্থীর তথ্য ও ছবি দিন, তারপর শিক্ষার্থী ও অভিভাবকের অঙ্গীকারনামা পড়ে স্বাক্ষর করুন। আবেদন গৃহীত হলে অফিস আপনাকে জানাবে।" />
   <section class="container apply ui">
-    {q.has('sent') ? (
+    {done !== null ? (
       <div class="card">
-        <p class="note note--good" role="status">ধন্যবাদ। আপনার তথ্য অফিসে পৌঁছেছে। অফিস খোলার সময় আপনাকে ফোন করা হবে।</p>
-        <p><a class="button button--ghost" href="/admission">ভর্তি পাতায় ফিরে যান</a></p>
+        <p class="note note--good" role="status">ধন্যবাদ। আপনার আবেদন অফিসে পৌঁছেছে।</p>
+        {doneNo > 0 && <p>আপনার আবেদন নম্বর: <strong class="code">{applicationCode(doneNo)}</strong>। নম্বরটি লিখে রাখুন। আবেদনের অবস্থা দেখতে এই নম্বর ও আবেদনে দেওয়া মোবাইল নম্বর লাগবে।</p>}
+        <p>অফিস আবেদন দেখে আপনাকে জানাবে। গৃহীত হলে শিক্ষার্থীর আইডি কার্ড ছাত্র প্যানেলে পাওয়া যাবে।</p>
+        <p class="row"><a class="button" href={doneNo ? `/admission/status?no=${doneNo}` : '/admission/status'}>আবেদনের অবস্থা দেখুন</a> <a class="button button--ghost" href="/admission">ভর্তি পাতায় ফিরে যান</a></p>
       </div>
     ) : (
-      <form method="post" class="card form-grid">
-        {q.has('error') && <p class="wide note note--bad" role="alert">{ERR[q.get('error') ?? ''] ?? 'পাঠানো যায়নি, আবার চেষ্টা করুন।'}</p>}
-        <label class="field"><span>ছাত্র বা ছাত্রীর নাম</span><input name="studentName" required minlength="2" maxlength="120" autocomplete="off" /></label>
-        <label class="field"><span>অভিভাবকের নাম</span><input name="guardianName" maxlength="120" autocomplete="name" /></label>
-        <label class="field"><span>মোবাইল নম্বর</span><input name="phone" type="tel" required inputmode="tel" maxlength="25" autocomplete="tel" /></label>
-        <label class="field"><span>যে বিভাগে ভর্তি হতে চান</span>
-          <select name="desiredClass">
-            <option value="" selected={!picked}>বিভাগ বাছাই করুন</option>
-            {DEPARTMENTS.map((d) => <option value={d.title} selected={d.key === picked}>{d.title}</option>)}
-          </select>
-        </label>
-        <label class="field wide"><span>কিছু জানাতে চাইলে (ঐচ্ছিক)</span><textarea name="message" rows="3" maxlength="1000"></textarea></label>
-        <label class="hp" aria-hidden="true">ওয়েবসাইট <input name="website" tabindex="-1" autocomplete="off" /></label>
-        <p class="wide muted"><small>এই তথ্য শুধু ভর্তির বিষয়ে যোগাযোগের জন্য মাদরাসার অফিস দেখবে।</small></p>
-        <button class="button"><Icon name="check" /> তথ্য পাঠান</button>
+      <form method="post" enctype="multipart/form-data" class="card" id="apply" data-error={error}>
+        {error && <p class="note note--bad" role="alert">{ERR[error] ?? ERR.failed}</p>}
+        <div class="steps" aria-hidden="true"><span data-dot="1" class="on">১. শিক্ষার্থীর তথ্য</span><span data-dot="2">২. অঙ্গীকারনামা ও স্বাক্ষর</span></div>
+
+        <div data-step="1" class="form-grid">
+          <h3>ছবি</h3>
+          <div class="wide photo">
+            <img data-preview alt="" width="96" height="120" hidden />
+            <label class="field"><span>শিক্ষার্থীর পাসপোর্ট সাইজ ছবি (আইডি কার্ডে বসবে)</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required data-photo /></label>
+          </div>
+          <AdmissionFields v={values} pickedDept={q.get('dept') ?? ''} />
+          <label class="hp" aria-hidden="true">ওয়েবসাইট <input name="website" tabindex="-1" autocomplete="off" /></label>
+          <p class="wide muted"><small>ভর্তি ও ফরমের টাকা অফেরতযোগ্য। এই তথ্য শুধু ভর্তির কাজে মাদরাসার অফিস দেখবে।</small></p>
+          <button type="button" class="button" data-next>পরের ধাপ: অঙ্গীকারনামা <Icon name="arrow" /></button>
+        </div>
+
+        <div data-step="2" class="pledges">
+          <p class="muted">দুটি অঙ্গীকারনামাই মনোযোগ দিয়ে পড়ুন। সম্মতি দিলে নিচে নাম লিখে স্বাক্ষর করুন। শুধু এরপরই আবেদন জমা দেওয়া যাবে।</p>
+          {[
+            { p: STUDENT_PLEDGE, key: 'student', who: 'শিক্ষার্থীর', name: signNames.student },
+            { p: GUARDIAN_PLEDGE, key: 'guardian', who: 'অভিভাবকের', name: signNames.guardian },
+          ].map(({ p, key, who, name }) => (
+            <article class="pledge" aria-labelledby={`h-${key}`}>
+              <h2 id={`h-${key}`}>{p.title}</h2>
+              <p>{p.intro}</p>
+              <ol class="points">{p.points.map((t) => <li>{t}</li>)}</ol>
+              <p class="pnote">{p.note}</p>
+              <div class="sign">
+                <label class="check"><input type="checkbox" name={`${key}Agree`} required checked={Boolean(name)} /> আমি উপরের সব কথা পড়েছি এবং মেনে নিলাম।</label>
+                <label class="field"><span>{who} স্বাক্ষর (পুরো নাম লিখুন)</span><input name={`${key}SignName`} required minlength="2" maxlength="120" value={name} autocomplete="off" /></label>
+              </div>
+            </article>
+          ))}
+          <div class="row">
+            <button type="button" class="button button--ghost" data-back>ফিরে যান</button>
+            <button class="button" type="submit"><Icon name="check" /> আবেদন জমা দিন</button>
+          </div>
+        </div>
       </form>
     )}
   </section>
 </Base>
+
+<script>
+  import { toWebp } from '../../lib/to-webp';
+  const form = document.getElementById('apply') as HTMLFormElement | null;
+  if (form) {
+    const s1 = form.querySelector<HTMLElement>('[data-step="1"]')!;
+    const s2 = form.querySelector<HTMLElement>('[data-step="2"]')!;
+    const dots = form.querySelectorAll<HTMLElement>('[data-dot]');
+    const show = (n: 1 | 2) => {
+      s1.hidden = n !== 1;
+      s2.hidden = n !== 2;
+      dots.forEach((d) => d.classList.toggle('on', d.dataset.dot === String(n)));
+      form.scrollIntoView({ block: 'start' });
+    };
+    // Without this script both parts simply show one after the other.
+    form.classList.add('js');
+    // If the server sent the form back with a mistake in the second part, stay there.
+    show(/Sign$/.test(form.dataset.error ?? '') ? 2 : 1);
+    form.querySelector('[data-next]')!.addEventListener('click', () => {
+      const fields = [...s1.querySelectorAll<HTMLInputElement>('input,select,textarea')];
+      for (const f of fields) if (!f.checkValidity()) { f.reportValidity(); return; }
+      show(2);
+    });
+    form.querySelector('[data-back]')!.addEventListener('click', () => show(1));
+
+    // Photo: shown at once, and turned into a small WebP before it is sent.
+    const input = form.querySelector<HTMLInputElement>('[data-photo]')!;
+    const img = form.querySelector<HTMLImageElement>('[data-preview]')!;
+    let pending: Promise<void> | null = null;
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      img.src = URL.createObjectURL(file);
+      img.hidden = false;
+      pending = toWebp(file).then((out) => {
+        if (out === file) return;
+        const list = new DataTransfer();
+        list.items.add(out);
+        input.files = list.files;
+      });
+    });
+    form.addEventListener('submit', (e) => {
+      if (!pending || form.dataset.ready) return;
+      e.preventDefault();
+      pending.then(() => setTimeout(() => { form.dataset.ready = '1'; form.requestSubmit(); }));
+    });
+  }
+</script>
+
 <style>
-  .apply { max-width: 44rem; padding-block: var(--space-8); }
+  .apply { max-width: 52rem; padding-block: var(--space-8); }
   .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+  .code { font-family: ui-monospace, monospace; font-size: var(--text-lg); }
+  .row { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
+  .steps { display: none; gap: var(--space-4); margin-bottom: var(--space-5); font: 600 var(--text-sm) / 1.4 var(--font-display); color: var(--color-text-muted); }
+  .js .steps { display: flex; }
+  .steps .on { color: var(--green-800); border-bottom: 2px solid var(--gold-500); }
+  [data-step][hidden] { display: none; }
+  .form-grid[data-step] { margin-bottom: var(--space-6); }
+  .js [data-next] { display: inline-flex; }
+  form:not(.js) [data-next], form:not(.js) [data-back] { display: none; }
+  .photo { display: flex; gap: var(--space-4); align-items: flex-end; flex-wrap: wrap; }
+  .photo img[hidden] { display: none; }
+  .photo img { border-radius: var(--radius-sm); object-fit: cover; border: 1px solid var(--color-line); }
+  .pledge { border: 1px solid var(--color-line); border-radius: var(--radius); padding: var(--space-5); margin-top: var(--space-5); background: var(--ivory); }
+  .pledge h2 { margin: 0 0 var(--space-3); font-size: var(--text-xl); color: var(--green-800); }
+  .points { padding-inline-start: 1.5em; display: grid; gap: var(--space-2); }
+  .pnote { font-weight: 700; color: var(--warn-700); }
+  .sign { display: grid; gap: var(--space-3); border-top: 1px dashed var(--color-line); padding-top: var(--space-4); margin-top: var(--space-4); }
 </style>

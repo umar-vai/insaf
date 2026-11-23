@@ -7,6 +7,7 @@ export type WorkCounts = {
   followupsOverdue: number;
   followupsToday: number;
   newInquiries: number;
+  newApplications: number;
   openTickets: number;
   feeReviews: number;
   pendingExpenses: number;
@@ -34,6 +35,7 @@ export async function workCounts(db: D1Database, today: string): Promise<WorkCou
     one(`SELECT count(*) FROM library_loans WHERE returned_on IS NULL AND due_on < ?1`, today),
     one(`SELECT count(*) FROM homework_submissions WHERE state = 'submitted'`),
     one(`SELECT count(*) FROM donations WHERE status = 'review'`),
+    one(`SELECT count(*) FROM admission_applications WHERE status = 'pending'`),
   ]);
   const n = (i: number) => rows[i]?.results[0]?.n ?? 0;
   return {
@@ -48,6 +50,7 @@ export async function workCounts(db: D1Database, today: string): Promise<WorkCou
     lateBooks: n(8),
     homeworkToCheck: n(9),
     donationReviews: n(10),
+    newApplications: n(11),
   };
 }
 
@@ -61,7 +64,8 @@ export function workCountsFor(locals: App.Locals, db: D1Database, today: string)
 export function badgesFor(c: WorkCounts): Record<string, Badge> {
   const list: [string, number, Badge['tone'], string][] = [
     ['/admin/offline/crm', c.followupsOverdue + c.followupsToday, c.followupsOverdue ? 'bad' : 'warn', 'আজকের ও তারিখ পার হওয়া ফলো আপ'],
-    ['/admin/offline/inquiries', c.newInquiries, 'warn', 'নতুন ভর্তির আবেদন'],
+    ['/admin/offline/applications', c.newApplications, 'warn', 'নতুন ভর্তির আবেদন'],
+    ['/admin/offline/inquiries', c.newInquiries, 'warn', 'নতুন যোগাযোগের আবেদন'],
     ['/admin/offline/tickets', c.openTickets, 'warn', 'উত্তরের অপেক্ষায় টিকেট'],
     ['/admin/offline/online-payments', c.feeReviews, 'bad', 'যাচাই করা দরকার এমন অনলাইন ফি'],
     ['/admin/offline/expenses', c.pendingExpenses, 'warn', 'অনুমোদনের অপেক্ষায় খরচ'],

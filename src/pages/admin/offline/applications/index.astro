@@ -1,0 +1,64 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import { applicationCode, applicationCounts, APPLICATION_STATUS_BN, APPLICATION_STATUSES, listApplications, RESIDENCE_BN, type ApplicationStatus } from '../../../../server/admission';
+import { bnDigits, dateBn } from '../../../../lib/format';
+
+const f = Astro.url.searchParams.get('status') ?? '';
+const status = ((APPLICATION_STATUSES as readonly string[]).includes(f) ? f : '') as ApplicationStatus | '';
+const q = Astro.url.searchParams.get('q') ?? '';
+const [list, counts] = await Promise.all([listApplications(env.DB, status, q), applicationCounts(env.DB)]);
+const PILL: Record<ApplicationStatus, string> = { pending: 'pending', accepted: 'paid', rejected: 'failed' };
+const tab = (s: string) => `?${new URLSearchParams({ ...(s ? { status: s } : {}), ...(q ? { q } : {}) })}`;
+---
+
+<Admin title="ভর্তির আবেদন">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">ছাত্র ও ফি</p>
+      <h1>ভর্তির আবেদন</h1>
+      <p>ওয়েবসাইটের পূর্ণ ভর্তি ফরম, দুই অঙ্গীকারনামার স্বাক্ষরসহ। আবেদন খুলে তথ্য ঠিক করুন, ভর্তি পরীক্ষার অংশ পূরণ করুন, তারপর গ্রহণ বা প্রত্যাখ্যান করুন। গ্রহণ করলেই ছাত্র তৈরি হয় এবং ছাত্র প্যানেলে আইডি কার্ড খোলে।</p>
+    </div>
+    <div class="actions">
+      <a class="button button--ghost" href="/admission/apply" target="_blank" rel="noopener"><Icon name="globe" /> আবেদনের পাতা</a>
+      <a class="button button--ghost" href="/admin/offline/inquiries">পুরোনো ছোট আবেদন</a>
+    </div>
+  </header>
+  <form class="toolbar" method="get">
+    <input name="q" value={q} placeholder="নাম, মোবাইল বা আবেদন নম্বর (AP-0001)" aria-label="আবেদন খুঁজুন" />
+    {status && <input type="hidden" name="status" value={status} />}
+    <button class="button" type="submit"><Icon name="search" /> খুঁজুন</button>
+  </form>
+  <nav class="tabs" aria-label="অবস্থা">
+    <a href={tab('')} aria-current={status === '' ? 'page' : undefined}>সব</a>
+    {APPLICATION_STATUSES.map((s) => <a href={tab(s)} aria-current={status === s ? 'page' : undefined}>{APPLICATION_STATUS_BN[s]} ({bnDigits(counts[s])})</a>)}
+  </nav>
+  {list.length === 0 ? <p class="card muted">কোনো আবেদন নেই।</p> : (
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>ছবি</th><th>নম্বর</th><th>শিক্ষার্থী</th><th>অভিভাবক</th><th>বিভাগ ও শ্রেণি</th><th>জমার সময়</th><th>অবস্থা</th><th></th></tr></thead>
+        <tbody>
+          {list.map((a) => (
+            <tr>
+              <td><img class="thumb" src={`/admin/offline/applications/${a.id}/photo`} alt="" width="40" height="50" loading="lazy" /></td>
+              <td><span class="id">{applicationCode(a.appNo)}</span></td>
+              <td><a href={`/admin/offline/applications/${a.id}`}><strong>{a.studentName}</strong></a><br /><small class="muted">{RESIDENCE_BN[a.residence]}</small></td>
+              <td>{a.guardianName}<br /><a class="muted" href={`tel:${a.phone}`}>{bnDigits(a.phone)}</a></td>
+              <td>{a.department}<br /><small class="muted">{a.desiredClass}</small></td>
+              <td>{dateBn(a.createdAt, true)}</td>
+              <td><span class={`pill pill--${PILL[a.status]}`}>{APPLICATION_STATUS_BN[a.status]}</span></td>
+              <td><a class="button button--sm button--ghost" href={`/admin/offline/applications/${a.id}`}>খুলুন</a></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )}
+</Admin>
+<style>
+  .tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-4); }
+  .tabs a { padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); text-decoration: none; }
+  .tabs a[aria-current='page'] { font-weight: 700; text-decoration: underline; }
+  .thumb { width: 40px; height: 50px; object-fit: cover; border-radius: 4px; background: var(--mint-100); }
+</style>

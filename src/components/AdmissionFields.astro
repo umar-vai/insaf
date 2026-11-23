@@ -1,0 +1,85 @@
+---
+// The student and guardian fields of the admission form, in the order of the
+// madrasa's printed form. Used by the public form and by the office when it
+// corrects an application. Class `ui` must be on an ancestor (panel.css).
+import type { ApplicationDetails } from '../server/admission';
+import { BLOOD_GROUPS, RESIDENCE_BN, RESIDENCES } from '../server/admission';
+import { DEPARTMENTS } from '../lib/madrasa';
+
+interface Props {
+  v?: Partial<ApplicationDetails>;
+  /** A department key from a link on the admission page. */
+  pickedDept?: string;
+}
+const { v = {}, pickedDept = '' } = Astro.props;
+const dept = v.department ?? DEPARTMENTS.find((d) => d.key === pickedDept)?.title ?? '';
+const sameAddress = v.curVillage === undefined ? true : v.curVillage === v.permVillage && v.curPost === v.permPost && v.curThana === v.permThana && v.curDistrict === v.permDistrict;
+---
+
+<h3>শিক্ষার্থীর পরিচয়</h3>
+<label class="field"><span>শিক্ষার্থীর নাম</span><input name="studentName" required minlength="2" maxlength="120" value={v.studentName ?? ''} autocomplete="off" /></label>
+<label class="field"><span>জন্ম তারিখ</span><input name="birthDate" type="date" required value={v.birthDate ?? ''} /></label>
+<label class="field"><span>পিতার নাম</span><input name="fatherName" maxlength="120" value={v.fatherName ?? ''} /></label>
+<label class="field"><span>পিতার পেশা</span><input name="fatherOccupation" maxlength="80" value={v.fatherOccupation ?? ''} /></label>
+<label class="field"><span>রক্তের গ্রুপ</span>
+  <select name="bloodGroup">
+    <option value="">জানা নেই</option>
+    {BLOOD_GROUPS.map((b) => <option value={b} selected={b === v.bloodGroup}>{b}</option>)}
+  </select>
+</label>
+
+<h3>স্থায়ী ঠিকানা</h3>
+<label class="field"><span>গ্রাম</span><input name="permVillage" maxlength="80" value={v.permVillage ?? ''} /></label>
+<label class="field"><span>পোস্ট</span><input name="permPost" maxlength="80" value={v.permPost ?? ''} /></label>
+<label class="field"><span>থানা</span><input name="permThana" maxlength="80" value={v.permThana ?? ''} /></label>
+<label class="field"><span>জেলা</span><input name="permDistrict" required maxlength="80" value={v.permDistrict ?? ''} /></label>
+
+<h3>বর্তমান ঠিকানা</h3>
+<label class="check wide"><input type="checkbox" name="curSame" checked={sameAddress} data-same /> স্থায়ী ঠিকানার মতোই</label>
+<div class="wide cur" data-cur hidden={sameAddress}>
+  <label class="field"><span>গ্রাম</span><input name="curVillage" maxlength="80" value={v.curVillage ?? ''} /></label>
+  <label class="field"><span>পোস্ট</span><input name="curPost" maxlength="80" value={v.curPost ?? ''} /></label>
+  <label class="field"><span>থানা</span><input name="curThana" maxlength="80" value={v.curThana ?? ''} /></label>
+  <label class="field"><span>জেলা</span><input name="curDistrict" maxlength="80" value={v.curDistrict ?? ''} /></label>
+</div>
+
+<h3>পড়াশোনা</h3>
+<label class="field"><span>যে বিভাগে ভর্তি হতে চান</span>
+  <select name="department" required>
+    <option value="">বিভাগ বাছাই করুন</option>
+    {DEPARTMENTS.map((d) => <option value={d.title} selected={d.title === dept}>{d.title}</option>)}
+  </select>
+</label>
+<label class="field"><span>যে শ্রেণিতে ভর্তি হতে ইচ্ছুক</span><input name="desiredClass" required maxlength="120" value={v.desiredClass ?? ''} /></label>
+<label class="field"><span>বিগত বছর যে শ্রেণিতে পড়েছিল</span><input name="prevClass" maxlength="80" value={v.prevClass ?? ''} /></label>
+<label class="field"><span>পূর্ববর্তী শিক্ষা প্রতিষ্ঠানের নাম (যদি থাকে)</span><input name="prevInstitute" maxlength="200" value={v.prevInstitute ?? ''} /></label>
+<fieldset class="field wide resid">
+  <legend>থাকার ধরন</legend>
+  {RESIDENCES.map((r) => <label class="check"><input type="radio" name="residence" value={r} required checked={(v.residence ?? 'non_resident') === r} /> {RESIDENCE_BN[r]}</label>)}
+</fieldset>
+
+<h3>অভিভাবকের পরিচয়</h3>
+<label class="field"><span>অভিভাবকের নাম</span><input name="guardianName" required minlength="2" maxlength="120" value={v.guardianName ?? ''} autocomplete="name" /></label>
+<label class="field"><span>অভিভাবকের পেশা</span><input name="guardianOccupation" maxlength="80" value={v.guardianOccupation ?? ''} /></label>
+<label class="field"><span>জাতীয় পরিচয়পত্র নম্বর</span><input name="guardianNid" inputmode="numeric" maxlength="25" value={v.guardianNid ?? ''} /></label>
+<label class="field"><span>অভিভাবকের মোবাইল নম্বর</span><input name="phone" type="tel" required inputmode="tel" maxlength="25" value={v.phone ?? ''} autocomplete="tel" /></label>
+
+<h3>যিনি শিক্ষার্থীকে আনা-নেওয়া করবেন</h3>
+<label class="field"><span>নাম</span><input name="pickupName" maxlength="120" value={v.pickupName ?? ''} /></label>
+<label class="field"><span>মোবাইল</span><input name="pickupPhone" type="tel" inputmode="tel" maxlength="25" value={v.pickupPhone ?? ''} /></label>
+<label class="field wide"><span>ঠিকানা</span><input name="pickupAddress" maxlength="200" value={v.pickupAddress ?? ''} /></label>
+
+<script>
+  // "Same as permanent" hides the present address; the server copies it.
+  document.querySelectorAll<HTMLInputElement>('[data-same]').forEach((box) => {
+    const cur = box.closest('form')?.querySelector<HTMLElement>('[data-cur]');
+    box.addEventListener('change', () => { if (cur) cur.hidden = box.checked; });
+  });
+</script>
+
+<style>
+  .cur { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); gap: var(--space-4); }
+  .cur[hidden] { display: none; }
+  .resid { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-4); }
+  .resid legend { font: 600 var(--text-xs) / 1.4 var(--font-display); color: var(--color-text-muted); padding: 0; margin-bottom: var(--space-1); }
+</style>
