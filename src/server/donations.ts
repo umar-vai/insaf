@@ -192,6 +192,7 @@ export function parseDonationForm(form: FormData): { ok: true; value: DonationIn
 export type Donation = {
   id: string;
   reference: string;
+  receiptNo: number | null;
   fundId: string;
   fundTitle: string;
   fundSlug: string;
@@ -216,7 +217,7 @@ export type Donation = {
   createdAt: string;
 };
 
-const DONATION_SELECT = `SELECT d.id, d.reference, d.fund_id AS fundId, f.title AS fundTitle, f.slug AS fundSlug, d.amount_minor AS amountMinor,
+const DONATION_SELECT = `SELECT d.id, d.reference, d.receipt_no AS receiptNo, d.fund_id AS fundId, f.title AS fundTitle, f.slug AS fundSlug, d.amount_minor AS amountMinor,
   d.donor_name AS donorName, d.donor_phone AS donorPhone, d.donor_email AS donorEmail, d.on_behalf AS onBehalf, d.anonymous,
   d.status, d.gateway, d.method, d.bank_tran_id AS bankTranId, d.review_reason AS reviewReason, d.utm_source AS utmSource,
   d.utm_campaign AS utmCampaign, d.note, d.recorded_by AS recordedBy, d.voided_at AS voidedAt, d.void_reason AS voidReason,
@@ -241,6 +242,29 @@ export async function createDonation(db: D1Database, v: DonationInput): Promise<
   return { ok: true, donation: (await donationByReference(db, reference))! };
 }
 
+/**
+ * Gives a paid gift its serial receipt number, once. One statement takes the highest
+ * number so far plus one, so two gifts confirmed at the same moment cannot share a
+ * number (the unique index rejects the second, which then tries again). Gifts are
+ * never deleted, so numbers are not reused; a voided gift keeps its number.
+ */
+export async function assignReceiptNo(db: D1Database, reference: string): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await db
+        .prepare(
+          `UPDATE donations SET receipt_no = (SELECT coalesce(max(receipt_no), 0) + 1 FROM donations)
+           WHERE reference = ? AND status = 'paid' AND receipt_no IS NULL`,
+        )
+        .bind(reference)
+        .run();
+      return;
+    } catch (e) {
+      if (!String(e).includes('UNIQUE')) throw e;
+    }
+  }
+}
+
 async function event(db: D1Database, donationId: string | null, kind: string, detail: unknown) {
   await db
     .prepare('INSERT INTO donation_events (id, donation_id, kind, detail_json) VALUES (?, ?, ?, ?)')
@@ -254,7 +278,10 @@ export async function applyDonationValidation(db: D1Database, v: Validation | nu
   const d = await donationByReference(db, reference);
   await event(db, d?.id ?? null, 'validation', { reference, v: v ?? { error: 'unreachable' } });
   if (!d) return 'unknown';
-  if (d.status === 'paid') return 'paid';
+  if (d.status === 'paid') {
+    await assignReceiptNo(db, d.reference);
+    return 'paid';
+  }
   if (!v || !(v.status === 'VALID' || v.status === 'VALIDATED')) return d.status;
 
   const matches =
@@ -274,6 +301,7 @@ export async function applyDonationValidation(db: D1Database, v: Validation | nu
     )
     .bind(status, status === 'review' ? (matches ? 'risky' : 'mismatch') : null, v.val_id ?? null, v.bank_tran_id ?? null, (v.card_type ?? '').slice(0, 40), status, d.id)
     .run();
+  if (status === 'paid') await assignReceiptNo(db, d.reference);
   return status;
 }
 
@@ -347,6 +375,7 @@ export async function recordManualDonation(db: D1Database, actor: string, v: Man
     )
     .bind(`don_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`, reference, fund.id, v.amountTaka * 100, v.name, v.phone, v.onBehalf, v.anonymous ? 1 : 0, v.method, v.note, actor, v.nonce, paidAt)
     .run();
+  if (r.meta.changes) await assignReceiptNo(db, reference);
   if (r.meta.changes) await log(db, actor, 'donation.manual', `donation:${reference}`, { fund: fund.title, amount: v.amountTaka, name: v.name });
   const saved = await db.prepare('SELECT reference FROM donations WHERE nonce = ?').bind(v.nonce).first<{ reference: string }>();
   return { ok: true, reference: saved?.reference ?? reference };
@@ -380,6 +409,7 @@ export async function decideReview(db: D1Database, actor: string, reference: str
     )
     .bind(accept ? 'paid' : 'failed', `${actor}: ${why}`, accept ? 'paid' : 'failed', reference)
     .run();
+  if (r.meta.changes && accept) await assignReceiptNo(db, reference);
   if (r.meta.changes) await log(db, actor, accept ? 'donation.accept' : 'donation.reject', `donation:${reference}`, { note: why });
   return r.meta.changes > 0;
 }

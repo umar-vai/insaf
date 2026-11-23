@@ -9,7 +9,8 @@ import { inArea, staffAccess } from '../server/staff';
 import { track } from '../server/activity';
 import { gatewayHandoffPage, sslConfigured, startPaymentSession, validatePayment } from '../server/sslcommerz';
 import { applyFeeValidation, createFeePayment, isFeeReference, markFeeUnpaid } from '../server/fee-pay';
-import { applyDonationValidation, createDonation, isDonationReference, markDonationUnpaid, parseDonationForm } from '../server/donations';
+import { sendPurchase, type CapiEnv } from '../server/meta-capi';
+import { applyDonationValidation, createDonation, donationByReference, isDonationReference, markDonationUnpaid, parseDonationForm } from '../server/donations';
 import { changePassword, signInWithPassword } from '../server/password';
 import { landingFor, materialFile, studentPanel } from '../server/panels';
 import { masterRoutine, mayReadRoutine } from '../server/academic';
@@ -235,13 +236,23 @@ async function gatewayPost(c: { req: { formData(): Promise<FormData> } }) {
 const feeDone = (reference: string) => `/account/offline/fees?pay=${reference}`;
 const donationDone = (reference: string) => `/donate/done?ref=${reference}`;
 
+const siteOrigin = 'https://madrasatulinsaf.org';
+
 async function validateAndApply(env: Env, reference: string | undefined, valId: string | undefined) {
   if (!reference || !valId) return;
   const gw = await gatewayEnv(env.DB, env);
   if (!sslConfigured(gw)) return;
   const v = await validatePayment(gw, valId);
   if (isFeeReference(reference)) await applyFeeValidation(env.DB, v, reference);
-  else if (isDonationReference(reference)) await applyDonationValidation(env.DB, v, reference);
+  else if (isDonationReference(reference)) {
+    const before = await donationByReference(env.DB, reference);
+    const after = await applyDonationValidation(env.DB, v, reference);
+    // Newly confirmed gift: tell Meta from the server too (does nothing until the token is set).
+    if (before && before.status !== 'paid' && after === 'paid') {
+      const d = await donationByReference(env.DB, reference);
+      if (d) await sendPurchase(env as unknown as CapiEnv, { reference, amountMinor: d.amountMinor, phone: d.donorPhone, email: d.donorEmail, paidAt: d.paidAt }, siteOrigin);
+    }
+  }
 }
 
 api.post('/api/pay/sslcommerz/success', async (c) => {

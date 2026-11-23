@@ -4,7 +4,7 @@ import Admin from '../../../layouts/Admin.astro';
 import Icon from '../../../components/Icon.astro';
 import { decideReview, listDonations, listFunds, MANUAL_METHOD_BN, voidDonation, type DonationFilter } from '../../../server/donations';
 import { localsMayDo } from '../../../server/staff';
-import { bnDigits, dateBn, taka } from '../../../lib/format';
+import { bnDigits, dateBn, receiptLabel, taka } from '../../../lib/format';
 
 const actor = Astro.locals.staff!;
 // Accepting a held payment or voiding an office entry is a decision: full level.
@@ -79,7 +79,7 @@ const csv = `/admin/donations/export.csv?${p.toString()}`;
                 const key = d.donorPhone || d.donorEmail || d.donorName.toLowerCase();
                 return (
                   <tr class={d.voidedAt ? 'void' : ''}>
-                    <td>{dateBn(d.paidAt ?? d.createdAt, true)}<small class="muted"><br />{d.reference}</small></td>
+                    <td>{dateBn(d.paidAt ?? d.createdAt, true)}<small class="muted"><br />{d.receiptNo ? `${receiptLabel(d.receiptNo)} · ` : ''}{d.reference}</small></td>
                     <td>
                       <a href={`/admin/donors/${encodeURIComponent(key)}`}><strong>{d.donorName}</strong></a>
                       {d.anonymous ? <span class="pill pill--info">নাম গোপন</span> : null}

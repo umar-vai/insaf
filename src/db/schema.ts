@@ -66,6 +66,8 @@ export const donations = sqliteTable(
     id: text('id').primaryKey(),
     /** SSLCommerz tran_id ("DN-..."), the old plugin's "DMP..." or "MN-..." for manual. */
     reference: text('reference').notNull().unique(),
+    /** Serial receipt number (RCP-000001), given once when the gift first counts as paid. */
+    receiptNo: integer('receipt_no'),
     fundId: text('fund_id')
       .notNull()
       .references(() => funds.id),

@@ -65,3 +65,6 @@ export function fileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${bnDigits(Math.max(1, Math.round(bytes / 1024)))} KB`;
   return `${bnDigits((bytes / 1024 / 1024).toFixed(1))} MB`;
 }
+
+/** "RCP-000123": the serial number printed on a donation receipt, empty until the gift is numbered. */
+export const receiptLabel = (n: number | null | undefined): string => (n ? `RCP-${String(n).padStart(6, '0')}` : '');
