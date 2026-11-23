@@ -2,6 +2,19 @@ import type { APIRoute } from 'astro';
 import { env } from 'cloudflare:workers';
 import { listDonations } from '../../../server/donations';
 import { toCsv } from '../../../lib/offline';
+import { receiptLabel } from '../../../lib/format';
+
+/** "2026-11-18 21:30" in Dhaka time; the books use Dhaka days, so the sheet must too. */
+function dhakaStamp(iso: string): string {
+  const d = new Date(iso.includes('T') ? iso : `${iso.replace(' ', 'T')}Z`);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+      .formatToParts(d)
+      .map((x) => [x.type, x.value]),
+  );
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+}
 
 // The donations list as a spreadsheet (Excel opens it), with the same filters as the page.
 export const GET: APIRoute = async ({ url }) => {
@@ -12,9 +25,10 @@ export const GET: APIRoute = async ({ url }) => {
     2000,
   );
   const body = toCsv([
-    ['Date (UTC)', 'Reference', 'Fund', 'Amount (Tk)', 'Donor', 'Phone', 'Email', 'On behalf of', 'Status', 'Voided', 'Gateway', 'Method', 'Source', 'Campaign', 'Recorded by', 'Note'],
+    ['Date (Dhaka)', 'Receipt no', 'Reference', 'Fund', 'Amount (Tk)', 'Donor', 'Phone', 'Email', 'On behalf of', 'Status', 'Voided', 'Gateway', 'Method', 'Source', 'Campaign', 'Recorded by', 'Note'],
     ...rows.map((d) => [
-      d.paidAt ?? d.createdAt,
+      dhakaStamp(d.paidAt ?? d.createdAt),
+      receiptLabel(d.receiptNo),
       d.reference,
       d.fundTitle,
       d.amountMinor / 100,

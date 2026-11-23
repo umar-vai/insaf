@@ -7,6 +7,8 @@ import { env } from 'cloudflare:workers';
 import { adminModule, homeFor, inArea, mayOpenPath, MODULE_BN } from '../server/staff';
 import { badgesFor, workCountsFor, type Badge } from '../server/nav-badges';
 import { todayDhaka } from '../lib/offline';
+import { isTestSite } from '../lib/envs';
+import { backupStatus } from '../server/backup';
 import { bnDigits } from '../lib/format';
 
 interface Props {
@@ -142,6 +144,8 @@ const SHARED: Group = {
 
 const access = { modules: Astro.locals.staffModules ?? [], owner: Astro.locals.staffOwner ?? false, grants: Astro.locals.staffGrants };
 const home = homeFor(access);
+// The owner is warned when no good database copy exists for 26 hours (real site only).
+const backup = access.owner && !isTestSite(env) ? await backupStatus(env.DB) : null;
 const here = adminModule(path);
 const pathArea = here === 'shared' || here === 'owner' ? 'shared' : MODULE_BN[here].area;
 const viewOnly = !access.owner && here !== 'shared' && here !== 'owner' && Astro.locals.staffGrants?.[here] === 'view';
@@ -255,6 +259,15 @@ const problem = Astro.url.searchParams.get('error');
       {viewOnly && <p class="note note--warn" role="status">এই অংশে আপনার শুধু দেখার অনুমতি আছে। কিছু সংরক্ষণ করতে চাইলে তা হবে না।</p>}
       {flash && <p class="flash flash--ok" role="status">সংরক্ষণ হয়েছে।</p>}
       {problem && <p class="flash flash--bad" role="alert">কাজটি করা যায়নি। তথ্য দেখে আবার চেষ্টা করুন।</p>}
+      {
+        backup && backup.state !== 'ok' && (
+          <div class="backup-alert" role="alert">
+            <strong>ডেটাবেস ব্যাকআপ হয়নি।</strong>{' '}
+            {backup.state === 'never' ? 'এখনো কোনো সফল ব্যাকআপ নেই।' : '২৬ ঘণ্টার বেশি সময় কোনো সফল ব্যাকআপ হয়নি।'}
+            {backup.lastError && <span class="backup-alert__why"> কারণ: {backup.lastError}</span>}
+          </div>
+        )
+      }
       <slot />
     </main>
     <FontPicker corner />
@@ -389,6 +402,15 @@ const problem = Astro.url.searchParams.get('error');
 
 
     <style>
+      .backup-alert {
+        margin-bottom: var(--space-4);
+        padding: var(--space-3) var(--space-4);
+        border-radius: var(--radius);
+        background: var(--bad-100);
+        color: var(--bad-700);
+        border: 1px solid var(--bad-700);
+        font-size: var(--text-sm);
+      }
       .top {
         display: none;
       }

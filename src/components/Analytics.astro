@@ -1,0 +1,45 @@
+---
+import { env } from 'cloudflare:workers';
+import { isTestSite } from '../lib/envs';
+
+// Google Analytics 4 and Microsoft Clarity for the marketing team. Their ids are
+// public (GA4_ID and CLARITY_ID in wrangler.jsonc); each tool stays off until its
+// id is filled in, and on test sites. Never loaded in the admin or portals, which
+// use their own layout.
+const vars = env as { GA4_ID?: string; CLARITY_ID?: string };
+const ga = vars.GA4_ID ?? '';
+const clarity = vars.CLARITY_ID ?? '';
+const live = !isTestSite(env);
+const gaOn = live && /^G-[A-Z0-9]{6,12}$/.test(ga);
+const clarityOn = live && /^[a-z0-9]{8,12}$/.test(clarity);
+---
+
+{
+  gaOn && (
+    <>
+      <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${ga}`}></script>
+      <script is:inline define:vars={{ ga }}>
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function () {
+          window.dataLayer.push(arguments);
+        };
+        gtag('js', new Date());
+        gtag('config', ga);
+      </script>
+    </>
+  )
+}
+{
+  clarityOn && (
+    <script is:inline define:vars={{ clarity }}>
+      (function (c, l, a, r, i, t, y) {
+        c[a] = c[a] || function () { (c[a].q = c[a].q || []).push(arguments); };
+        t = l.createElement(r);
+        t.async = 1;
+        t.src = 'https://www.clarity.ms/tag/' + i;
+        y = l.getElementsByTagName(r)[0];
+        y.parentNode.insertBefore(t, y);
+      })(window, document, 'clarity', 'script', clarity);
+    </script>
+  )
+}
