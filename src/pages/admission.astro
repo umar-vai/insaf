@@ -1,16 +1,20 @@
 ---
+import { env } from 'cloudflare:workers';
 import Base from '../layouts/Base.astro';
 import PageHero from '../components/PageHero.astro';
 import SectionHead from '../components/SectionHead.astro';
 import Icon from '../components/Icon.astro';
 import { SITE, whatsappUrl } from '../lib/site';
-import { DEPARTMENTS, FACILITIES } from '../lib/madrasa';
+import FeatureList from '../components/FeatureList.astro';
+import { publicDepartments } from '../server/departments';
+import { ADMISSION_CLASSES, FACILITIES } from '../lib/madrasa';
 import { bnDigits } from '../lib/format';
 
 // Admission is handled at the office; this page says what there is and how
 // to reach the office. Fees and dates are not published on the old site, so
 // none are written here.
-Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=3600');
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+const departments = await publicDepartments(env.DB);
 ---
 
 <Base title="ভর্তি তথ্য" description="মাদরাসাতুল ইনসাফে নুরানি, নাজেরা ও হিফজুল কুরআন এবং কিতাব বিভাগে ভর্তি সম্পর্কে জানুন। আবাসিক সুবিধা ও স্কলারশিপ।">
@@ -26,16 +30,21 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=3600')
     <SectionHead eyebrow="বিভাগসমূহ" title="কোন বিভাগে ভর্তি হবেন" />
     <div class="depts">
       {
-        DEPARTMENTS.map((d, i) => (
+        departments.map((d, i) => (
           <article data-reveal>
             <span class="no">{bnDigits(String(i + 1).padStart(2, '0'))}</span>
             <h3>{d.title}</h3>
-            <p>{d.text}</p>
-            <a href={`/admission/apply?dept=${d.key}`}>এই বিভাগে ভর্তির আবেদন করুন <Icon name="arrow" size={16} /></a>
+            {d.summary && <p>{d.summary}</p>}
+            <a href={`/admission/apply?dept=${d.slug}`}>এই বিভাগে ভর্তির আবেদন করুন <Icon name="arrow" size={16} /></a>
           </article>
         ))
       }
     </div>
+  </section>
+
+  <section class="section container">
+    <SectionHead eyebrow="আমাদের বৈশিষ্ট্য" title="আমাদের বৈশিষ্ট্যসমূহ" lead={`ভর্তি চলছে: ${ADMISSION_CLASSES}`} />
+    <FeatureList />
   </section>
 
   <section class="section section--tint">

@@ -2,7 +2,6 @@ import { log } from './admin';
 import { createOfflineStudent } from './offline';
 import { cleanPhone, longText, newId, PHONE, text, type Result } from './ops-util';
 import { isYmd, parseTaka } from '../lib/offline';
-import { DEPARTMENTS } from '../lib/madrasa';
 import { PLEDGE_VERSION } from '../lib/pledges';
 
 // The full online admission form (/admission/apply). A family fills the
@@ -40,6 +39,8 @@ export type ApplicationDetails = {
   curDistrict: string;
   prevClass: string;
   department: string;
+  /** The department (offline course) picked on the form. */
+  courseId: string;
   desiredClass: string;
   prevInstitute: string;
   bloodGroup: string;
@@ -57,7 +58,9 @@ export type Signatures = { studentSignName: string; guardianSignName: string };
 const bad = (s: string) => /[<>]/.test(s);
 
 /** Reads and checks the details. `today` (YYYY-MM-DD) bounds the birth date. */
-export function parseApplicationDetails(form: FormData, today: string): Result<ApplicationDetails> {
+export type DepartmentChoice = { id: string; title: string };
+
+export function parseApplicationDetails(form: FormData, today: string, departments: readonly DepartmentChoice[]): Result<ApplicationDetails> {
   const t = (k: string, max = 200) => text(form, k, max);
   const studentName = t('studentName', 120);
   if (studentName.length < 2) return { ok: false, error: 'studentName' };
@@ -71,8 +74,9 @@ export function parseApplicationDetails(form: FormData, today: string): Result<A
   if (pickupPhone && !PHONE.test(pickupPhone)) return { ok: false, error: 'pickupPhone' };
   const permDistrict = t('permDistrict', 80);
   if (!permDistrict) return { ok: false, error: 'permDistrict' };
-  const department = t('department', 120);
-  if (!DEPARTMENTS.some((d) => d.title === department)) return { ok: false, error: 'department' };
+  const picked = departments.find((d) => d.id === t('courseId', 60));
+  if (!picked) return { ok: false, error: 'department' };
+  const department = picked.title;
   const desiredClass = t('desiredClass', 120);
   if (!desiredClass) return { ok: false, error: 'desiredClass' };
   const residence = t('residence', 20);
@@ -99,6 +103,7 @@ export function parseApplicationDetails(form: FormData, today: string): Result<A
     curDistrict: cur('District'),
     prevClass: t('prevClass', 80),
     department,
+    courseId: picked.id,
     desiredClass,
     prevInstitute: t('prevInstitute', 200),
     bloodGroup,
@@ -128,7 +133,7 @@ const COLS: [keyof ApplicationDetails, string][] = [
   ['studentName', 'student_name'], ['birthDate', 'birth_date'], ['fatherName', 'father_name'], ['fatherOccupation', 'father_occupation'],
   ['permVillage', 'perm_village'], ['permPost', 'perm_post'], ['permThana', 'perm_thana'], ['permDistrict', 'perm_district'],
   ['curVillage', 'cur_village'], ['curPost', 'cur_post'], ['curThana', 'cur_thana'], ['curDistrict', 'cur_district'],
-  ['prevClass', 'prev_class'], ['department', 'department'], ['desiredClass', 'desired_class'], ['prevInstitute', 'prev_institute'],
+  ['prevClass', 'prev_class'], ['department', 'department'], ['courseId', 'course_id'], ['desiredClass', 'desired_class'], ['prevInstitute', 'prev_institute'],
   ['bloodGroup', 'blood_group'], ['residence', 'residence'], ['pickupName', 'pickup_name'], ['pickupAddress', 'pickup_address'],
   ['pickupPhone', 'pickup_phone'], ['guardianName', 'guardian_name'], ['guardianOccupation', 'guardian_occupation'], ['guardianNid', 'guardian_nid'], ['phone', 'phone'],
 ];

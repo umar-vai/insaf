@@ -13,6 +13,9 @@ const slugOf = (title: string) =>
 // Blog articles. Visitors only ever see published posts; drafts and every
 // change go through the admin, and each change is logged in admin_events.
 
+/** Published and already due: a scheduled post stays hidden until its time. */
+const LIVE = `status = 'published' AND coalesce(published_at, '') <= strftime('%Y-%m-%dT%H:%M:%fZ','now')`;
+
 export type PostCard = {
   id: string;
   slug: string;
@@ -39,10 +42,10 @@ const toCard = ({ bodyLength, featured, ...r }: CardRow): PostCard => ({
   minutes: Math.max(1, Math.round(bodyLength / 6 / 180)),
 });
 
-export async function publishedPosts(db: D1Database, opts: { category?: string | null; limit?: number } = {}): Promise<PostCard[]> {
+export async function publishedPosts(db: D1Database, opts: { category?: string | null; limit?: number} = {}): Promise<PostCard[]> {
   const where = opts.category ? `AND category = ?` : '';
   const stmt = db.prepare(
-    `SELECT ${CARD_COLUMNS} FROM blog_posts WHERE status = 'published' ${where}
+    `SELECT ${CARD_COLUMNS} FROM blog_posts WHERE ${LIVE} ${where}
      ORDER BY featured DESC, published_at DESC LIMIT ${Math.min(opts.limit ?? 60, 100)}`,
   );
   const { results } = await (opts.category ? stmt.bind(opts.category) : stmt).all<CardRow>();
@@ -51,7 +54,7 @@ export async function publishedPosts(db: D1Database, opts: { category?: string |
 
 export async function blogCategories(db: D1Database): Promise<{ name: string; count: number }[]> {
   const { results } = await db
-    .prepare(`SELECT category AS name, count(*) AS count FROM blog_posts WHERE status = 'published' AND category != '' GROUP BY category ORDER BY count DESC, name`)
+    .prepare(`SELECT category AS name, count(*) AS count FROM blog_posts WHERE ${LIVE} AND category != '' GROUP BY category ORDER BY count DESC, name`)
     .all<{ name: string; count: number }>();
   return results;
 }
@@ -60,7 +63,7 @@ export async function publishedPost(db: D1Database, slug: string): Promise<Post 
   const row = await db
     .prepare(
       `SELECT ${CARD_COLUMNS}, body_html AS bodyHtml, seo_title AS seoTitle, seo_description AS seoDescription, updated_at AS updatedAt
-       FROM blog_posts WHERE slug = ? AND status = 'published'`,
+       FROM blog_posts WHERE slug = ? AND ${LIVE}`,
     )
     .bind(slug)
     .first<CardRow & { bodyHtml: string; seoTitle: string | null; seoDescription: string | null; updatedAt: string }>();
@@ -73,7 +76,7 @@ export async function publishedPost(db: D1Database, slug: string): Promise<Post 
 export async function relatedPosts(db: D1Database, post: Pick<PostCard, 'id' | 'category'>, limit = 3): Promise<PostCard[]> {
   const { results } = await db
     .prepare(
-      `SELECT ${CARD_COLUMNS} FROM blog_posts WHERE status = 'published' AND id != ?
+      `SELECT ${CARD_COLUMNS} FROM blog_posts WHERE ${LIVE} AND id != ?
        ORDER BY (category = ? AND category != '') DESC, published_at DESC LIMIT ?`,
     )
     .bind(post.id, post.category, limit)
@@ -99,6 +102,10 @@ export type AdminPost = {
   publishedAt: string | null;
   updatedAt: string;
 };
+
+/** "HH:MM" in Dhaka for a stored UTC time, or the morning when there is none. */
+export const dhakaTime = (iso: string | null) => (iso ? new Date(Date.parse(iso) + 6 * 3_600_000).toISOString().slice(11, 16) : '09:00');
+export const dhakaDate = (iso: string | null) => (iso ? new Date(Date.parse(iso) + 6 * 3_600_000).toISOString().slice(0, 10) : '');
 
 const log = (db: D1Database, actor: string, action: string, id: string, detail: unknown = {}) =>
   db
@@ -166,9 +173,11 @@ export type PostInput = {
   seoDescription: string;
   /** "YYYY-MM-DD"; empty keeps the existing date (or today on first publish). */
   publishedDate: string;
+  /** "HH:MM" Dhaka time; with a future date and status published the post is scheduled. */
+  publishedTime: string;
 };
 
-export type PostFormResult = { ok: true; value: PostInput } | { ok: false; error: 'title' | 'slug' | 'status' | 'date' };
+export type PostFormResult = { ok: true; value: PostInput } | { ok: false; error: 'title' | 'slug' | 'status' | 'date' | 'time' };
 
 export function parsePostForm(form: FormData): PostFormResult {
   const s = (k: string, max: number) => String(form.get(k) ?? '').trim().slice(0, max);
@@ -180,6 +189,8 @@ export function parsePostForm(form: FormData): PostFormResult {
   if (status !== 'draft' && status !== 'published') return { ok: false, error: 'status' };
   const publishedDate = s('publishedDate', 10);
   if (publishedDate && !/^\d{4}-\d{2}-\d{2}$/.test(publishedDate)) return { ok: false, error: 'date' };
+  const publishedTime = s('publishedTime', 5);
+  if (publishedTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(publishedTime)) return { ok: false, error: 'time' };
   return {
     ok: true,
     value: {
@@ -195,6 +206,7 @@ export function parsePostForm(form: FormData): PostFormResult {
       seoTitle: s('seoTitle', 120),
       seoDescription: s('seoDescription', 300),
       publishedDate,
+      publishedTime,
     },
   };
 }
@@ -206,8 +218,9 @@ export async function updatePost(db: D1Database, bucket: R2Bucket, actor: string
   if (slug !== before.slug && (await db.prepare('SELECT 1 FROM blog_posts WHERE slug = ? AND id != ?').bind(slug, id).first())) return 'slug';
   const body = sanitizeBlogHtml(v.bodyHtml);
   const excerpt = v.excerpt || blogText(body).slice(0, 220);
+  // The date and time the editor sees are Dhaka time (UTC+6); stored as UTC.
   const publishedAt = v.publishedDate
-    ? `${v.publishedDate}T${(before.publishedAt ?? new Date().toISOString()).slice(11)}`
+    ? new Date(`${v.publishedDate}T${v.publishedTime || dhakaTime(before.publishedAt)}:00+06:00`).toISOString()
     : before.publishedAt ?? (v.status === 'published' ? new Date().toISOString() : null);
   await db
     .prepare(

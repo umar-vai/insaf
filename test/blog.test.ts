@@ -30,6 +30,7 @@ const input = (over: Partial<PostInput> = {}): PostInput => ({
   seoTitle: '',
   seoDescription: '',
   publishedDate: '',
+  publishedTime: '',
   ...over,
 });
 
@@ -166,5 +167,19 @@ describe('the public blog', () => {
       { name: 'B', count: 1 },
     ]);
     expect((await relatedPosts(db, { id: old, category: 'A' })).map((p) => p.title)).toEqual(['Pinned', 'New one']);
+  });
+});
+
+describe('scheduling', () => {
+  it('hides a scheduled notice until its time, then shows it', async () => {
+    const n = await createPost(db, 'a@x.org', 'Later');
+    if (!n.ok) throw new Error('create');
+    await updatePost(db, bucket, 'a@x.org', n.id, input({ title: 'Later', publishedDate: '2999-01-01', publishedTime: '10:30' }));
+    expect(await publishedPosts(db)).toEqual([]);
+    const row = await db.prepare('SELECT published_at AS at FROM blog_posts WHERE id = ?').bind(n.id).first<{ at: string }>();
+    // 10:30 in Dhaka is 04:30 UTC.
+    expect(row?.at).toBe('2999-01-01T04:30:00.000Z');
+    await db.prepare("UPDATE blog_posts SET published_at = '2020-01-01T00:00:00.000Z' WHERE id = ?").bind(n.id).run();
+    expect((await publishedPosts(db)).map((p) => p.title)).toEqual(['Later']);
   });
 });

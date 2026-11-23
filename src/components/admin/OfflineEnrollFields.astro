@@ -13,8 +13,10 @@ interface Props {
   today: string;
   /** When true the course may be left empty (enrol later). */
   optional?: boolean;
+  /** Course to preselect (the department an applicant asked for). */
+  selected?: string;
 }
-const { courses, batches, today, optional = false } = Astro.props;
+const { courses, batches, today, optional = false, selected = '' } = Astro.props;
 ---
 
 <div class="enroll wide" data-enroll>
@@ -24,7 +26,7 @@ const { courses, batches, today, optional = false } = Astro.props;
       {optional && <option value="">এখন না, পরে ভর্তি করব</option>}
       {
         courses.map((c) => (
-          <option value={c.id} data-fee={c.feeMinor} data-admission={c.admissionFeeMinor} data-months={c.durationMonths}>
+          <option value={c.id} selected={c.id === selected} data-fee={c.feeMinor} data-admission={c.admissionFeeMinor} data-months={c.durationMonths}>
             {c.title} ({taka(c.feeMinor)}, {durationBn(c.durationMonths)})
           </option>
         ))

@@ -10,10 +10,12 @@ import { listFunds } from '../server/donations';
 import { publishedPosts } from '../server/blog';
 import { LAND } from '../lib/land';
 import { FOUNDER, SITE, whatsappUrl } from '../lib/site';
-import { DEPARTMENTS, FACILITIES } from '../lib/madrasa';
+import FeatureList from '../components/FeatureList.astro';
+import { publicDepartments } from '../server/departments';
+import { ADMISSION_CLASSES, FACILITIES } from '../lib/madrasa';
 import { bnDigits, dateBn } from '../lib/format';
 
-const [funds, posts] = await Promise.all([listFunds(env.DB), publishedPosts(env.DB, { limit: 6 })]);
+const [funds, posts, departments] = await Promise.all([listFunds(env.DB), publishedPosts(env.DB, { limit: 6 }), publicDepartments(env.DB)]);
 const buy = funds.find((f) => f.slug === LAND.fund);
 const members = funds.find((f) => f.slug === LAND.memberFund);
 const landRaised = (buy?.raisedMinor ?? 0) + (members?.raisedMinor ?? 0);
@@ -86,15 +88,24 @@ Astro.response.headers.set('Cache-Control', error ? 'no-store' : 'public, max-ag
       <SectionHead eyebrow="শিক্ষা কার্যক্রম" title="মাদরাসাতুল ইনসাফের বিভাগসমূহ" />
       <div class="depts">
         {
-          DEPARTMENTS.map((d, i) => (
+          departments.map((d, i) => (
             <article class="dept" data-reveal>
               <span class="dept__no">{bnDigits(String(i + 1).padStart(2, '0'))}</span>
               <h3>{d.title}</h3>
-              <p>{d.text}</p>
+              {d.summary && <p>{d.summary}</p>}
+              <a class="dept__apply" href={`/admission/apply?dept=${d.slug}`}>ভর্তির আবেদন <Icon name="arrow" size={16} /></a>
             </article>
           ))
         }
       </div>
+    </div>
+  </section>
+
+  <section class="section section--tint">
+    <div class="container">
+      <SectionHead eyebrow="আমাদের বৈশিষ্ট্যসমূহ" title="কেন আপনার সন্তান এখানে নিরাপদ ও সমৃদ্ধ হবে" lead={`ভর্তি চলছে: ${ADMISSION_CLASSES}`} />
+      <FeatureList />
+      <p class="admit-cta"><a class="button" href="/admission/apply">অনলাইনে ভর্তির আবেদন <Icon name="arrow" size={18} /></a> <a class="button button--ghost" href="/blog">ভর্তির বিজ্ঞপ্তি দেখুন</a></p>
     </div>
   </section>
 
@@ -298,6 +309,19 @@ Astro.response.headers.set('Cache-Control', error ? 'no-store' : 'public, max-ag
     object-position: center;
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
+  }
+  .admit-cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-top: var(--space-6);
+  }
+  .dept__apply {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin-top: var(--space-3);
+    font-weight: 600;
   }
   .depts {
     display: grid;

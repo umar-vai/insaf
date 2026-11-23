@@ -4,15 +4,16 @@
 // corrects an application. Class `ui` must be on an ancestor (panel.css).
 import type { ApplicationDetails } from '../server/admission';
 import { BLOOD_GROUPS, RESIDENCE_BN, RESIDENCES } from '../server/admission';
-import { DEPARTMENTS } from '../lib/madrasa';
+import type { PublicDepartment } from '../server/departments';
 
 interface Props {
   v?: Partial<ApplicationDetails>;
-  /** A department key from a link on the admission page. */
+  departments: readonly Pick<PublicDepartment, 'id' | 'title'>[];
+  /** A department id or slug from a link on the admission page. */
   pickedDept?: string;
 }
-const { v = {}, pickedDept = '' } = Astro.props;
-const dept = v.department ?? DEPARTMENTS.find((d) => d.key === pickedDept)?.title ?? '';
+const { v = {}, departments, pickedDept = '' } = Astro.props;
+const dept = v.courseId ?? (departments as readonly PublicDepartment[]).find((d) => d.id === pickedDept || d.slug === pickedDept)?.id ?? '';
 const sameAddress = v.curVillage === undefined ? true : v.curVillage === v.permVillage && v.curPost === v.permPost && v.curThana === v.permThana && v.curDistrict === v.permDistrict;
 ---
 
@@ -45,9 +46,9 @@ const sameAddress = v.curVillage === undefined ? true : v.curVillage === v.permV
 
 <h3>পড়াশোনা</h3>
 <label class="field"><span>যে বিভাগে ভর্তি হতে চান</span>
-  <select name="department" required>
+  <select name="courseId" required>
     <option value="">বিভাগ বাছাই করুন</option>
-    {DEPARTMENTS.map((d) => <option value={d.title} selected={d.title === dept}>{d.title}</option>)}
+    {departments.map((d) => <option value={d.id} selected={d.id === dept}>{d.title}</option>)}
   </select>
 </label>
 <label class="field"><span>যে শ্রেণিতে ভর্তি হতে ইচ্ছুক</span><input name="desiredClass" required maxlength="120" value={v.desiredClass ?? ''} /></label>

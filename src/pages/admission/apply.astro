@@ -10,6 +10,7 @@ import { IMAGE_TYPES, storeUpload } from '../../server/files';
 import { sameOrigin } from '../../server/session';
 import { GUARDIAN_PLEDGE, STUDENT_PLEDGE } from '../../lib/pledges';
 import { todayDhaka } from '../../lib/offline';
+import { publicDepartments } from '../../server/departments';
 
 // The full admission form: student and guardian details, a photo, then both
 // pledges signed by typed name. Rate limited per address, with a hidden field
@@ -37,6 +38,7 @@ const ERR: Record<string, string> = {
   too_many: 'অল্প সময়ে অনেকবার পাঠানো হয়েছে। এক মিনিট পরে আবার চেষ্টা করুন।',
   failed: 'পাঠানো যায়নি, আবার চেষ্টা করুন।',
 };
+const departments = await publicDepartments(env.DB);
 let error = '';
 let values: Partial<ApplicationDetails> = {};
 let signNames = { student: '', guardian: '' };
@@ -52,7 +54,7 @@ if (Astro.request.method === 'POST') {
     if (String(form.get('website') ?? '') !== '') return Astro.redirect(`${here}?done=0`, 303);
     values = Object.fromEntries([...form.entries()].filter(([, v]) => typeof v === 'string')) as Partial<ApplicationDetails>;
     signNames = { student: String(form.get('studentSignName') ?? ''), guardian: String(form.get('guardianSignName') ?? '') };
-    const d = parseApplicationDetails(form, todayDhaka());
+    const d = parseApplicationDetails(form, todayDhaka(), departments);
     const s = parseSignatures(form);
     if (!d.ok) error = d.error;
     else if (!s.ok) error = s.error;
@@ -92,7 +94,7 @@ const doneNo = done && /^\d{1,6}$/.test(done) ? Number(done) : 0;
             <img data-preview alt="" width="96" height="120" hidden />
             <label class="field"><span>শিক্ষার্থীর পাসপোর্ট সাইজ ছবি (আইডি কার্ডে বসবে)</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required data-photo /></label>
           </div>
-          <AdmissionFields v={values} pickedDept={q.get('dept') ?? ''} />
+          <AdmissionFields departments={departments} v={values} pickedDept={q.get('dept') ?? ''} />
           <label class="hp" aria-hidden="true">ওয়েবসাইট <input name="website" tabindex="-1" autocomplete="off" /></label>
           <p class="wide muted"><small>ভর্তি ও ফরমের টাকা অফেরতযোগ্য। এই তথ্য শুধু ভর্তির কাজে মাদরাসার অফিস দেখবে।</small></p>
           <button type="button" class="button" data-next>পরের ধাপ: অঙ্গীকারনামা <Icon name="arrow" /></button>
