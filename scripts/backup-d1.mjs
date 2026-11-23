@@ -23,8 +23,11 @@ const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 const file = path.join(out, `d1-${env}-${stamp}.sql`);
 mkdirSync(out, { recursive: true });
 
-const wrangler = (args) => execFileSync('npx', ['wrangler', ...args, '--config', 'wrangler.jsonc'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-const TABLES = ['students', 'enrollments', 'courses', 'lessons', 'lesson_progress', 'orders', 'offline_students', 'offline_payments', 'expenses', 'payroll'];
+// On Windows npx is npx.cmd, which needs a shell, so quote any argument with spaces.
+const win = process.platform === 'win32';
+const quote = (a) => (win && /[\s()*,]/.test(a) ? `"${a}"` : a);
+const wrangler = (args) => execFileSync('npx', ['wrangler', ...args, '--config', 'wrangler.jsonc'].map(quote), { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], shell: win });
+const TABLES = ['students', 'teachers', 'staff', 'offline_students', 'offline_courses', 'offline_batches', 'offline_enrollments', 'offline_payments', 'donations', 'funds', 'expenses', 'payroll'];
 const countSql = `SELECT ${TABLES.map((t) => `(SELECT count(*) FROM ${t}) AS ${t}`).join(', ')}`;
 const counts = (text) => JSON.parse(text.slice(text.indexOf('[')))[0].results[0];
 
