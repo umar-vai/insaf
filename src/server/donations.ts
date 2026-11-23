@@ -2,6 +2,7 @@ import { log } from './admin';
 import type { Validation } from './sslcommerz';
 import { renderText } from '../lib/text';
 import { isYmd, todayDhaka } from '../lib/offline';
+import { withLandMemberTerms } from '../lib/land';
 
 // Donations to the madrasa's funds.
 //
@@ -54,11 +55,11 @@ export async function listFunds(db: D1Database, opts: { all?: boolean } = {}): P
        GROUP BY f.id ORDER BY f.position, f.title`,
     )
     .all<FundWithTotals>();
-  return results;
+  return results.map(withLandMemberTerms);
 }
 
 export async function fundBySlug(db: D1Database, slug: string): Promise<FundWithTotals | null> {
-  return db
+  const row = await db
     .prepare(
       `SELECT ${FUND_COLS},
          coalesce(sum(CASE WHEN ${COUNTED} THEN d.amount_minor END), 0) AS raisedMinor,
@@ -68,6 +69,7 @@ export async function fundBySlug(db: D1Database, slug: string): Promise<FundWith
     )
     .bind(slug)
     .first<FundWithTotals>();
+  return row ? withLandMemberTerms(row) : null;
 }
 
 export const fundById = (db: D1Database, id: string) => db.prepare(`SELECT ${FUND_COLS} FROM funds f WHERE f.id = ?`).bind(id).first<Fund>();

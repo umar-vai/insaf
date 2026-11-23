@@ -6,6 +6,8 @@ import Icon from '../../components/Icon.astro';
 import DonateForm from '../../components/donate/DonateForm.astro';
 import FundProgress from '../../components/donate/FundProgress.astro';
 import BankCard from '../../components/donate/BankCard.astro';
+import FoundationPaymentDetails from '../../components/donate/FoundationPaymentDetails.astro';
+import '../../styles/land-foundation.css';
 import BarChart from '../../components/admin/BarChart.astro';
 import { fundBySlug, fundUpdates, listFunds, monthlyTotals, recentGifts, storyHtml } from '../../server/donations';
 import { LAND } from '../../lib/land';
@@ -21,9 +23,12 @@ const error = Astro.url.searchParams.get('error');
 const amount = Number(Astro.url.searchParams.get('amount')) || undefined;
 Astro.response.headers.set('Cache-Control', error || amount ? 'no-store' : 'public, max-age=30, s-maxage=60');
 const hasMoney = months.some((m) => m.minor > 0);
+// Land donor members give to the Tamrin Foundation's land project, so the
+// foundation's bank and MFS details show here, not the madrasa's.
+const isMember = fund.slug === LAND.memberFund;
 ---
 
-<Base title={fund.title} description={fund.summary || `${fund.title}: মাদরাসাতুল ইনসাফে দান করুন।`}>
+<Base title={fund.title} description={fund.summary || `${fund.title}: মাদরাসাতুল ইনসাফে দান করুন।`} foundationTheme={isMember}>
   <PageHero eyebrow="তহবিল" title={fund.title} lead={fund.summary} crumbs={[{ href: '/donate', label: 'দান' }, { href: `/donate/${fund.slug}`, label: fund.title }]}>
     <div class="hero-progress">
       <FundProgress raisedMinor={fund.raisedMinor} goalMinor={fund.goalMinor} donors={fund.donors} gifts={fund.gifts} memberGoal={fund.memberGoal} onDark />
@@ -85,10 +90,11 @@ const hasMoney = months.some((m) => m.minor > 0);
       </div>
       <aside class="side">
         <DonateForm funds={funds} fund={fund.slug} amount={amount} title={`${fund.title} এ দান`} from={`/donate/${fund.slug}`} error={error} />
-        <BankCard />
+        {!isMember && <BankCard />}
       </aside>
     </div>
   </section>
+  {isMember && <FoundationPaymentDetails />}
 </Base>
 
 <style>
