@@ -1,0 +1,120 @@
+---
+import { env } from 'cloudflare:workers';
+import { institute } from '../../../../../server/config';
+import { ageOn, applicationCode, curAddress, getApplication, permAddress, RESIDENCE_BN } from '../../../../../server/admission';
+import { GUARDIAN_PLEDGE, STUDENT_PLEDGE } from '../../../../../lib/pledges';
+import { todayDhaka } from '../../../../../lib/offline';
+import { bnDigits, dateBn, taka } from '../../../../../lib/format';
+
+// The application as the madrasa's printed form: the details with the photo,
+// then the student's and the guardian's pledges with the signed names. Staff only.
+const a = await getApplication(env.DB, Astro.params.id!);
+if (!a) return new Response('Not found', { status: 404 });
+const inst = await institute(env.DB);
+const age = ageOn(a.birthDate, todayDhaka());
+const line = (label: string, value: string) => ({ label, value });
+const fields = [
+  line('শিক্ষার্থীর নাম', a.studentName),
+  line('জন্ম তারিখ', a.birthDate ? `${dateBn(a.birthDate)}${age !== null ? ` (বয়স ${bnDigits(age)} বছর)` : ''}` : ''),
+  line('পিতার নাম', a.fatherName),
+  line('পিতার পেশা', a.fatherOccupation),
+  line('স্থায়ী ঠিকানা', permAddress(a)),
+  line('বর্তমান ঠিকানা', curAddress(a)),
+  line('বিগত বছর যে শ্রেণিতে পড়েছিল', a.prevClass),
+  line('যে বিভাগে ও শ্রেণিতে ভর্তি হতে ইচ্ছুক', [a.department, a.desiredClass].filter(Boolean).join(', ')),
+  line('পূর্ববর্তী শিক্ষা প্রতিষ্ঠানের নাম', a.prevInstitute),
+  line('রক্তের গ্রুপ', a.bloodGroup),
+  line('আবাসিক / অনাবাসিক / ডে-কেয়ার', RESIDENCE_BN[a.residence]),
+  line('অভিভাবকের নাম', a.guardianName),
+  line('অভিভাবকের পেশা', a.guardianOccupation),
+  line('জাতীয় পরিচয়পত্র নম্বর', a.guardianNid ? bnDigits(a.guardianNid) : ''),
+  line('অভিভাবকের মোবাইল', bnDigits(a.phone)),
+  line('আনা-নেওয়া করবেন', [a.pickupName, a.pickupPhone && bnDigits(a.pickupPhone), a.pickupAddress].filter(Boolean).join(', ')),
+];
+const pledges = [
+  { p: STUDENT_PLEDGE, name: a.studentSignName, at: a.studentSignedAt, who: 'শিক্ষার্থীর স্বাক্ষর', lead: 'আমি' },
+  { p: GUARDIAN_PLEDGE, name: a.guardianSignName, at: a.guardianSignedAt, who: 'অভিভাবকের স্বাক্ষর', lead: 'আমি' },
+];
+---
+
+<!doctype html>
+<html lang="bn">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>ভর্তির আবেদন {applicationCode(a.appNo)}</title>
+    <style>
+      :root { color-scheme: light; }
+      body { margin: 0; background: #eef4ef; font-family: 'Hind Siliguri', 'Nirmala UI', system-ui, sans-serif; color: #10261b; }
+      .tools { text-align: center; margin: 16px; }
+      .tools button { font: inherit; padding: 10px 20px; border-radius: 8px; border: 0; background: #0b3d2a; color: #fff; cursor: pointer; }
+      .sheet { width: 190mm; min-height: 270mm; box-sizing: border-box; margin: 0 auto 16px; padding: 10mm; background: #fffdf5; box-shadow: 0 2px 10px rgb(0 0 0 / 0.12); break-after: page; }
+      .head { display: flex; align-items: center; justify-content: space-between; gap: 8mm; background: #073d26; color: #e3c27a; border-radius: 3mm; padding: 4mm 6mm; }
+      .head img { height: 16mm; background: #fff; border-radius: 2mm; padding: 1mm 2mm; }
+      .head h1 { margin: 0; font-size: 7mm; }
+      .head p { margin: 1mm 0 0; font-size: 3.2mm; color: #fff; }
+      .meta { display: flex; justify-content: space-between; margin: 4mm 0; font-weight: 700; }
+      .title { text-align: center; margin: 3mm 0 5mm; }
+      .title span { display: inline-block; background: #c9a24e; color: #04261a; font-weight: 800; padding: 1.5mm 10mm; border-radius: 9mm; font-size: 5mm; }
+      .top { display: grid; grid-template-columns: 1fr 34mm; gap: 6mm; align-items: start; }
+      .photo { width: 34mm; height: 42mm; border: 0.3mm solid #10261b; object-fit: cover; }
+      .row { display: grid; grid-template-columns: 62mm 1fr; border-bottom: 0.25mm dotted #4b6357; padding: 1.6mm 0; font-size: 3.8mm; }
+      .row b { font-weight: 600; color: #345; }
+      .office { margin-top: 6mm; }
+      .office h2 { font-size: 4.6mm; background: #c9a24e; display: inline-block; padding: 1mm 6mm; border-radius: 6mm; margin: 0 0 2mm; }
+      .signs { display: flex; justify-content: space-between; margin-top: 18mm; font-size: 3.6mm; }
+      .signs span { border-top: 0.3mm solid #10261b; padding-top: 1mm; min-width: 45mm; text-align: center; }
+      .pledge h2 { text-align: center; margin: 0 0 4mm; font-size: 6mm; color: #073d26; }
+      .pledge p { font-size: 3.7mm; line-height: 1.55; }
+      .pledge ol { padding-left: 6mm; margin: 3mm 0; font-size: 3.6mm; line-height: 1.55; }
+      .pledge ol li { margin-bottom: 1.2mm; }
+      .pledge .note { background: #c9a24e; padding: 2mm 4mm; border-radius: 2mm; font-weight: 700; }
+      .signed { margin-top: 8mm; display: flex; justify-content: space-between; align-items: flex-end; gap: 6mm; }
+      .signed .name { font-size: 5mm; font-weight: 700; border-bottom: 0.3mm solid #10261b; min-width: 70mm; padding: 0 2mm 1mm; }
+      .signed small { display: block; color: #4b6357; margin-top: 1mm; }
+      @media print {
+        body { background: #fff; }
+        .tools { display: none; }
+        .sheet { box-shadow: none; margin: 0; width: auto; min-height: 0; }
+        @page { size: A4; margin: 8mm; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tools"><button type="button" onclick="print()">প্রিন্ট বা PDF</button></div>
+    <section class="sheet">
+      <div class="head">
+        <img src={inst.logo} alt={inst.name} />
+        <div><h1>{inst.name}</h1><p>{inst.address}{inst.phone && ` · ফোন ${bnDigits(inst.phone)}`}</p></div>
+      </div>
+      <div class="meta"><span>ফরম নং: {applicationCode(a.appNo)}</span><span>ভর্তির তারিখ: {dateBn(a.createdAt)}</span></div>
+      <div class="title"><span>ভর্তির আবেদনপত্র</span></div>
+      <div class="top">
+        <div>
+          {fields.map((f) => f.value && <div class="row"><b>{f.label}</b><span>{f.value}</span></div>)}
+        </div>
+        <img class="photo" src={`/admin/offline/applications/${a.id}/photo`} alt="ছবি" />
+      </div>
+      <div class="office">
+        <h2>প্রতিষ্ঠানের জন্য পূরণীয়</h2>
+        <div class="row"><b>ভর্তি পরীক্ষার নম্বর</b><span>{a.examMarks}</span></div>
+        <div class="row"><b>পরীক্ষকের নাম</b><span>{a.examinerName}</span></div>
+        <div class="row"><b>ধার্যকৃত অর্থ</b><span>{a.feeMinor ? taka(a.feeMinor) : ''}</span></div>
+      </div>
+      <div class="signs"><span>শিক্ষাসচিবের স্বাক্ষর</span><span>মুহতামিমের স্বাক্ষর</span></div>
+    </section>
+    {pledges.map(({ p, name, at, who }) => (
+      <section class="sheet pledge">
+        <h2>{p.title}</h2>
+        <p>{p.intro}</p>
+        <ol>{p.points.map((t) => <li>{t}</li>)}</ol>
+        <p class="note">{p.note}</p>
+        <div class="signed">
+          <div><div class="name">{name}</div><small>{who} (নাম লিখে সম্মতি) · {dateBn(at, true)}</small></div>
+          <small>আবেদন {applicationCode(a.appNo)}</small>
+        </div>
+      </section>
+    ))}
+  </body>
+</html>

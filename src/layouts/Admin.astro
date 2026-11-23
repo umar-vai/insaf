@@ -38,7 +38,8 @@ const OFFLINE: Group[] = [
     label: 'ছাত্র ও ফি',
     items: [
       { href: '/admin/offline/students', label: 'ছাত্র ও ভর্তি', icon: 'users' },
-      { href: '/admin/offline/inquiries', label: 'ভর্তির আবেদন', icon: 'child' },
+      { href: '/admin/offline/applications', label: 'ভর্তির আবেদন', icon: 'child' },
+      { href: '/admin/offline/inquiries', label: 'পুরোনো ছোট আবেদন', icon: 'phone' },
       { href: '/admin/offline/crm', label: 'যোগাযোগ ও ফলো আপ', icon: 'phone' },
       { href: '/admin/offline/collect', label: 'ফি আদায়', icon: 'coins' },
       { href: '/admin/offline/bills', label: 'একসাথে ফি বিল', icon: 'receipt' },
@@ -97,6 +98,7 @@ const TASK_HINTS: Record<string, string> = {
   '/admin/offline': 'মাদরাসা দৈনিক সারাংশ, ছাত্র ফি ও আজকের ক্লাস',
   '/admin/offline/students': 'নতুন ভর্তি, ছাত্র প্রোফাইল, অভিভাবকের ফোন, আইডি কার্ড, রেকর্ড খুঁজুন',
   '/admin/offline/collect': 'ছাত্রের ফি নিন, টাকা আদায়, মানি রসিদ তৈরি',
+  '/admin/offline/applications': 'ভর্তির আবেদন ফরম অঙ্গীকারনামা স্বাক্ষর ছবি গ্রহণ প্রত্যাখ্যান নতুন ছাত্র',
   '/admin/offline/inquiries': 'ওয়েবসাইট থেকে ভর্তির আবেদন অনুসন্ধান অভিভাবকের ফোন',
   '/admin/offline/bills': 'মাসিক বেতন ফি বিল একসাথে সব ছাত্রের ইনভয়েস ছাড় এতিম বকেয়া বিল প্রিন্ট',
   '/admin/offline/certificates': 'ছাড়পত্র টিসি ট্রান্সফার সার্টিফিকেট চারিত্রিক সনদ প্রত্যয়নপত্র যাচাই',

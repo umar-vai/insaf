@@ -64,3 +64,14 @@ export async function downloadResponse(bucket: R2Bucket, key: string, fileName: 
     },
   });
 }
+
+/** Streams a stored image inline (never any other type), for pages that check who is asking first. */
+export async function imageResponse(bucket: R2Bucket, key: string): Promise<Response> {
+  if (!key) return new Response('Not found', { status: 404 });
+  const object = await bucket.get(key);
+  const type = object?.httpMetadata?.contentType ?? '';
+  if (!object || !/^image\/(jpeg|png|webp)$/.test(type)) return new Response('Not found', { status: 404 });
+  return new Response(object.body, {
+    headers: { 'Content-Type': type, 'Cache-Control': 'private, max-age=300', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'" },
+  });
+}

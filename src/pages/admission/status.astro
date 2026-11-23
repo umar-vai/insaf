@@ -1,0 +1,56 @@
+---
+import { env } from 'cloudflare:workers';
+import Base from '../../layouts/Base.astro';
+import PageHero from '../../components/PageHero.astro';
+import '../../styles/panel.css';
+import { applicationCode, APPLICATION_STATUS_BN, statusFor } from '../../server/admission';
+import { dateBn } from '../../lib/format';
+
+// A family checks their application with the number they were given and the
+// mobile number they wrote on the form. Both must match; the rate limit keeps
+// anyone from guessing numbers.
+Astro.response.headers.set('Cache-Control', 'no-store');
+Astro.response.headers.set('X-Robots-Tag', 'noindex');
+const q = Astro.url.searchParams;
+const no = q.get('no') ?? '';
+const phone = q.get('phone') ?? '';
+let limited = false;
+let found = null;
+if (no && phone) {
+  const ip = Astro.request.headers.get('CF-Connecting-IP') ?? 'local';
+  if (env.LOGIN_LIMITER && !(await env.LOGIN_LIMITER.limit({ key: `status:${ip}` })).success) limited = true;
+  else found = await statusFor(env.DB, no, phone);
+}
+---
+
+<Base title="আবেদনের অবস্থা" description="ভর্তির আবেদন নম্বর ও মোবাইল নম্বর দিয়ে আবেদনের অবস্থা দেখুন।">
+  <PageHero crumbs={[{ href: '/admission', label: 'ভর্তি' }, { href: '/admission/status', label: 'আবেদনের অবস্থা' }]} eyebrow="ভর্তি" title="আবেদনের অবস্থা" lead="আবেদন নম্বর (যেমন AP-0001) ও আবেদনে দেওয়া অভিভাবকের মোবাইল নম্বর লিখুন।" />
+  <section class="container st ui">
+    <form method="get" class="card form-grid">
+      <label class="field"><span>আবেদন নম্বর</span><input name="no" value={no} required maxlength="12" placeholder="AP-0001" autocomplete="off" /></label>
+      <label class="field"><span>মোবাইল নম্বর</span><input name="phone" type="tel" value={phone} required maxlength="25" inputmode="tel" /></label>
+      <button class="button">দেখুন</button>
+    </form>
+    {limited && <p class="note note--bad" role="alert">অল্প সময়ে অনেকবার চেষ্টা হয়েছে। এক মিনিট পরে আবার চেষ্টা করুন।</p>}
+    {no && phone && !limited && !found && <p class="note note--warn" role="status">এই নম্বর ও মোবাইল নম্বরের কোনো আবেদন পাওয়া যায়নি। নম্বর মিলিয়ে আবার দেখুন।</p>}
+    {found && (
+      <div class="card">
+        <h2>{found.studentName} <small class="muted">{applicationCode(found.appNo)}</small></h2>
+        <p>জমা দেওয়া হয়েছে: {dateBn(found.createdAt, true)}</p>
+        <p>অবস্থা: <span class={`pill pill--${found.status === 'accepted' ? 'paid' : found.status === 'rejected' ? 'failed' : 'pending'}`}>{APPLICATION_STATUS_BN[found.status]}</span></p>
+        {found.status === 'pending' && <p>অফিস আপনার আবেদন দেখছে। সিদ্ধান্ত হলে আপনাকে জানানো হবে।</p>}
+        {found.status === 'accepted' && <p>আলহামদুলিল্লাহ, আবেদন গৃহীত হয়েছে। অফিস আপনাকে ছাত্র প্যানেলে ঢোকার তথ্য দিবে। সেখানে আইডি কার্ড পাবেন। <a href="/account">ছাত্র প্যানেলে যান</a></p>}
+        {found.status === 'rejected' && (
+          <>
+            <p>দুঃখিত, এই আবেদন গ্রহণ করা যায়নি।</p>
+            {found.decisionNote && <p class="note note--warn">কারণ: {found.decisionNote}</p>}
+            <p>প্রশ্ন থাকলে অফিসে যোগাযোগ করুন।</p>
+          </>
+        )}
+      </div>
+    )}
+  </section>
+</Base>
+<style>
+  .st { max-width: 40rem; padding-block: var(--space-8); display: grid; gap: var(--space-4); }
+</style>

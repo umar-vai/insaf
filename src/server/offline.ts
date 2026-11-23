@@ -90,11 +90,14 @@ export type OfflineStudent = {
   note: string;
   status: 'active' | 'blocked';
   blockedReason: string;
+  /** Private R2 key of the admission photo; empty when there is none. */
+  photoKey: string;
+  applicationId: string | null;
   createdAt: string;
 };
-type StudentInput = Omit<OfflineStudent, 'id' | 'createdAt' | 'studentNo' | 'status' | 'blockedReason'>;
+type StudentInput = Omit<OfflineStudent, 'id' | 'createdAt' | 'studentNo' | 'status' | 'blockedReason' | 'photoKey' | 'applicationId'>;
 
-const STUDENT_COLS = `id, student_no AS studentNo, name, phone, guardian_phone AS guardianPhone, email, address, note, status, blocked_reason AS blockedReason, created_at AS createdAt`;
+const STUDENT_COLS = `id, student_no AS studentNo, name, phone, guardian_phone AS guardianPhone, email, address, note, status, blocked_reason AS blockedReason, photo_key AS photoKey, application_id AS applicationId, created_at AS createdAt`;
 export const isGmailish = (v: string) => /^[^\s@<>"',;]{1,64}@[a-z0-9.-]{1,190}\.[a-z]{2,}$/.test(v);
 
 const PHONE = /^\+?[0-9০-৯ -]{6,20}$/;

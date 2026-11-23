@@ -29,6 +29,7 @@ const alerts = ([
   { show: fuDue > 0, href: '/admin/offline/crm', icon: 'phone', tone: w.followupsOverdue ? 'bad' : 'warn', text: `আজ ${bnDigits(fuDue)} জনকে ফলো আপ করতে হবে${w.followupsOverdue > 0 ? ` (${bnDigits(w.followupsOverdue)}টির তারিখ পার)` : ''}।` },
   { show: w.feeReviews > 0, href: '/admin/offline/online-payments', icon: 'alert', tone: 'bad', text: `অনলাইনে আসা ${bnDigits(w.feeReviews)}টি ফি যাচাই করা দরকার।` },
   { show: w.lateBooks > 0, href: '/admin/offline/library', icon: 'book', tone: 'bad', text: `${bnDigits(w.lateBooks)}টি বইয়ের ফেরতের তারিখ পার হয়ে গেছে।` },
+  { show: w.newApplications > 0, href: '/admin/offline/applications', icon: 'child', tone: 'warn', text: `${bnDigits(w.newApplications)}টি নতুন ভর্তির আবেদন দেখা বাকি।` },
   { show: w.newInquiries > 0, href: '/admin/offline/inquiries', icon: 'child', tone: 'warn', text: `${bnDigits(w.newInquiries)}টি নতুন ভর্তির আবেদন দেখা বাকি।` },
   { show: w.openTickets > 0, href: '/admin/offline/tickets?status=open', icon: 'mail', tone: 'warn', text: `ছাত্র বা শিক্ষকের ${bnDigits(w.openTickets)}টি টিকেট উত্তরের অপেক্ষায়।` },
   { show: w.pendingExpenses > 0, href: '/admin/offline/expenses', icon: 'wallet', tone: 'warn', text: `${bnDigits(w.pendingExpenses)}টি বড় খরচ অনুমোদনের অপেক্ষায়।` },

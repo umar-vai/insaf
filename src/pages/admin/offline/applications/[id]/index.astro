@@ -1,0 +1,242 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../../layouts/Admin.astro';
+import Icon from '../../../../../components/Icon.astro';
+import AdmissionFields from '../../../../../components/AdmissionFields.astro';
+import EnrollFields from '../../../../../components/admin/OfflineEnrollFields.astro';
+import {
+  acceptApplication,
+  ageOn,
+  applicationCode,
+  APPLICATION_STATUS_BN,
+  curAddress,
+  getApplication,
+  parseApplicationDetails,
+  parseOfficeFields,
+  permAddress,
+  rejectApplication,
+  reopenApplication,
+  RESIDENCE_BN,
+  updateApplication,
+  type ApplicationStatus,
+} from '../../../../../server/admission';
+import { enrollOffline, listOfflineCourses, parseEnrollForm } from '../../../../../server/offline';
+import { listBatches } from '../../../../../server/office';
+import { grantPasswordLogin, phoneEmail } from '../../../../../server/password';
+import { normalizePhone } from '../../../../../server/account';
+import { PLEDGE_VERSION } from '../../../../../lib/pledges';
+import { SITE } from '../../../../../lib/site';
+import { todayDhaka, waNumber } from '../../../../../lib/offline';
+import { bnDigits, dateBn } from '../../../../../lib/format';
+
+const id = Astro.params.id!;
+const actor = Astro.locals.staff!;
+const today = todayDhaka();
+const here = `/admin/offline/applications/${id}`;
+const first = await getApplication(env.DB, id);
+if (!first) return new Response('Not found', { status: 404 });
+
+// After accepting, the family's login is shown once on this same response.
+let granted: { login: string; password: string | null; studentId: string } | null = null;
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  const fail = (e: string) => Astro.redirect(`${here}?error=${e}`, 303);
+  if (action === 'save') {
+    const o = parseOfficeFields(form);
+    if (!o.ok) return fail(o.error);
+    // Details are left alone when the office section alone is saved.
+    const d = form.has('studentName') ? parseApplicationDetails(form, today) : null;
+    if (d && !d.ok) return fail(d.error);
+    if (!(await updateApplication(env.DB, actor, id, d?.ok ? d.value : null, o.value))) return fail('missing');
+    return Astro.redirect(`${here}?saved=1`, 303);
+  }
+  if (action === 'accept') {
+    const enroll = form.get('courseId') ? parseEnrollForm(form) : null;
+    if (enroll && !enroll.ok) return fail(enroll.error);
+    const done = await acceptApplication(env.DB, actor, id);
+    if (!done) return fail('state');
+    if (enroll?.ok) await enrollOffline(env.DB, actor, done.studentId, enroll.value);
+    // One mobile number is one login for the whole family. If that login
+    // already has a password (a brother or sister), keep it and only link.
+    const phone = normalizePhone(first.phone);
+    if (phone) {
+      const existing = await env.DB.prepare('SELECT password_hash AS h FROM students WHERE lower(email) = lower(?)').bind(phoneEmail(phone)).first<{ h: string | null }>();
+      if (existing?.h) {
+        await env.DB.prepare('UPDATE offline_students SET email = ? WHERE id = ?').bind(phoneEmail(phone), done.studentId).run();
+        granted = { login: phone, password: null, studentId: done.studentId };
+      } else {
+        const g = await grantPasswordLogin(env.DB, actor, 'student', done.studentId);
+        if (g.ok) granted = { login: g.login, password: g.password, studentId: done.studentId };
+      }
+    }
+    if (!granted) return Astro.redirect(`/admin/offline/students/${done.studentId}?saved=1`, 303);
+  }
+  if (action === 'reject') {
+    if (!(await rejectApplication(env.DB, actor, id, String(form.get('reason') ?? '')))) return fail('reason');
+    return Astro.redirect(`${here}?saved=1`, 303);
+  }
+  if (action === 'reopen') {
+    if (!(await reopenApplication(env.DB, actor, id))) return fail('state');
+    return Astro.redirect(`${here}?saved=1`, 303);
+  }
+}
+
+const a = (await getApplication(env.DB, id))!;
+const q = Astro.url.searchParams;
+const ERR: Record<string, string> = {
+  state: 'এই আবেদনের অবস্থা এর মধ্যে বদলে গেছে। পাতাটি নতুন করে খুলুন।',
+  reason: 'প্রত্যাখ্যানের কারণ লিখুন (অন্তত ৩ অক্ষর)।',
+  fee: 'ধার্যকৃত অর্থ সংখ্যায় লিখুন।',
+  missing: 'আবেদনটি পাওয়া যায়নি।',
+};
+const [courses, batches] = a.status === 'pending' ? await Promise.all([listOfflineCourses(env.DB, false), listBatches(env.DB, { activeOnly: true })]) : [[], []];
+const PILL: Record<ApplicationStatus, string> = { pending: 'pending', accepted: 'paid', rejected: 'failed' };
+const age = ageOn(a.birthDate, today);
+const wa = waNumber(a.phone);
+const site = new URL('/account', Astro.url).href;
+const loginMessage = granted?.password
+  ? `আসসালামু আলাইকুম। ${SITE.nameBn} এ ${a.studentName} এর ভর্তির আবেদন গৃহীত হয়েছে। আলহামদুলিল্লাহ। ছাত্র প্যানেলে লগইন করুন:\n${site}\nমোবাইল: ${granted.login}\nপাসওয়ার্ড: ${granted.password}\nপ্যানেলে আইডি কার্ড দেখতে পাবেন।`
+  : '';
+const rejectMessage = `আসসালামু আলাইকুম। ${SITE.nameBn} এ ${a.studentName} এর ভর্তির আবেদন (${applicationCode(a.appNo)}) গ্রহণ করা যায়নি।${a.decisionNote ? `\nকারণ: ${a.decisionNote}` : ''}\nপ্রশ্ন থাকলে অফিসে যোগাযোগ করুন।`;
+const Row = (label: string, value: string) => ({ label, value });
+const rows = [
+  Row('জন্ম তারিখ', a.birthDate ? `${dateBn(a.birthDate)}${age !== null ? ` (বয়স ${bnDigits(age)} বছর)` : ''}` : ''),
+  Row('পিতার নাম', a.fatherName),
+  Row('পিতার পেশা', a.fatherOccupation),
+  Row('রক্তের গ্রুপ', a.bloodGroup),
+  Row('স্থায়ী ঠিকানা', permAddress(a)),
+  Row('বর্তমান ঠিকানা', curAddress(a)),
+  Row('বিভাগ', a.department),
+  Row('যে শ্রেণিতে ভর্তি হতে ইচ্ছুক', a.desiredClass),
+  Row('বিগত বছর পড়েছিল', a.prevClass),
+  Row('পূর্ববর্তী প্রতিষ্ঠান', a.prevInstitute),
+  Row('থাকার ধরন', RESIDENCE_BN[a.residence]),
+  Row('অভিভাবক', a.guardianName),
+  Row('অভিভাবকের পেশা', a.guardianOccupation),
+  Row('জাতীয় পরিচয়পত্র নম্বর', a.guardianNid ? bnDigits(a.guardianNid) : ''),
+  Row('অভিভাবকের মোবাইল', a.phone ? bnDigits(a.phone) : ''),
+  Row('আনা-নেওয়া করবেন', [a.pickupName, a.pickupPhone && bnDigits(a.pickupPhone), a.pickupAddress].filter(Boolean).join(', ')),
+].filter((r) => r.value);
+---
+
+<Admin title={`ভর্তির আবেদন ${applicationCode(a.appNo)}`}>
+  {granted ? (
+    <>
+      <header class="page-head">
+        <div>
+          <p class="eyebrow"><a href={here}>আবেদনে ফিরুন</a></p>
+          <h1>{a.studentName} ভর্তি হয়েছে</h1>
+          <p>ছাত্র তৈরি হয়েছে, আইডি কার্ড ছাত্র প্যানেলে খুলেছে।{granted.password ? ' এই পাসওয়ার্ড শুধু এখন একবার দেখা যাবে। লিখে নিন বা এখনই পাঠিয়ে দিন।' : ' এই মোবাইল নম্বরে আগে থেকেই লগইন আছে, ভাইবোনের সাথে একই লগইনে এই ছাত্রও দেখা যাবে। আগের পাসওয়ার্ড বদলানো হয়নি।'}</p>
+        </div>
+      </header>
+      <section class="card">
+        <dl class="creds">
+          <div><dt>লগইন (মোবাইল)</dt><dd>{bnDigits(granted.login)}</dd></div>
+          {granted.password && <div><dt>পাসওয়ার্ড</dt><dd class="pw">{granted.password}</dd></div>}
+          <div><dt>ঠিকানা</dt><dd>{site}</dd></div>
+        </dl>
+        <div class="actions">
+          {granted.password && wa && <a class="button button--wa" href={`https://wa.me/${wa}?text=${encodeURIComponent(loginMessage)}`} target="_blank" rel="noopener"><Icon name="whatsapp" /> WhatsApp এ পাঠান</a>}
+          {granted.password && wa && <a class="button button--ghost" href={`sms:+${wa}?body=${encodeURIComponent(loginMessage)}`}><Icon name="mail" /> SMS</a>}
+          <a class="button" href={`/admin/offline/students/${granted.studentId}`}>ছাত্রের প্রোফাইল খুলুন</a>
+        </div>
+      </section>
+    </>
+  ) : (
+    <>
+      <header class="page-head">
+        <div>
+          <p class="eyebrow"><a href="/admin/offline/applications">সব আবেদন</a></p>
+          <h1>{a.studentName} <small class="muted">{applicationCode(a.appNo)}</small></h1>
+          <p>জমা দেওয়া হয়েছে {dateBn(a.createdAt, true)} · <span class={`pill pill--${PILL[a.status]}`}>{APPLICATION_STATUS_BN[a.status]}</span></p>
+        </div>
+        <div class="actions">
+          <a class="button button--ghost" href={`${here}/print`} target="_blank" rel="noopener"><Icon name="printer" /> আবেদন প্রিন্ট</a>
+          {a.studentId && <a class="button" href={`/admin/offline/students/${a.studentId}`}>ছাত্রের প্রোফাইল</a>}
+        </div>
+      </header>
+      {q.has('saved') && <p class="note note--good" role="status">সংরক্ষিত হয়েছে।</p>}
+      {q.has('error') && <p class="note note--bad" role="alert">{ERR[q.get('error') ?? ''] ?? 'কাজটি করা যায়নি। তথ্য দেখে আবার চেষ্টা করুন।'}</p>}
+
+      <section class="card view">
+        <img class="photo" src={`${here}/photo`} alt={`${a.studentName} এর ছবি`} width="120" height="150" />
+        <dl class="info">
+          {rows.map((r) => <div><dt>{r.label}</dt><dd>{r.value}</dd></div>)}
+        </dl>
+      </section>
+
+      <section class="card">
+        <h2>অঙ্গীকারনামা ও স্বাক্ষর</h2>
+        <p class="muted">দুটি অঙ্গীকারনামার পুরো লেখা পড়ে (সংস্করণ {bnDigits(a.pledgeVersion)}{a.pledgeVersion !== PLEDGE_VERSION ? ', এখনকার লেখা থেকে আলাদা' : ''}) সম্মতি দিয়ে নাম লিখে স্বাক্ষর করা হয়েছে।</p>
+        <ul>
+          <li>শিক্ষার্থীর স্বাক্ষর: <strong>{a.studentSignName}</strong> · {dateBn(a.studentSignedAt, true)}</li>
+          <li>অভিভাবকের স্বাক্ষর: <strong>{a.guardianSignName}</strong> · {dateBn(a.guardianSignedAt, true)}</li>
+        </ul>
+      </section>
+
+      <form method="post" class="card form-grid" id="edit">
+        <input type="hidden" name="action" value="save" />
+        <h2 class="wide">{a.status === 'accepted' ? 'প্রতিষ্ঠানের জন্য পূরণীয়' : 'তথ্য ঠিক করুন ও প্রতিষ্ঠানের অংশ পূরণ করুন'}</h2>
+        {a.status === 'accepted' && <p class="wide muted">ভর্তি হয়ে গেছে। তথ্য বদলাতে ছাত্রের প্রোফাইল ব্যবহার করুন। এখানে শুধু প্রতিষ্ঠানের অংশ বদলানো যায়।</p>}
+        {a.status !== 'accepted' && <AdmissionFields v={a} />}
+        <h3>প্রতিষ্ঠানের জন্য পূরণীয়</h3>
+        <label class="field"><span>ভর্তি পরীক্ষার নম্বর</span><input name="examMarks" maxlength="40" value={a.examMarks} /></label>
+        <label class="field"><span>পরীক্ষকের নাম</span><input name="examinerName" maxlength="120" value={a.examinerName} /></label>
+        <label class="field"><span>ধার্যকৃত অর্থ (টাকা)</span><input name="feeTaka" inputmode="numeric" maxlength="12" value={a.feeMinor ? String(a.feeMinor / 100) : ''} /></label>
+        <label class="field wide"><span>অফিসের নোট (শুধু অফিস দেখবে)</span><textarea name="officeNote" rows="2" maxlength="1000">{a.officeNote}</textarea></label>
+        <button class="button">সংরক্ষণ</button>
+      </form>
+
+      {a.status === 'pending' && (
+        <div class="decide">
+          <form method="post" class="card form-grid">
+            <input type="hidden" name="action" value="accept" />
+            <h2 class="wide">আবেদন গ্রহণ করুন</h2>
+            <p class="wide muted">গ্রহণ করলে ছাত্র তৈরি হবে, আইডি নম্বর পাবে এবং অভিভাবকের মোবাইল নম্বরে ছাত্র প্যানেলের লগইন খুলবে। আগে উপরের তথ্য সংরক্ষণ করে নিন।</p>
+            {courses.length === 0 ? (
+              <p class="wide muted">কোনো চালু কোর্স নেই। এখন শুধু ছাত্র তৈরি হবে, কোর্সে ভর্তি পরে ছাত্রের প্রোফাইল থেকে করতে পারবেন।</p>
+            ) : (
+              <EnrollFields courses={courses} batches={batches} today={today} optional />
+            )}
+            <button class="button">আবেদন গ্রহণ করুন</button>
+          </form>
+          <form method="post" class="card form-grid">
+            <input type="hidden" name="action" value="reject" />
+            <h2 class="wide">প্রত্যাখ্যান করুন</h2>
+            <label class="field wide"><span>কারণ (আবেদনকারী এটি দেখতে পাবেন)</span><textarea name="reason" rows="2" required minlength="3" maxlength="500"></textarea></label>
+            <button class="button button--danger">প্রত্যাখ্যান করুন</button>
+          </form>
+        </div>
+      )}
+      {a.status === 'rejected' && (
+        <section class="card">
+          <h2>প্রত্যাখ্যাত</h2>
+          <p>কারণ: {a.decisionNote} <small class="muted">({a.decidedBy}, {dateBn(a.decidedAt, true)})</small></p>
+          <p class="actions">
+            {wa && <a class="button button--wa" href={`https://wa.me/${wa}?text=${encodeURIComponent(rejectMessage)}`} target="_blank" rel="noopener"><Icon name="whatsapp" /> আবেদনকারীকে জানান</a>}
+            {wa && <a class="button button--ghost" href={`sms:+${wa}?body=${encodeURIComponent(rejectMessage)}`}><Icon name="mail" /> SMS</a>}
+          </p>
+          <p class="muted"><small>আবেদনকারী নিজেও <a href="/admission/status" target="_blank" rel="noopener">আবেদনের অবস্থা পাতায়</a> কারণ দেখতে পাবেন।</small></p>
+          <form method="post"><input type="hidden" name="action" value="reopen" /><button class="button button--ghost">আবার অপেক্ষায় রাখুন</button></form>
+        </section>
+      )}
+      {a.status === 'accepted' && <p class="muted">গৃহীত: {a.decidedBy}, {dateBn(a.decidedAt, true)}</p>}
+    </>
+  )}
+</Admin>
+
+<style>
+  .view { display: flex; gap: var(--space-5); flex-wrap: wrap; align-items: flex-start; margin-bottom: var(--space-4); }
+  .photo { width: 120px; height: 150px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--color-line); background: var(--mint-100); }
+  .info { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: var(--space-3) var(--space-5); margin: 0; flex: 1; min-width: 16rem; }
+  .info div { display: grid; gap: 2px; }
+  dt { font: 600 var(--text-xs) / 1.4 var(--font-display); color: var(--color-text-muted); }
+  dd { margin: 0; }
+  .card { margin-bottom: var(--space-4); }
+  .decide { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: var(--space-4); align-items: start; }
+  .creds { display: grid; gap: var(--space-3); margin: 0 0 var(--space-5); }
+  .creds div { display: grid; grid-template-columns: 9rem 1fr; gap: var(--space-3); }
+  .pw { font: 700 var(--text-xl) / 1.2 ui-monospace, monospace; letter-spacing: 0.05em; }
+</style>

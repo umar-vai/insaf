@@ -8,4 +8,4 @@ const p = await getOfflineStudent(env.DB, Astro.params.id!, todayDhaka());
 if (!p) return new Response('Not found', { status: 404 });
 ---
 
-<IdCards people={[p]} />
+<IdCards people={[p]} photoUrl={(id) => `/admin/offline/students/${id}/photo`} />

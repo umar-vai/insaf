@@ -10,10 +10,12 @@ import { institute } from '../server/config';
 type Person = NonNullable<Awaited<ReturnType<typeof getOfflineStudent>>>;
 interface Props {
   people: Person[];
+  /** Where a student's photo is served for whoever is looking (office or family). */
+  photoUrl?: (studentId: string) => string;
 }
 // Name, address, phone and logo as the owner set them on the system page.
 const inst = await institute(env.DB);
-const { people } = Astro.props;
+const { people, photoUrl = (id: string) => `/account/offline/photo/${id}` } = Astro.props;
 const cards = people.map((p) => {
   const active = p.enrollments.filter((e) => e.status === 'active');
   const ends = active.map((e) => addMonths(e.startDate, e.durationMonths)).sort();
@@ -93,6 +95,12 @@ const cards = people.map((p) => {
         grid-template-columns: 15mm 1fr;
         gap: 3mm;
         padding: 3mm;
+      }
+      .avatar img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 2mm;
       }
       .avatar {
         width: 15mm;
@@ -183,7 +191,9 @@ const cards = people.map((p) => {
           <section class="card front" aria-label="আইডি কার্ডের সামনের দিক">
             <header><img src={inst.logo} alt={inst.name} /><span>ছাত্র পরিচয়পত্র</span></header>
             <div class="body">
-              <div class="avatar" aria-hidden="true">{p.student.name.trim().charAt(0)}</div>
+              <div class="avatar" aria-hidden={p.student.photoKey ? undefined : 'true'}>
+                {p.student.photoKey ? <img src={photoUrl(p.student.id)} alt={`${p.student.name} এর ছবি`} /> : p.student.name.trim().charAt(0)}
+              </div>
               <div>
                 <h2>{p.student.name}</h2>
                 <span class="id">{studentCode(p.student.studentNo)}</span>
