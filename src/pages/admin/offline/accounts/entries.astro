@@ -39,7 +39,7 @@ const [accounts, funds, projects, entries] = await Promise.all([listAccounts(env
 const done = q.get('done') ? entries.find((e) => e.id === q.get('done')) : null;
 const ERR: Record<string, string> = {
   amount: 'টাকার অঙ্ক সঠিক নয়।', day: 'তারিখ সঠিক নয় (ভবিষ্যতের তারিখ দেওয়া যায় না)।', account: 'হিসাব বাছুন।', from_account: 'কোন হিসাব থেকে যাবে বাছুন, দুটো আলাদা হতে হবে।',
-  category: 'আয়ের খাত লিখুন।', reason: 'বাতিলের কারণ লিখুন।', full: 'বাতিল করতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।',
+  category: 'আয়ের খাত লিখুন।', closed: 'এই তারিখের হিসাব বন্ধ করা আছে। মালিক আবার খুললে তবেই বদলানো যাবে।', reason: 'বাতিলের কারণ লিখুন, অথবা এই তারিখের হিসাব বন্ধ আছে কিনা দেখুন।', full: 'বাতিল করতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।',
 };
 const err = q.get('error');
 const totalIn = entries.filter((e) => e.kind === 'income' && !e.voidedAt).reduce((a, e) => a + e.amountMinor, 0);

@@ -64,7 +64,7 @@ const edit = q.get('edit') ?? '';
 const ep = projects.find((p) => p.id === edit);
 const ef = funds.find((f) => f.id === edit);
 const ea = accounts.find((a) => a.id === edit);
-const ERR: Record<string, string> = { name: 'নাম লিখুন।', name_taken: 'এই নাম আগেই আছে।', kind: 'ধরন বাছুন।', opening: 'শুরুর টাকা সঠিক নয়।', opening_on: 'শুরুর তারিখ সঠিক নয়।', full: 'এসব বদলাতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।', course: 'বিভাগটি পাওয়া যায়নি।' };
+const ERR: Record<string, string> = { name: 'নাম লিখুন।', name_taken: 'এই নাম আগেই আছে।', kind: 'ধরন বাছুন।', opening: 'শুরুর টাকা সঠিক নয়।', opening_on: 'শুরুর তারিখ সঠিক নয়।', full: 'এসব বদলাতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।', course: 'বিভাগটি পাওয়া যায়নি।', closed: 'এই শুরুর টাকা বন্ধ করা হিসাবের ভেতরে পড়ে। মালিক হিসাব আবার খুললে তবেই বদলানো যাবে।' };
 const err = q.get('error');
 const unplaced = ALL_METHODS.filter((m) => !accounts.some((a) => a.methods.split(',').includes(m)));
 ---

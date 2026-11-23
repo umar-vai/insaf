@@ -1,0 +1,87 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import { consolidatedReport } from '../../../server/acc-controls';
+import { statementRange } from '../../../server/accounts-ledger';
+import { dayBn, todayDhaka } from '../../../lib/offline';
+import { bnDigits, taka } from '../../../lib/format';
+
+// Donations, fees, other income and all spending on one page. Read only.
+const p = Astro.url.searchParams;
+const { from, to, preset } = statementRange(p, todayDhaka());
+const r = await consolidatedReport(env.DB, from, to);
+const signed = (m: number) => `${m < 0 ? '−' : ''}${taka(Math.abs(m))}`;
+const PRESETS = [['month', 'এই মাস'], ['last', 'গত মাস'], ['year', 'এই বছর'], ['lastyear', 'গত বছর']] as const;
+---
+
+<Admin title="সমন্বিত রিপোর্ট">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow">প্রতিষ্ঠান</p>
+      <h1>সমন্বিত রিপোর্ট</h1>
+      <p>দান, ছাত্রদের ফি, অন্যান্য আয় আর সব খরচ এক পাতায়। দান থেকে হিসাব খাতায় আনা টাকা দুইবার গোনা হয় না।</p>
+    </div>
+    <div class="actions" data-noprint>
+      <a class="button button--ghost" href={`/admin/finance/consolidated.csv?from=${from}&to=${to}`}><Icon name="download" /> Excel</a>
+      <button type="button" class="button button--ghost" data-print><Icon name="printer" /> PDF বা প্রিন্ট</button>
+    </div>
+  </header>
+
+  <form class="card range" method="get" data-noprint>
+    <nav class="tabs" aria-label="সময়">{PRESETS.map(([k, label]) => <a href={`?p=${k}`} aria-current={preset === k ? 'page' : undefined}>{label}</a>)}</nav>
+    <label class="field"><span>থেকে</span><input type="date" name="from" value={from} /></label>
+    <label class="field"><span>পর্যন্ত</span><input type="date" name="to" value={to} /></label>
+    <button class="button">দেখুন</button>
+  </form>
+  <p class="muted"><small>{dayBn(from)} থেকে {dayBn(to)}</small></p>
+
+  <div class="kpis">
+    <div class="kpi"><span class="kpi__label">মোট আয়</span><strong class="kpi__value">{taka(r.incomeMinor)}</strong><span class="kpi__hint">দান {taka(r.donationsMinor)} · ফি {taka(r.feesMinor)} · অন্যান্য {taka(r.otherMinor)}</span></div>
+    <div class="kpi kpi--warn"><span class="kpi__label">মোট খরচ</span><strong class="kpi__value">{taka(r.expenseMinor)}</strong></div>
+    <div class={`kpi ${r.netMinor < 0 ? 'kpi--bad' : 'kpi--info'}`}><span class="kpi__label">{r.netMinor < 0 ? 'ঘাটতি' : 'উদ্বৃত্ত'}</span><strong class="kpi__value">{taka(Math.abs(r.netMinor))}</strong></div>
+  </div>
+  {r.movedMinor > 0 && <p class="note">দান থেকে হিসাব খাতায় আনা হয়েছে {taka(r.movedMinor)}। এটি দানের মধ্যেই ধরা আছে, আলাদা আয় হিসেবে যোগ হয়নি।</p>}
+
+  <div class="cols block">
+    <section class="card">
+      <div class="card__head"><h2>আয়</h2></div>
+      <h3 class="sub">দান, তহবিল অনুযায়ী</h3>
+      {r.donations.length === 0 ? <p class="muted">কিছু নেই।</p> : <ul class="list">{r.donations.map((d) => <li><span>{d.head}<small>{bnDigits(d.n)}টি দান</small></span><strong class="num">{taka(d.minor)}</strong></li>)}</ul>}
+      <h3 class="sub">ছাত্রদের ফি</h3>
+      {r.fees.length === 0 ? <p class="muted">কিছু নেই।</p> : <ul class="list">{r.fees.map((d) => <li><span>{d.head}</span><strong class="num">{taka(d.minor)}</strong></li>)}</ul>}
+      <h3 class="sub">অন্যান্য আয়</h3>
+      {r.other.length === 0 ? <p class="muted">কিছু নেই।</p> : <ul class="list">{r.other.map((d) => <li><span>{d.head}</span><strong class="num">{taka(d.minor)}</strong></li>)}</ul>}
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>খরচ, খাত অনুযায়ী</h2></div>
+      {r.expenses.length === 0 ? <p class="muted">কিছু নেই।</p> : <ul class="list">{r.expenses.map((d) => <li><span>{d.head}</span><strong class="num">{taka(d.minor)}</strong></li>)}</ul>}
+    </section>
+  </div>
+
+  <div class="cols block">
+    <section class="card">
+      <div class="card__head"><h2>হিসাব খাতার তহবিল</h2></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>তহবিল</th><th class="num">আয়</th><th class="num">খরচ</th><th class="num">এ পর্যন্ত ব্যালেন্স</th></tr></thead>
+        <tbody>{r.funds.map((f) => <tr><td>{f.name}</td><td class="num">{taka(f.inMinor)}</td><td class="num">{taka(f.outMinor)}</td><td class="num">{signed(f.balanceMinor)}</td></tr>)}</tbody>
+      </table></div>
+      <p class="muted"><small>এই তহবিলগুলো হিসাব খাতার। দানের টাকা হিসাব খাতায় না আনা পর্যন্ত এখানে যোগ হয় না।</small></p>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>প্রকল্প</h2></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>প্রকল্প</th><th class="num">আয়</th><th class="num">খরচ</th><th class="num">বাকি</th></tr></thead>
+        <tbody>{r.projects.map((x) => <tr><td>{x.name}</td><td class="num">{taka(x.inMinor)}</td><td class="num">{taka(x.outMinor)}</td><td class="num">{signed(x.inMinor - x.outMinor)}</td></tr>)}</tbody>
+      </table></div>
+    </section>
+  </div>
+</Admin>
+
+<style>
+  .range { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3); margin-bottom: var(--space-2); }
+  .range .tabs { margin: 0; }
+  .range .field { width: 170px; }
+  .block { margin-top: var(--space-5); }
+  .sub { margin: var(--space-4) 0 var(--space-1); font-size: var(--text-sm); color: var(--color-text-muted); }
+</style>

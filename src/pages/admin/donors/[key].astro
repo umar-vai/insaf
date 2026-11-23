@@ -3,15 +3,83 @@ import { env } from 'cloudflare:workers';
 import Admin from '../../../layouts/Admin.astro';
 import Icon from '../../../components/Icon.astro';
 import { donorHistory, MANUAL_METHOD_BN } from '../../../server/donations';
-import { waNumber } from '../../../lib/offline';
-import { bnDigits, dateBn, taka } from '../../../lib/format';
+import {
+  addDonorFollowup,
+  closeDonorFollowup,
+  DONOR_CHANNEL_BN,
+  DONOR_CHANNELS,
+  donorTags,
+  donorTimeline,
+  getProfile,
+  listDonorFollowups,
+  listDonorTemplates,
+  logDonorContact,
+  markReceiptSent,
+  openDonorTicket,
+  parseDonorContact,
+  parseDonorFollowup,
+  parseDonorTags,
+  parseDonorTicket,
+  receiptMessage,
+  renderDonorTemplate,
+  saveProfile,
+  segmentOf,
+  SEGMENT_BN,
+  setDonorTags,
+  SUGGESTED_DONOR_TAGS,
+  TICKET_CATEGORIES,
+  TICKET_CATEGORY_BN,
+} from '../../../server/donor-crm';
+import { dayBn, todayDhaka, waNumber } from '../../../lib/offline';
+import { bnDigits, dateBn, receiptLabel, taka } from '../../../lib/format';
 
 let key = '';
 try {
   key = decodeURIComponent(Astro.params.key ?? '').slice(0, 120);
 } catch {}
+const actor = Astro.locals.staff!;
+const today = todayDhaka();
+const here = `/admin/donors/${encodeURIComponent(key)}`;
+
+if (Astro.request.method === 'POST' && key) {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  const back = (good: boolean, error = 'action') => Astro.redirect(`${here}?${good ? 'saved=1' : `error=${error}`}`, 303);
+  if (action === 'profile') return back(await saveProfile(env.DB, actor, key, form));
+  if (action === 'tags') return back(await setDonorTags(env.DB, actor, key, parseDonorTags(form)));
+  if (action === 'contact') {
+    const v = parseDonorContact(form);
+    return v.ok ? back(await logDonorContact(env.DB, actor, key, v.value)) : back(false, v.error);
+  }
+  if (action === 'followup') {
+    const v = parseDonorFollowup(form, today);
+    return v.ok ? back(await addDonorFollowup(env.DB, actor, key, v.value)) : back(false, v.error);
+  }
+  if (action === 'close') return back(await closeDonorFollowup(env.DB, actor, String(form.get('id') ?? ''), form.get('status') === 'cancelled' ? 'cancelled' : 'done', String(form.get('outcome') ?? ''), form.get('channel')), 'followup');
+  if (action === 'ticket') {
+    const v = parseDonorTicket(form);
+    if (!v.ok) return back(false, v.error);
+    const r = await openDonorTicket(env.DB, actor, key, v.value);
+    return r.ok ? Astro.redirect('/admin/donors/desk?tab=tickets&saved=1', 303) : back(false, r.error);
+  }
+  if (action === 'receipt') {
+    // Logged first, then WhatsApp opens with the message ready to send.
+    const ref = String(form.get('reference') ?? '').slice(0, 40);
+    const m = await receiptMessage(env.DB, ref, Astro.url.origin, today);
+    const wa = m?.phone ? waNumber(m.phone) : null;
+    if (!m || !wa) return back(false, 'receipt');
+    await markReceiptSent(env.DB, actor, ref, 'whatsapp', Astro.url.origin, today);
+    return Astro.redirect(`https://wa.me/${wa}?text=${encodeURIComponent(m.message)}`, 303);
+  }
+  return back(false);
+}
+
 const history = key ? await donorHistory(env.DB, key) : [];
 if (!history.length) return Astro.redirect('/admin/donors', 302);
+const [profile, tags, followups, timeline, templates] = await Promise.all([getProfile(env.DB, key), donorTags(env.DB, key), listDonorFollowups(env.DB, { key, status: 'open' }), donorTimeline(env.DB, key), listDonorTemplates(env.DB)]);
+const sent = new Set(
+  (await env.DB.prepare('SELECT donation_ref AS r FROM donor_contacts WHERE donor_key = ? AND donation_ref IS NOT NULL').bind(key).all<{ r: string }>()).results.map((x) => x.r),
+);
 const counted = history.filter((d) => d.status === 'paid' && !d.voidedAt);
 const total = counted.reduce((s, d) => s + d.amountMinor, 0);
 const first = history[0]!;
@@ -19,8 +87,13 @@ const byFund = new Map<string, number>();
 for (const d of counted) byFund.set(d.fundTitle, (byFund.get(d.fundTitle) ?? 0) + d.amountMinor);
 const phone = history.find((d) => d.donorPhone)?.donorPhone ?? '';
 const email = history.find((d) => d.donorEmail)?.donorEmail ?? '';
-const wa = phone ? waNumber(phone) : null;
+const wa = phone && !profile.doNotContact ? waNumber(phone) : null;
 const STATUS_BN: Record<string, string> = { paid: 'পরিশোধিত', review: 'যাচাই বাকি', pending: 'অসম্পূর্ণ', failed: 'ব্যর্থ', cancelled: 'বাতিল' };
+const segment = counted.length ? segmentOf({ gifts: counted.length, firstAt: counted.at(-1)!.paidAt ?? '', lastAt: counted[0]!.paidAt ?? '' }, today) : null;
+const tagChoices = [...new Set([...SUGGESTED_DONOR_TAGS, ...tags])];
+const ERR: Record<string, string> = { channel: 'মাধ্যম বাছুন।', summary: 'কী কথা হলো লিখুন।', title: 'কী করতে হবে লিখুন।', due: 'তারিখ সঠিক নয়।', followup: 'ফলো আপটি আর খোলা নেই।', subject: 'টিকেটের বিষয় লিখুন।', body: 'সমস্যাটি লিখুন।', receipt: 'এই দানের রসিদ WhatsApp এ পাঠানো যায়নি। নম্বরটি দেখুন।' };
+const err = Astro.url.searchParams.get('error');
+const vars = { name: first.donorName, total: taka(total), date: dayBn(today) };
 ---
 
 <Admin title={first.donorName}>
@@ -29,12 +102,18 @@ const STATUS_BN: Record<string, string> = { paid: 'পরিশোধিত', re
       <p class="eyebrow"><a href="/admin/donors">দাতাগণ</a></p>
       <h1>{first.donorName}</h1>
       <p>{[phone, email].filter(Boolean).join(' · ')}</p>
+      <p class="chips">
+        {segment && <span class="pill pill--info">{SEGMENT_BN[segment]}</span>}
+        {profile.doNotContact && <span class="pill pill--failed">যোগাযোগ করা যাবে না</span>}
+        {tags.map((t) => <span class="pill">{t}</span>)}
+      </p>
     </div>
     <div class="actions">
-      {phone && <a class="button button--ghost" href={`tel:${phone}`}><Icon name="phone" /> ফোন</a>}
+      {phone && !profile.doNotContact && <a class="button button--ghost" href={`tel:${phone}`}><Icon name="phone" /> ফোন</a>}
       {wa && <a class="button button--wa" href={`https://wa.me/${wa}?text=${encodeURIComponent('আসসালামু আলাইকুম। মাদরাসাতুল ইনসাফে আপনার দানের জন্য জাযাকাল্লাহু খাইরান।')}`} rel="noopener"><Icon name="whatsapp" /> ধন্যবাদ জানান</a>}
     </div>
   </header>
+  {err && <p class="note note--bad" role="alert">{ERR[err] ?? 'কাজটি করা যায়নি।'}</p>}
 
   <div class="kpis">
     <div class="kpi"><span class="kpi__label">মোট দান</span><strong class="kpi__value">{taka(total)}</strong></div>
@@ -43,22 +122,49 @@ const STATUS_BN: Record<string, string> = { paid: 'পরিশোধিত', re
     <div class="kpi"><span class="kpi__label">শেষ দান</span><strong class="kpi__value">{dateBn(counted[0]?.paidAt)}</strong></div>
   </div>
 
-  <div class="cols cols--wide">
+  {followups.length > 0 && (
+    <section class="card block">
+      <div class="card__head"><h2>বাকি ফলো আপ</h2></div>
+      <ul class="list fu">{followups.map((f) => (
+        <li>
+          <div><strong>{f.title}</strong><small class={f.dueOn < today ? 'bad' : ''}>{dayBn(f.dueOn)}{f.assignedTo && ` · ${f.assignedTo}`}</small></div>
+          <form method="post" class="close">
+            <input type="hidden" name="action" value="close" /><input type="hidden" name="id" value={f.id} />
+            <input name="outcome" maxlength="500" placeholder="ফলাফল" aria-label="ফলাফল" />
+            <select name="channel" aria-label="মাধ্যম">{DONOR_CHANNELS.map((c) => <option value={c}>{DONOR_CHANNEL_BN[c]}</option>)}</select>
+            <button class="button button--sm" name="status" value="done"><Icon name="check" /> শেষ</button>
+            <button class="button button--sm button--ghost" name="status" value="cancelled">বাতিল</button>
+          </form>
+        </li>
+      ))}</ul>
+    </section>
+  )}
+
+  <div class="cols cols--wide block">
     <section class="card">
-      <div class="card__head"><h2>দানের ইতিহাস</h2></div>
+      <div class="card__head"><h2>দানের ইতিহাস ও রসিদ</h2></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>তারিখ</th><th>তহবিল</th><th class="num">টাকা</th><th>মাধ্যম</th><th>অবস্থা</th></tr></thead>
+          <thead><tr><th>তারিখ</th><th>তহবিল</th><th class="num">টাকা</th><th>মাধ্যম</th><th>অবস্থা</th><th>রসিদ</th></tr></thead>
           <tbody>
-            {history.map((d) => (
-              <tr>
-                <td>{dateBn(d.paidAt ?? d.createdAt, true)}<small class="muted"><br />{d.reference}</small></td>
-                <td>{d.fundTitle}{d.onBehalf && <small class="muted"><br />পক্ষে: {d.onBehalf}</small>}</td>
-                <td class="num">{taka(d.amountMinor)}</td>
-                <td>{d.gateway === 'manual' ? `অফিস: ${MANUAL_METHOD_BN[d.method] ?? d.method}` : 'অনলাইন'}</td>
-                <td>{d.voidedAt ? <span class="pill pill--cancelled">বাতিল</span> : <span class={`pill pill--${d.status}`}>{STATUS_BN[d.status]}</span>}</td>
-              </tr>
-            ))}
+            {history.map((d) => {
+              const isCounted = d.status === 'paid' && !d.voidedAt;
+              return (
+                <tr>
+                  <td>{dateBn(d.paidAt ?? d.createdAt, true)}<small class="muted"><br />{d.reference}</small></td>
+                  <td>{d.fundTitle}{d.onBehalf && <small class="muted"><br />পক্ষে: {d.onBehalf}</small>}</td>
+                  <td class="num">{taka(d.amountMinor)}</td>
+                  <td>{d.gateway === 'manual' ? `অফিস: ${MANUAL_METHOD_BN[d.method] ?? d.method}` : 'অনলাইন'}</td>
+                  <td>{d.voidedAt ? <span class="pill pill--cancelled">বাতিল</span> : <span class={`pill pill--${d.status}`}>{STATUS_BN[d.status]}</span>}</td>
+                  <td class="keep">
+                    {isCounted && <a href={`/donate/done?ref=${encodeURIComponent(d.reference)}`} target="_blank"><small>{receiptLabel(d.receiptNo) || 'দেখুন'}</small></a>}
+                    {isCounted && (sent.has(d.reference) ? <small class="muted">পাঠানো হয়েছে</small> : wa && (
+                      <form method="post" target="_blank"><input type="hidden" name="action" value="receipt" /><input type="hidden" name="reference" value={d.reference} /><button class="button button--sm button--wa">পাঠান</button></form>
+                    ))}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -78,4 +184,95 @@ const STATUS_BN: Record<string, string> = { paid: 'পরিশোধিত', re
       </ul>
     </section>
   </div>
+
+  <div class="cols block">
+    <section class="card">
+      <div class="card__head"><h2>যোগাযোগ লিখুন</h2></div>
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="contact" />
+        <label class="field"><span>মাধ্যম</span><select name="channel">{DONOR_CHANNELS.map((c) => <option value={c} selected={c === profile.preferredChannel}>{DONOR_CHANNEL_BN[c]}</option>)}</select></label>
+        <label class="field"><span>কে করলেন</span><select name="direction"><option value="out">আমরা করেছি</option><option value="in">দাতা করেছেন</option></select></label>
+        <label class="field wide"><span>কী কথা হলো</span><textarea name="summary" rows="2" required maxlength="1000"></textarea></label>
+        <button class="button"><Icon name="check" /> লিখে রাখুন</button>
+      </form>
+      {templates.length > 0 && wa && (
+        <details class="tpl"><summary>টেমপ্লেট থেকে WhatsApp</summary>
+          <ul class="list">{templates.filter((t) => t.purpose === 'general').map((t) => <li><span>{t.name}</span><a class="button button--sm button--wa" target="_blank" rel="noopener" href={`https://wa.me/${wa}?text=${encodeURIComponent(renderDonorTemplate(t.body, vars))}`}>খুলুন</a></li>)}</ul>
+        </details>
+      )}
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>ফলো আপ ঠিক করুন</h2></div>
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="followup" />
+        <label class="field wide"><span>কী করতে হবে</span><input name="title" required maxlength="200" placeholder="যেমন প্রকল্পের খবর জানিয়ে ফোন" /></label>
+        <label class="field"><span>কবে</span><input type="date" name="dueOn" required value={today} min={today} /></label>
+        <label class="field"><span>কে করবেন</span><input name="assignedTo" maxlength="120" placeholder="নাম বা ইমেইল" /></label>
+        <button class="button"><Icon name="plus" /> যোগ করুন</button>
+      </form>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>সমস্যা বা টিকেট</h2></div>
+      <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="ticket" />
+        <label class="field"><span>বিষয়</span><input name="subject" required maxlength="160" /></label>
+        <label class="field"><span>ধরন</span><select name="category">{TICKET_CATEGORIES.map((c) => <option value={c}>{TICKET_CATEGORY_BN[c]}</option>)}</select></label>
+        <label class="field wide"><span>বিস্তারিত</span><textarea name="body" rows="2" required maxlength="2000"></textarea></label>
+        <label class="field wide"><span>কে দেখবেন</span><input name="assignedTo" maxlength="120" /></label>
+        <button class="button"><Icon name="plus" /> টিকেট খুলুন</button>
+      </form>
+    </section>
+  </div>
+
+  <div class="cols cols--wide block">
+    <section class="card">
+      <div class="card__head"><h2>পুরো টাইমলাইন</h2></div>
+      <ol class="timeline">
+        {timeline.map((t) => (
+          <li class={`tone-${t.tone}`}>
+            <small class="muted">{dateBn(t.at, true)} · {t.kind}</small>
+            <strong>{t.link ? <a href={t.link}>{t.title}</a> : t.title}</strong>
+            {t.detail && <small>{t.detail}</small>}
+          </li>
+        ))}
+      </ol>
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>দাতার তথ্য</h2></div>
+      <form method="post" class="form-grid one">
+        <input type="hidden" name="action" value="tags" />
+        <fieldset class="tags"><legend>ট্যাগ</legend>{tagChoices.map((t) => <label class="check"><input type="checkbox" name="tag" value={t} checked={tags.includes(t)} /> {t}</label>)}</fieldset>
+        <label class="field"><span>নতুন ট্যাগ (কমা দিয়ে)</span><input name="tags" maxlength="200" /></label>
+        <button class="button button--ghost">ট্যাগ সংরক্ষণ</button>
+      </form>
+      <form method="post" class="form-grid one profile">
+        <input type="hidden" name="action" value="profile" />
+        <label class="field"><span>পছন্দের মাধ্যম</span><select name="preferredChannel">{DONOR_CHANNELS.map((c) => <option value={c} selected={c === profile.preferredChannel}>{DONOR_CHANNEL_BN[c]}</option>)}</select></label>
+        <label class="field"><span>অফিসের নোট</span><textarea name="note" rows="3" maxlength="1000">{profile.note}</textarea></label>
+        <label class="check"><input type="checkbox" name="doNotContact" checked={profile.doNotContact} /> এই দাতার সাথে যোগাযোগ করা যাবে না</label>
+        <button class="button button--ghost">তথ্য সংরক্ষণ</button>
+      </form>
+    </section>
+  </div>
 </Admin>
+
+<style>
+  .block { margin-top: var(--space-5); }
+  .bad { color: var(--bad-600); }
+  .chips { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-2); }
+  .keep { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+  .fu li { align-items: start; flex-wrap: wrap; gap: var(--space-3); }
+  .fu li > div { display: grid; gap: 2px; flex: 1 1 220px; }
+  .close { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+  .close input { min-width: 140px; }
+  .tpl { margin-top: var(--space-4); }
+  .one { grid-template-columns: 1fr; }
+  .profile { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
+  .tags { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  .tags legend { font-size: var(--text-sm); margin-bottom: var(--space-1); }
+  .timeline { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); max-height: 560px; overflow-y: auto; }
+  .timeline li { display: grid; gap: 2px; padding-left: var(--space-3); border-left: 3px solid var(--color-border); overflow-wrap: anywhere; }
+  .timeline .tone-good { border-left-color: var(--chart-income); }
+  .timeline .tone-bad { border-left-color: var(--bad-600); }
+  .timeline .tone-info { border-left-color: var(--warn-700); }
+</style>

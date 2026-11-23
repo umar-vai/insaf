@@ -1,3 +1,5 @@
+import { thanksCountStatement } from './donor-crm';
+
 // Small counts of work waiting in each admin section. The sidebar shows them
 // as badges (like a cart count) and the office dashboard turns them into
 // clickable alerts. All plain count queries in one D1 batch, cheap enough to
@@ -16,6 +18,10 @@ export type WorkCounts = {
   lateBooks: number;
   homeworkToCheck: number;
   donationReviews: number;
+  donorFollowups: number;
+  donorFollowupsLate: number;
+  donorTickets: number;
+  donorThanks: number;
 };
 
 /** 'bad' is red (something is late or money needs checking), 'warn' is gold. */
@@ -36,6 +42,10 @@ export async function workCounts(db: D1Database, today: string): Promise<WorkCou
     one(`SELECT count(*) FROM homework_submissions WHERE state = 'submitted'`),
     one(`SELECT count(*) FROM donations WHERE status = 'review'`),
     one(`SELECT count(*) FROM admission_applications WHERE status = 'pending'`),
+    one(`SELECT count(*) FROM donor_followups WHERE status = 'open' AND due_on <= ?1`, today),
+    one(`SELECT count(*) FROM donor_followups WHERE status = 'open' AND due_on < ?1`, today),
+    one(`SELECT count(*) FROM donor_tickets WHERE status = 'open'`),
+    thanksCountStatement(db, today),
   ]);
   const n = (i: number) => rows[i]?.results[0]?.n ?? 0;
   return {
@@ -51,6 +61,10 @@ export async function workCounts(db: D1Database, today: string): Promise<WorkCou
     homeworkToCheck: n(9),
     donationReviews: n(10),
     newApplications: n(11),
+    donorFollowups: n(12),
+    donorFollowupsLate: n(13),
+    donorTickets: n(14),
+    donorThanks: n(15),
   };
 }
 
@@ -74,6 +88,7 @@ export function badgesFor(c: WorkCounts): Record<string, Badge> {
     ['/admin/offline/library', c.lateBooks, 'bad', 'তারিখ পার হয়েছে, বই ফেরত আসেনি'],
     ['/admin/offline/homework', c.homeworkToCheck, 'warn', 'দেখা বাকি হোমওয়ার্ক'],
     ['/admin/donations', c.donationReviews, 'bad', 'যাচাই করা দরকার এমন দান'],
+    ['/admin/donors/desk', c.donorFollowups + c.donorTickets + c.donorThanks, c.donorFollowupsLate ? 'bad' : 'warn', 'রসিদ পাঠানো, ফলো আপ ও টিকেট বাকি'],
   ];
   return Object.fromEntries(list.filter(([, n]) => n > 0).map(([href, n, tone, hint]) => [href, { n, tone, hint }]));
 }

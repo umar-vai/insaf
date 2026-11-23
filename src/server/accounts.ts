@@ -1,4 +1,5 @@
 import { log } from './admin';
+import { CLOSED_THROUGH_SQL, dayIsClosed } from './acc-period';
 import { longText, newId, text, type Result } from './ops-util';
 import { addDays, isYmd, parseTaka, PAY_METHODS, type PayMethod } from '../lib/offline';
 
@@ -144,6 +145,11 @@ export function parseAccountForm(form: FormData): Result<AccountInput> {
 /** Saves an account. A method given to it is taken away from any other account, so each method has one home. */
 export async function saveAccount(db: D1Database, actor: string, id: string | null, v: AccountInput): Promise<Result<string>> {
   const aid = id || newId('acct');
+  if (id) {
+    // An opening balance inside closed books would change a finished statement.
+    const old = await db.prepare('SELECT opening_minor AS m, opening_on AS d FROM acc_accounts WHERE id = ?').bind(id).first<{ m: number; d: string }>();
+    if (old && (old.m !== v.openingMinor || old.d !== v.openingOn) && ((await dayIsClosed(db, old.d || '0000-01-01')) || (await dayIsClosed(db, v.openingOn || '0000-01-01')))) return fail('closed');
+  }
   const others = (await listAccounts(db)).filter((a) => a.id !== aid);
   const stmts: D1PreparedStatement[] = [];
   for (const o of others) {
@@ -249,6 +255,7 @@ export async function recordEntry(db: D1Database, actor: string, v: EntryInput):
     v.nonce ? await db.prepare('SELECT id, voucher_no AS voucherNo FROM acc_entries WHERE nonce = ?').bind(v.nonce).first<{ id: string; voucherNo: number }>() : null;
   const before = await seen();
   if (before) return ok(before);
+  if (await dayIsClosed(db, v.day)) return fail('closed');
   const accounts = await listAccounts(db, false);
   if (!accounts.some((a) => a.id === v.accountId) || (v.fromAccountId && !accounts.some((a) => a.id === v.fromAccountId))) return fail('account');
   const id = newId('ace');
@@ -279,7 +286,7 @@ export async function voidEntry(db: D1Database, actor: string, id: string, reaso
   if (why.length < 2) return false;
   const r = await db
     .prepare(
-      `UPDATE acc_entries SET voided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), voided_by = ?, void_reason = ? WHERE id = ? AND voided_at IS NULL
+      `UPDATE acc_entries SET voided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), voided_by = ?, void_reason = ? WHERE id = ? AND voided_at IS NULL AND day > ${CLOSED_THROUGH_SQL}
        RETURNING kind, voucher_no AS voucherNo, amount_minor AS amount`,
     )
     .bind(actor, why, id)

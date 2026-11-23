@@ -1,3 +1,4 @@
+import { dayIsClosed } from './acc-period';
 import { log } from './admin';
 import { teaches } from './office';
 import { notifyTeachers } from './notifications';
@@ -301,7 +302,7 @@ export async function reopenPayroll(db: D1Database, actor: string, id: string): 
  * moved the row to paid (its updated_at token), so two clicks add one expense.
  */
 export async function payPayroll(db: D1Database, actor: string, id: string, paidOn: string, method: string, today: string): Promise<boolean> {
-  if (!isYmd(paidOn) || paidOn > today) return false;
+  if (!isYmd(paidOn) || paidOn > today || (await dayIsClosed(db, paidOn))) return false;
   const m = (PAY_METHODS as readonly string[]).includes(method) ? method : 'cash';
   const row = await getPayroll(db, id);
   if (!row || row.status !== 'approved') return false;

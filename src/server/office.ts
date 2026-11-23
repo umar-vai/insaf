@@ -1,3 +1,4 @@
+import { CLOSED_THROUGH_SQL, dayIsClosed, PeriodClosedError } from './acc-period';
 import { log } from './admin';
 import { DOC_TYPES, storeUpload } from './files';
 import { isGmailish } from './offline';
@@ -374,6 +375,7 @@ export async function recordExpense(db: D1Database, actor: string, v: ExpenseInp
   const seen = async () => (v.nonce ? await db.prepare('SELECT id FROM expenses WHERE nonce = ?').bind(v.nonce).first<{ id: string }>() : null);
   const before = await seen();
   if (before) return before.id;
+  if (await dayIsClosed(db, v.spentOn)) throw new PeriodClosedError(v.spentOn);
   const waits = needsApproval !== false;
   const checked = needsApproval === 'checked';
   const id = newId('exp');
@@ -403,7 +405,7 @@ export async function voidExpense(db: D1Database, actor: string, id: string, rea
   if (why.length < 2) return false;
   const r = await db
     .prepare(
-      `UPDATE expenses SET voided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), voided_by = ?, void_reason = ? WHERE id = ? AND voided_at IS NULL
+      `UPDATE expenses SET voided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), voided_by = ?, void_reason = ? WHERE id = ? AND voided_at IS NULL AND spent_on > ${CLOSED_THROUGH_SQL}
        RETURNING amount_minor AS amount`,
     )
     .bind(actor, why, id)
@@ -418,7 +420,7 @@ const EXPENSE_SELECT = `SELECT x.id, x.spent_on AS spentOn, x.category, x.amount
   x.voucher_no AS voucherNo, x.project_id AS projectId, p.name AS projectName, x.fund_id AS fundId, f.name AS fundName, x.party, x.checked_by AS checkedBy,
   x.created_at AS createdAt FROM expenses x LEFT JOIN acc_projects p ON p.id = x.project_id LEFT JOIN acc_funds f ON f.id = x.fund_id`;
 
-export type DecideResult = 'approved' | 'rejected' | 'checked' | 'missing' | 'self' | 'owner' | 'forbidden';
+export type DecideResult = 'approved' | 'rejected' | 'checked' | 'missing' | 'self' | 'owner' | 'forbidden' | 'closed';
 
 /**
  * Approves or turns down an expense that waits. Two steps above the owner's
@@ -438,6 +440,7 @@ export async function decideExpense(
   if (!e || e.status !== 'pending' || e.voidedAt) return 'missing';
   if (!who.owner && !who.full) return 'forbidden';
   if (!who.owner && e.recordedBy === actor) return 'self';
+  if (await dayIsClosed(db, e.spentOn)) return 'closed';
   const needsOwner = ownerOverTaka > 0 && e.amountMinor > ownerOverTaka * 100;
   if (decision === 'approved' && needsOwner && !who.owner) {
     if (e.checkedBy) return 'owner';
