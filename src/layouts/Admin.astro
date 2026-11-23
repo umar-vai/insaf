@@ -28,6 +28,7 @@ const ONLINE: Group[] = [
     items: [
       { href: '/admin/donations', label: 'সব দান', icon: 'receipt' },
       { href: '/admin/donations/record', label: 'অফিসে পাওয়া দান', icon: 'plus' },
+      { href: '/admin/donors/desk', label: 'দাতাদের কাজ', icon: 'bell' },
       { href: '/admin/donors', label: 'দাতা (CRM)', icon: 'users' },
       { href: '/admin/funds', label: 'তহবিল ও গল্প', icon: 'heart' },
     ],
@@ -94,7 +95,8 @@ const TASK_HINTS: Record<string, string> = {
   '/admin/visits': 'ওয়েবসাইট ভিজিট এবং দর্শনার্থীর রিপোর্ট',
   '/admin/donations': 'অনলাইন ও অফলাইন অনুদান, রসিদ এবং পেমেন্ট যাচাই',
   '/admin/donations/record': 'ক্যাশ ব্যাংক বিকাশ নগদ অনুদান অফিসে রেকর্ড করুন',
-  '/admin/donors': 'দাতার ইতিহাস, ফোন এবং CRM',
+  '/admin/donors/desk': 'দাতাকে রসিদ পাঠানো ধন্যবাদ ফলো আপ টিকেট অভিযোগ টেমপ্লেট দাতা রিপোর্ট',
+  '/admin/donors': 'দাতার প্রোফাইল ইতিহাস টাইমলাইন ট্যাগ সেগমেন্ট ফোন এবং CRM',
   '/admin/funds': 'জমি প্রজেক্ট অনুদানের লক্ষ্য ও তহবিল',
   '/admin/blog': 'ওয়েবসাইটের নোটিশ খবর ব্লগ পোস্ট',
   '/admin/offline': 'মাদরাসা দৈনিক সারাংশ, ছাত্র ফি ও আজকের ক্লাস',
@@ -127,6 +129,7 @@ const TASK_HINTS: Record<string, string> = {
   '/admin/offline/online-payments': 'গেটওয়ে পেমেন্ট যাচাই অনলাইন ফি',
   '/admin/offline/settings': 'মাদরাসা অফিসের নিয়ম ফি জরিমানা অনুমতি',
   '/admin/finance': 'দান ও ছাত্র ফি একসাথে মোট আয় ব্যয়',
+  '/admin/finance/consolidated': 'দান ফি অন্যান্য আয় খরচ তহবিল প্রকল্প একসাথে সমন্বিত অডিট রিপোর্ট',
   '/admin/team': 'টিম সদস্য নিয়োগ ভূমিকা অ্যাডমিন অনুমতি',
   '/admin/audit': 'অডিট লগ কে কী পরিবর্তন করেছে',
   '/admin/system': 'সিস্টেম সেটিংস SSLCommerz নিরাপত্তা',
@@ -136,6 +139,7 @@ const SHARED: Group = {
   label: 'প্রতিষ্ঠান',
   items: [
     { href: '/admin/finance', label: 'মোট আয় ব্যয়', icon: 'layers' },
+    { href: '/admin/finance/consolidated', label: 'সমন্বিত রিপোর্ট', icon: 'chart' },
     { href: '/admin/team', label: 'টিম ও অনুমতি', icon: 'user' },
     { href: '/admin/audit', label: 'কে কী করেছে', icon: 'clipboard' },
     { href: '/admin/system', label: 'সিস্টেম সেটিংস', icon: 'lock' },

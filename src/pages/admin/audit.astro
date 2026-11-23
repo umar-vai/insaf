@@ -17,7 +17,7 @@ const filter = {
 const [rows, actors] = await Promise.all([auditLog(env.DB, filter), auditActors(env.DB)]);
 const groups = [...new Set(Object.keys(ACTION_BN).map((a) => a.split('.')[0]!))];
 const GROUP_BN: Record<string, string> = {
-  attendance: 'হাজিরা', batch: 'ব্যাচ', blog: 'ব্লগ', config: 'সিস্টেম', course: 'কোর্স', enrollment: 'অনলাইন ভর্তি', exam: 'পরীক্ষা', expense: 'খরচ',
+  accounts: 'হিসাব খাতা', crm: 'ছাত্র CRM', donation: 'দান', donor: 'দাতা CRM', attendance: 'হাজিরা', batch: 'ব্যাচ', blog: 'ব্লগ', config: 'সিস্টেম', course: 'কোর্স', enrollment: 'অনলাইন ভর্তি', exam: 'পরীক্ষা', expense: 'খরচ',
   fee_online: 'অনলাইন ফি', leave: 'ছুটি', material: 'উপকরণ', notice: 'নোটিশ', offline: 'ছাত্র ও ফি', order: 'অর্ডার', payroll: 'বেতন',
   rating: 'মূল্যায়ন', reminder: 'রিমাইন্ডার', routine: 'রুটিন', settings: 'নিয়ম', staff: 'টিম', teacher: 'শিক্ষক', ticket: 'টিকেট',
 };
@@ -31,6 +31,7 @@ const next = rows.length === 100 ? new URLSearchParams({ ...Object.fromEntries(p
       <h1>কে কী করেছে</h1>
       <p>অ্যাডমিন, শিক্ষক আর ছাত্রদের প্যানেল থেকে করা প্রতিটি পরিবর্তন: কে, কখন, কী করেছেন, কোন রেকর্ডে, আর কোন IP ঠিকানা থেকে। শুধু মালিক দেখেন। কোনো এন্ট্রি মোছা যায় না।</p>
     </div>
+    <div class="actions"><a class="button button--ghost" href={`/admin/audit/export.csv?${new URLSearchParams({ actor: filter.actor, action: filter.action, from: filter.from, to: filter.to, q: filter.q })}`}>Excel এ নামান</a></div>
   </header>
 
   <form class="card filters" method="get">

@@ -1,0 +1,103 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import Icon from '../../../../components/Icon.astro';
+import AccountsNav from '../../../../components/admin/AccountsNav.astro';
+import { closedThrough, closePeriod, listCloses, reopenPeriod } from '../../../../server/acc-period';
+import { pendingExpenses } from '../../../../server/office';
+import { localsMayDo } from '../../../../server/staff';
+import { addDays, dayBn, todayDhaka } from '../../../../lib/offline';
+import { bnDigits, dateBn } from '../../../../lib/format';
+
+// Month end: close the books through a day so finished statements cannot
+// change. Full accounts power closes; only a real owner reopens.
+const actor = Astro.locals.staff!;
+const today = todayDhaka();
+const here = '/admin/offline/accounts/close';
+const full = localsMayDo(Astro.locals, 'accounts', 'full');
+const isOwner = Boolean(Astro.locals.staffOwner);
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  if (form.get('action') === 'reopen') {
+    if (!isOwner) return Astro.redirect(`${here}?error=owner`, 303);
+    const r = await reopenPeriod(env.DB, actor, String(form.get('reason') ?? ''));
+    return Astro.redirect(`${here}?${r.ok ? 'saved=1' : `error=${r.error}`}`, 303);
+  }
+  if (!full) return Astro.redirect(`${here}?error=full`, 303);
+  const r = await closePeriod(env.DB, actor, String(form.get('through') ?? ''), today, String(form.get('note') ?? ''));
+  return Astro.redirect(`${here}?${r.ok ? 'saved=1' : `error=${r.error}`}`, 303);
+}
+
+const [through, closes, pending] = await Promise.all([closedThrough(env.DB), listCloses(env.DB), pendingExpenses(env.DB)]);
+const lastMonthEnd = addDays(`${today.slice(0, 7)}-01`, -1);
+const suggested = through && through >= lastMonthEnd ? addDays(today, -1) : lastMonthEnd;
+const ERR: Record<string, string> = {
+  day: 'আজকের আগের একটি তারিখ দিন।', already: 'এই তারিখ পর্যন্ত হিসাব আগেই বন্ধ আছে।', pending: 'এই সময়ের কিছু খরচ অনুমোদনের অপেক্ষায় আছে। আগে সেগুলো শেষ করুন।',
+  owner: 'বন্ধ হিসাব শুধু মালিক খুলতে পারেন।', full: 'হিসাব বন্ধ করতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।', reason: 'কেন খুলছেন লিখুন।', none: 'কোনো বন্ধ হিসাব নেই।',
+};
+const err = Astro.url.searchParams.get('error');
+---
+
+<Admin title="হিসাব বন্ধ">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/offline/accounts">হিসাব খাতা</a></p>
+      <h1>মাস শেষে হিসাব বন্ধ</h1>
+      <p>হিসাব বন্ধ করলে সেই তারিখ পর্যন্ত নতুন লেখা, অনুমোদন বা বাতিল করা যাবে না, তাই অডিটরকে দেওয়া হিসাব আর বদলায় না। অনলাইনে যাচাই হওয়া ফি সবসময় জমা হবে।</p>
+    </div>
+  </header>
+  <AccountsNav />
+  {err && <p class="note note--bad" role="alert">{ERR[err] ?? 'কাজটি করা যায়নি।'}</p>}
+
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>এখনকার অবস্থা</h2></div>
+      <p>{through ? <>হিসাব বন্ধ আছে <strong>{dayBn(through)}</strong> পর্যন্ত।</> : 'এখনো কোনো হিসাব বন্ধ করা হয়নি।'}</p>
+      {pending.length > 0 && <p class="note note--warn"><a href="/admin/offline/expenses">{bnDigits(pending.length)}টি খরচ</a> অনুমোদনের অপেক্ষায় আছে।</p>}
+      <ol class="steps">
+        <li><a href="/admin/offline/expenses">অপেক্ষার খরচ শেষ করুন</a></li>
+        <li><a href="/admin/offline/accounts/reconcile">ব্যাংক ও ক্যাশ মিলিয়ে নিন</a></li>
+        <li><a href="/admin/offline/accounts/statement?p=last">গত মাসের বিবরণী দেখে নিন</a></li>
+        <li>নিচে তারিখ দিয়ে হিসাব বন্ধ করুন</li>
+      </ol>
+    </section>
+    {full && (
+      <section class="card">
+        <div class="card__head"><h2>হিসাব বন্ধ করুন</h2></div>
+        <form method="post" class="form-grid" data-confirm="এই তারিখ পর্যন্ত হিসাব বন্ধ করবেন?">
+          <label class="field"><span>কোন তারিখ পর্যন্ত</span><input type="date" name="through" required value={suggested} max={addDays(today, -1)} /></label>
+          <label class="field wide"><span>নোট (ঐচ্ছিক)</span><input name="note" maxlength="300" /></label>
+          <button class="button"><Icon name="lock" /> হিসাব বন্ধ করুন</button>
+        </form>
+      </section>
+    )}
+    {isOwner && through && (
+      <section class="card">
+        <div class="card__head"><h2>আবার খুলুন (শুধু মালিক)</h2></div>
+        <form method="post" class="form-grid" data-confirm="বন্ধ হিসাব আবার খুলবেন? অডিট লগে থাকবে।">
+          <input type="hidden" name="action" value="reopen" />
+          <label class="field wide"><span>কেন খুলছেন</span><input name="reason" required minlength="3" maxlength="300" /></label>
+          <button class="button button--ghost">আবার খুলুন</button>
+        </form>
+      </section>
+    )}
+  </div>
+
+  <section class="card block">
+    <div class="card__head"><h2>ইতিহাস</h2></div>
+    {closes.length === 0 ? <p class="muted">কিছু নেই।</p> : (
+      <div class="table-wrap"><table>
+        <thead><tr><th>পর্যন্ত</th><th>কে বন্ধ করেছেন</th><th>অবস্থা</th></tr></thead>
+        <tbody>{closes.map((c) => (
+          <tr><td>{dayBn(c.throughDay)}{c.note && <small class="muted"><br />{c.note}</small>}</td><td><small>{c.closedBy} · {dateBn(c.closedAt, true)}</small></td>
+            <td>{c.reopenedAt ? <small>আবার খুলেছেন {c.reopenedBy}, {dateBn(c.reopenedAt, true)}: {c.reopenReason}</small> : <span class="pill pill--paid">বন্ধ</span>}</td></tr>
+        ))}</tbody>
+      </table></div>
+    )}
+  </section>
+</Admin>
+<style>
+  .block { margin-top: var(--space-5); }
+  .steps { margin: var(--space-3) 0 0; padding-left: var(--space-5); display: grid; gap: var(--space-1); }
+</style>

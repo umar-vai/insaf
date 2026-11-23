@@ -2,14 +2,17 @@
 import { env } from 'cloudflare:workers';
 import Admin from '../../../layouts/Admin.astro';
 import Icon from '../../../components/Icon.astro';
-import { decideExpense, expensesBetween, parseExpenseForm, pendingExpenses, recordExpense, usedCategories, voidExpense } from '../../../server/office';
+import { decideExpense, expensesBetween, getExpense, parseExpenseForm, pendingExpenses, recordExpense, usedCategories, voidExpense } from '../../../server/office';
 import { getSettings } from '../../../server/settings';
 import { IMAGE_TYPES, storeUpload } from '../../../server/files';
 import { localsMayDo } from '../../../server/staff';
-import { addMonths, dayBn, EXPENSE_CATEGORIES, METHOD_BN, monthBn, PAY_METHODS, todayDhaka, type PayMethod } from '../../../lib/offline';
+import { addDays, addMonths, dayBn, EXPENSE_CATEGORIES, METHOD_BN, monthBn, PAY_METHODS, todayDhaka, type PayMethod } from '../../../lib/offline';
 import { bnDigits, taka } from '../../../lib/format';
 import AccountsNav from '../../../components/admin/AccountsNav.astro';
 import { GENERAL_FUND, listFunds, listProjects, newExpenseStage, voucherCode } from '../../../server/accounts';
+import { closedThrough, dayIsClosed } from '../../../server/acc-period';
+import { restrictedFundShort } from '../../../server/acc-controls';
+import { log } from '../../../server/admin';
 
 const today = todayDhaka();
 const actor = Astro.locals.staff!;
@@ -23,17 +26,32 @@ if (Astro.request.method === 'POST') {
   if (form.get('action') === 'approve' || form.get('action') === 'reject') {
     if (!owner) return Astro.redirect('/admin/offline/expenses?error=owner', 303);
     const rules = await getSettings(env.DB);
+    if (form.get('action') === 'approve') {
+      // Spending past a restricted fund's balance needs a real owner.
+      const pendingOne = await getExpense(env.DB, String(form.get('id') ?? ''));
+      const short = pendingOne ? await restrictedFundShort(env.DB, pendingOne.fundId, pendingOne.amountMinor, today) : null;
+      if (short && !isOwner) return Astro.redirect('/admin/offline/expenses?error=fund_short', 303);
+      if (short && pendingOne) await log(env.DB, actor, 'accounts.fund.override', `expense:${pendingOne.id}`, { fund: short.fundName, balance: short.balanceMinor / 100, short: short.shortMinor / 100 });
+    }
     const r = await decideExpense(env.DB, actor, String(form.get('id') ?? ''), form.get('action') === 'approve' ? 'approved' : 'rejected', { owner: isOwner, full: owner }, rules.expenseOwnerOver);
     const okay = r === 'approved' || r === 'rejected' || r === 'checked';
     return Astro.redirect(`/admin/offline/expenses?${okay ? `saved=1${r === 'checked' ? '&checked=1' : ''}` : `error=${r === 'missing' ? 'expense' : r}`}`, 303);
   }
   if (form.get('action') === 'void') {
     if (!owner) return Astro.redirect('/admin/offline/expenses?error=owner', 303);
+    const target = await getExpense(env.DB, String(form.get('id') ?? ''));
+    if (target && (await dayIsClosed(env.DB, target.spentOn))) return Astro.redirect(`/admin/offline/expenses?m=${form.get('m')}&error=closed`, 303);
+    // A large approved expense needed the owner to pass, so it needs the owner to cancel.
+    const limits = await getSettings(env.DB);
+    if (target && !isOwner && target.status === 'approved' && limits.expenseOwnerOver > 0 && target.amountMinor > limits.expenseOwnerOver * 100) return Astro.redirect(`/admin/offline/expenses?m=${form.get('m')}&error=void_owner`, 303);
     const ok = await voidExpense(env.DB, actor, String(form.get('id') ?? ''), String(form.get('reason') ?? ''));
     return Astro.redirect(`/admin/offline/expenses?m=${form.get('m')}&${ok ? 'saved=1' : 'error=reason'}`, 303);
   }
   const v = parseExpenseForm(form, today);
   if (!v.ok) return Astro.redirect(`/admin/offline/expenses?new=1&error=${v.error}`, 303);
+  if (await dayIsClosed(env.DB, v.value.spentOn)) return Astro.redirect('/admin/offline/expenses?new=1&error=closed', 303);
+  const fundShort = await restrictedFundShort(env.DB, v.value.fundId, v.value.amountTaka * 100, today);
+  if (fundShort && !(isOwner && form.get('overrideFund') === 'on')) return Astro.redirect(`/admin/offline/expenses?new=1&error=${isOwner ? 'fund_short_owner' : 'fund_short'}`, 303);
   let voucher: string | null = null;
   const file = form.get('voucher');
   if (file instanceof File && file.size > 0) {
@@ -45,16 +63,18 @@ if (Astro.request.method === 'POST') {
   const rules = await getSettings(env.DB);
   const stage = newExpenseStage(v.value.amountTaka, { owner: isOwner, full: owner }, { approvalOver: rules.expenseApprovalOver, ownerOver: rules.expenseOwnerOver });
   const newId = await recordExpense(env.DB, actor, v.value, voucher, stage === 'approved' ? false : stage);
+  if (fundShort) await log(env.DB, actor, 'accounts.fund.override', `expense:${newId}`, { fund: fundShort.fundName, balance: fundShort.balanceMinor / 100, short: fundShort.shortMinor / 100 });
   return Astro.redirect(`/admin/offline/expenses?m=${v.value.spentOn.slice(0, 7)}&saved=1&done=${newId}${stage !== 'approved' ? `&waits=${stage}` : ''}`, 303);
 }
 
 const asked = Astro.url.searchParams.get('m') ?? '';
 const thisMonth = today.slice(0, 7);
 const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(asked) ? asked : thisMonth;
-const [r, used, pending, s, projects, funds] = await Promise.all([expensesBetween(env.DB, `${month}-01`, `${month}-31`), usedCategories(env.DB), pendingExpenses(env.DB), getSettings(env.DB), listProjects(env.DB), listFunds(env.DB)]);
+const [r, used, pending, s, projects, funds, closedDay] = await Promise.all([expensesBetween(env.DB, `${month}-01`, `${month}-31`), usedCategories(env.DB), pendingExpenses(env.DB), getSettings(env.DB), listProjects(env.DB), listFunds(env.DB), closedThrough(env.DB)]);
+const nextDay = (d: string) => addDays(d, 1);
 const needsOwner = (minor: number) => s.expenseOwnerOver > 0 && minor > s.expenseOwnerOver * 100;
 const done = Astro.url.searchParams.get('done');
-const ERR: Record<string, string> = { owner: 'অনুমোদন বা বাতিল করতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।', self: 'নিজের লেখা খরচ নিজে অনুমোদন করা যায় না, অন্য কেউ অনুমোদন দেবেন।', expense: 'খরচটি আর অপেক্ষায় নেই।', reason: 'বাতিলের কারণ লিখুন।', amount: 'টাকার অঙ্ক সঠিক নয়।', spentOn: 'তারিখ সঠিক নয়।', category: 'খাত লিখুন।' };
+const ERR: Record<string, string> = { owner: 'অনুমোদন বা বাতিল করতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।', self: 'নিজের লেখা খরচ নিজে অনুমোদন করা যায় না, অন্য কেউ অনুমোদন দেবেন।', expense: 'খরচটি আর অপেক্ষায় নেই।', reason: 'বাতিলের কারণ লিখুন।', amount: 'টাকার অঙ্ক সঠিক নয়।', spentOn: 'তারিখ সঠিক নয়।', category: 'খাত লিখুন।', closed: 'এই তারিখের হিসাব বন্ধ করা আছে। মালিক আবার খুললে তবেই বদলানো যাবে।', fund_short: 'এই নির্দিষ্ট তহবিলে এত টাকা নেই। আগে তহবিলে আয় লিখুন, অথবা মালিককে জানান।', fund_short_owner: 'এই নির্দিষ্ট তহবিলে এত টাকা নেই। তবুও খরচ করতে চাইলে ফরমের নিচের টিক দিয়ে আবার সংরক্ষণ করুন।', void_owner: 'এত বড় খরচ শুধু মালিক বাতিল করতে পারেন।' };
 const err = Astro.url.searchParams.get('error');
 const categories = [...new Set([...used, ...EXPENSE_CATEGORIES])];
 const top = r.byCategory[0]?.totalMinor ?? 1;
@@ -112,7 +132,7 @@ const top = r.byCategory[0]?.totalMinor ?? 1;
       <label class="field"><span>খাত</span><input name="category" required list="exp-cats" maxlength="60" placeholder="যেমন বাড়ি ভাড়া" /></label>
       <datalist id="exp-cats">{categories.map((c) => <option value={c} />)}</datalist>
       <label class="field"><span>টাকা</span><input name="amount" required inputmode="numeric" /></label>
-      <label class="field"><span>তারিখ</span><input name="spentOn" type="date" required value={today} max={today} /></label>
+      <label class="field"><span>তারিখ</span><input name="spentOn" type="date" required value={today} min={closedDay ? nextDay(closedDay) : undefined} max={today} /></label>
       <label class="field"><span>কীভাবে দেওয়া হয়েছে</span><select name="method">{PAY_METHODS.map((m) => <option value={m}>{METHOD_BN[m]}</option>)}</select></label>
       <label class="field"><span>যাঁকে দেওয়া হয়েছে</span><input name="party" maxlength="120" placeholder="দোকান, ব্যক্তি বা প্রতিষ্ঠান" /></label>
       <label class="field"><span>তহবিল</span><select name="fundId">{funds.map((f) => <option value={f.id} selected={f.id === GENERAL_FUND}>{f.name}</option>)}</select></label>
@@ -120,6 +140,7 @@ const top = r.byCategory[0]?.totalMinor ?? 1;
       <label class="field wide"><span>বিবরণ (ঐচ্ছিক)</span><input name="description" maxlength="500" placeholder="কী বাবদ" /></label>
       {!isOwner && (s.expenseApprovalOver > 0 || s.expenseOwnerOver > 0) && <p class="wide muted"><small>{!owner && s.expenseApprovalOver > 0 && `${taka(s.expenseApprovalOver * 100)} এর বেশি খরচ হিসাবরক্ষক অনুমোদন দিলে তবেই হিসাবে ধরা হবে। `}{s.expenseOwnerOver > 0 && `${taka(s.expenseOwnerOver * 100)} এর বেশি হলে মালিকের চূড়ান্ত অনুমোদনও লাগবে।`}</small></p>}
       <label class="field wide"><span>ভাউচারের ছবি (ঐচ্ছিক, JPG বা PNG)</span><input name="voucher" type="file" accept="image/jpeg,image/png,image/webp" /></label>
+      {isOwner && err === 'fund_short_owner' && <label class="check wide"><input type="checkbox" name="overrideFund" /> জেনে বুঝে তহবিলের ব্যালেন্সের বেশি খরচ করছি (অডিট লগে থাকবে)</label>}
       <button class="button">খরচ সংরক্ষণ করুন</button>
     </form>
   </details>

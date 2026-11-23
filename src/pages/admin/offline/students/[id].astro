@@ -1,5 +1,6 @@
 ---
 import { env } from 'cloudflare:workers';
+import { dayIsClosed } from '../../../../server/acc-period';
 import Admin from '../../../../layouts/Admin.astro';
 import PortalLogin from '../../../../components/admin/PortalLogin.astro';
 import Icon from '../../../../components/Icon.astro';
@@ -93,6 +94,7 @@ if (Astro.request.method === 'POST') {
   } else if (action === 'pay' && mine) {
     const v = parsePaymentForm(form, today);
     if (!v.ok) return fail(v.error);
+    if (await dayIsClosed(env.DB, v.value.paidOn)) return fail('closed');
     const r = await recordPayment(env.DB, actor, enrollmentId, v.value, today);
     if (!r.ok) return fail(r.error);
     return Astro.redirect(`${here}?paid=${r.id}#e-${enrollmentId}`, 303);
@@ -115,6 +117,8 @@ if (Astro.request.method === 'POST') {
   } else if (action === 'void' && owner) {
     const paymentId = String(form.get('paymentId') ?? '');
     if (!current.payments.some((p) => p.id === paymentId)) return fail('payment');
+    const paidOn = current.payments.find((p) => p.id === paymentId)?.paidOn;
+    if (paidOn && (await dayIsClosed(env.DB, paidOn))) return fail('closed');
     if (!(await voidPayment(env.DB, actor, paymentId, String(form.get('reason') ?? '')))) return fail('reason');
   } else {
     return fail('action');
@@ -180,6 +184,7 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
     )
   }
   {tooMuch && <p class="note note--bad" role="alert">যত টাকা বাকি আছে তার চেয়ে বেশি লেখা হয়েছে। টাকার অঙ্ক আবার দেখুন।</p>}
+  {Astro.url.searchParams.get('error') === 'closed' && <p class="note note--bad" role="alert">এই তারিখের হিসাব বন্ধ করা আছে। মালিক আবার খুললে তবেই বদলানো যাবে।</p>}
 
   <section class="card" id="guardian-access">
     <div class="card__head"><h2>অনুমোদিত অভিভাবক অ্যাকাউন্ট</h2></div>

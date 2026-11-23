@@ -2,14 +2,24 @@
 import { env } from 'cloudflare:workers';
 import Admin from '../../../layouts/Admin.astro';
 import Icon from '../../../components/Icon.astro';
-import { listDonors } from '../../../server/donations';
-import { waNumber } from '../../../lib/offline';
+import { allDonorTags, donorDirectory, SEGMENT_BN, SEGMENT_HINT, SEGMENTS } from '../../../server/donor-crm';
+import { todayDhaka, waNumber } from '../../../lib/offline';
 import { bnDigits, dateBn, taka } from '../../../lib/format';
 
-const q = Astro.url.searchParams.get('q')?.trim().slice(0, 60) ?? '';
-const donors = await listDonors(env.DB, q, 500);
-const total = donors.reduce((s, d) => s + d.totalMinor, 0);
-const repeat = donors.filter((d) => d.gifts > 1).length;
+const p = Astro.url.searchParams;
+const q = p.get('q')?.trim().slice(0, 60) ?? '';
+const segment = (SEGMENTS as readonly string[]).includes(p.get('segment') ?? '') ? p.get('segment')! : '';
+const tag = p.get('tag')?.slice(0, 40) ?? '';
+const minTaka = Math.max(0, Math.min(100_000_000, Number.parseInt(p.get('min') ?? '0', 10) || 0));
+const [dir, tags] = await Promise.all([donorDirectory(env.DB, todayDhaka(), { q, segment, tag, minTaka }), allDonorTags(env.DB)]);
+const link = (s: string) => {
+  const u = new URLSearchParams();
+  if (q) u.set('q', q);
+  if (s) u.set('segment', s);
+  if (tag) u.set('tag', tag);
+  if (minTaka) u.set('min', String(minTaka));
+  return `?${u}`;
+};
 ---
 
 <Admin title="দাতা (CRM)">
@@ -17,41 +27,52 @@ const repeat = donors.filter((d) => d.gifts > 1).length;
     <div>
       <p class="eyebrow">দান CRM</p>
       <h1>দাতাগণ</h1>
-      <p>একই মোবাইল নম্বরের সব দান এক দাতার নামে ধরা হয়। নাম চাপলে তাঁর পুরো দানের ইতিহাস দেখা যাবে।</p>
+      <p>একই মোবাইল নম্বরের সব দান এক দাতার নামে ধরা হয়। নাম চাপলে তাঁর প্রোফাইল, পুরো ইতিহাস ও যোগাযোগ দেখা যাবে।</p>
     </div>
+    <div class="actions"><a class="button" href="/admin/donors/desk"><Icon name="bell" /> আজকের কাজ</a></div>
   </header>
 
   <div class="kpis">
-    <div class="kpi"><span class="kpi__label">দাতা</span><strong class="kpi__value">{bnDigits(donors.length)}</strong></div>
-    <div class="kpi"><span class="kpi__label">একাধিকবার দিয়েছেন</span><strong class="kpi__value">{bnDigits(repeat)}</strong></div>
-    <div class="kpi"><span class="kpi__label">এই তালিকার মোট</span><strong class="kpi__value">{taka(total)}</strong></div>
+    <div class="kpi"><span class="kpi__label">এই তালিকায় দাতা</span><strong class="kpi__value">{bnDigits(dir.matched)}</strong></div>
+    <div class="kpi"><span class="kpi__label">নিয়মিত দাতা</span><strong class="kpi__value">{bnDigits(dir.bySegment.regular)}</strong></div>
+    <div class="kpi kpi--warn"><span class="kpi__label">অনেক দিন দেননি</span><strong class="kpi__value">{bnDigits(dir.bySegment.lapsed)}</strong></div>
+    <div class="kpi"><span class="kpi__label">এই তালিকার মোট</span><strong class="kpi__value">{taka(dir.totalMinor)}</strong></div>
   </div>
 
+  <nav class="tabs seg" aria-label="দাতার ধরন">
+    <a href={link('')} aria-current={!segment ? 'page' : undefined}>সবাই</a>
+    {SEGMENTS.map((s) => <a href={link(s)} title={SEGMENT_HINT[s]} aria-current={segment === s ? 'page' : undefined}>{SEGMENT_BN[s]} ({bnDigits(dir.bySegment[s])})</a>)}
+  </nav>
+
   <form class="toolbar" method="get">
+    {segment && <input type="hidden" name="segment" value={segment} />}
     <input name="q" value={q} placeholder="নাম, মোবাইল বা ইমেইল" aria-label="খুঁজুন" />
+    <select name="tag" aria-label="ট্যাগ"><option value="">সব ট্যাগ</option>{tags.map((t) => <option value={t.tag} selected={t.tag === tag}>{t.tag} ({bnDigits(t.count)})</option>)}</select>
+    <input name="min" inputmode="numeric" value={minTaka || ''} placeholder="কমপক্ষে কত টাকা" aria-label="কমপক্ষে মোট দান" />
     <button class="button button--ghost">খুঁজুন</button>
   </form>
 
   <section class="card">
     {
-      donors.length === 0 ? (
+      dir.rows.length === 0 ? (
         <div class="empty"><Icon name="users" size={28} /><p>কোনো দাতা পাওয়া যায়নি।</p></div>
       ) : (
         <div class="table-wrap">
           <table>
-            <thead><tr><th>দাতা</th><th class="num">মোট</th><th class="num">দান</th><th>প্রথম / শেষ</th><th>তহবিল</th><th></th></tr></thead>
+            <thead><tr><th>দাতা</th><th>ধরন ও ট্যাগ</th><th class="num">মোট</th><th class="num">দান</th><th>শেষ দান</th><th>শেষ যোগাযোগ</th><th></th></tr></thead>
             <tbody>
-              {donors.map((d) => {
-                const wa = d.phone ? waNumber(d.phone) : null;
+              {dir.rows.map((d) => {
+                const wa = d.phone && !d.doNotContact ? waNumber(d.phone) : null;
                 return (
                   <tr>
                     <td><a href={`/admin/donors/${encodeURIComponent(d.key)}`}><strong>{d.name}</strong></a><small class="muted"><br />{d.phone || d.email}</small></td>
+                    <td><span class="pill pill--info">{SEGMENT_BN[d.segment]}</span>{d.doNotContact && <span class="pill pill--failed">যোগাযোগ নয়</span>}{d.tags.length > 0 && <small class="muted"><br />{d.tags.join(', ')}</small>}</td>
                     <td class="num">{taka(d.totalMinor)}</td>
                     <td class="num">{bnDigits(d.gifts)}</td>
-                    <td><small>{dateBn(d.firstAt)}<br />{dateBn(d.lastAt)}</small></td>
-                    <td><small>{d.funds}</small></td>
+                    <td><small>{dateBn(d.lastAt)}</small></td>
+                    <td><small>{d.lastContact ? dateBn(d.lastContact) : 'হয়নি'}</small></td>
                     <td class="keep">
-                      {d.phone && <a class="button button--sm button--ghost" href={`tel:${d.phone}`} aria-label="ফোন"><Icon name="phone" size={16} /></a>}
+                      {d.phone && !d.doNotContact && <a class="button button--sm button--ghost" href={`tel:${d.phone}`} aria-label="ফোন"><Icon name="phone" size={16} /></a>}
                       {wa && <a class="button button--sm button--wa" href={`https://wa.me/${wa}`} rel="noopener" aria-label="WhatsApp"><Icon name="whatsapp" size={16} /></a>}
                     </td>
                   </tr>
@@ -63,15 +84,18 @@ const repeat = donors.filter((d) => d.gifts > 1).length;
       )
     }
   </section>
+  {dir.matched > dir.rows.length && <p class="muted"><small>প্রথম {bnDigits(dir.rows.length)} জন দেখানো হচ্ছে। খুঁজে বা ছেঁকে তালিকা ছোট করুন।</small></p>}
 </Admin>
 
 <style>
+  .seg { margin: var(--space-5) 0 var(--space-3); flex-wrap: wrap; }
   .toolbar {
     display: flex;
+    flex-wrap: wrap;
     gap: var(--space-2);
-    margin: var(--space-5) 0;
-    max-width: 520px;
+    margin: 0 0 var(--space-5);
   }
+  .toolbar input, .toolbar select { flex: 1 1 160px; width: auto; }
   .keep {
     display: flex;
     gap: var(--space-1);

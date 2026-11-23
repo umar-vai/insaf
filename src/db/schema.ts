@@ -1046,6 +1046,106 @@ export const portalNotifications = sqliteTable('portal_notifications', {
   index('portal_notifications_teacher_idx').on(t.teacherId, t.readAt, t.createdAt),
 ]);
 
+// ---- Donor CRM and accounting controls (0007) ----
+
+export const donorProfiles = sqliteTable('donor_profiles', {
+  donorKey: text('donor_key').primaryKey(),
+  note: text('note').notNull().default(''),
+  preferredChannel: text('preferred_channel', { enum: ['call', 'sms', 'whatsapp', 'email', 'visit', 'letter'] }).notNull().default('whatsapp'),
+  doNotContact: integer('do_not_contact').notNull().default(0),
+  updatedBy: text('updated_by').notNull(),
+  updatedAt: timestamp('updated_at'),
+});
+
+export const donorTags = sqliteTable('donor_tags', {
+  donorKey: text('donor_key').notNull(),
+  tag: text('tag').notNull(),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [primaryKey({ columns: [t.donorKey, t.tag] }), index('donor_tags_tag_idx').on(t.tag)]);
+
+export const donorFollowups = sqliteTable('donor_followups', {
+  id: text('id').primaryKey(),
+  donorKey: text('donor_key').notNull(),
+  title: text('title').notNull(),
+  dueOn: text('due_on').notNull(),
+  assignedTo: text('assigned_to').notNull().default(''),
+  status: text('status', { enum: ['open', 'done', 'cancelled'] }).notNull().default('open'),
+  outcome: text('outcome').notNull().default(''),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+  doneBy: text('done_by'),
+  doneAt: text('done_at'),
+}, (t) => [index('donor_followups_due_idx').on(t.status, t.dueOn), index('donor_followups_donor_idx').on(t.donorKey)]);
+
+export const donorContacts = sqliteTable('donor_contacts', {
+  id: text('id').primaryKey(),
+  donorKey: text('donor_key').notNull(),
+  channel: text('channel', { enum: ['call', 'sms', 'whatsapp', 'email', 'visit', 'letter'] }).notNull(),
+  direction: text('direction', { enum: ['out', 'in'] }).notNull().default('out'),
+  summary: text('summary').notNull(),
+  donationRef: text('donation_ref'),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [
+  index('donor_contacts_donor_idx').on(t.donorKey, t.createdAt),
+  index('donor_contacts_created_idx').on(t.createdAt),
+  uniqueIndex('donor_contacts_receipt_idx').on(t.donationRef).where(sql`${t.donationRef} IS NOT NULL`),
+]);
+
+export const donorTickets = sqliteTable('donor_tickets', {
+  id: text('id').primaryKey(),
+  ticketNo: integer('ticket_no').notNull(),
+  donorKey: text('donor_key').notNull(),
+  subject: text('subject').notNull(),
+  category: text('category', { enum: ['receipt', 'payment', 'information', 'complaint', 'other'] }).notNull().default('other'),
+  status: text('status', { enum: ['open', 'closed'] }).notNull().default('open'),
+  assignedTo: text('assigned_to').notNull().default(''),
+  createdBy: text('created_by').notNull(),
+  closedBy: text('closed_by'),
+  closedAt: text('closed_at'),
+  createdAt: timestamp('created_at'),
+  updatedAt: timestamp('updated_at'),
+}, (t) => [uniqueIndex('donor_tickets_no_idx').on(t.ticketNo), index('donor_tickets_status_idx').on(t.status, t.updatedAt), index('donor_tickets_donor_idx').on(t.donorKey)]);
+
+export const donorTicketMessages = sqliteTable('donor_ticket_messages', {
+  id: text('id').primaryKey(),
+  ticketId: text('ticket_id').notNull().references(() => donorTickets.id),
+  author: text('author').notNull(),
+  body: text('body').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [index('donor_ticket_messages_idx').on(t.ticketId, t.createdAt)]);
+
+export const donorTemplates = sqliteTable('donor_templates', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  purpose: text('purpose', { enum: ['general', 'receipt'] }).notNull().default('general'),
+  body: text('body').notNull(),
+  status: text('status', { enum: ['active', 'archived'] }).notNull().default('active'),
+  createdBy: text('created_by').notNull(),
+  updatedAt: timestamp('updated_at'),
+});
+
+export const accPeriodCloses = sqliteTable('acc_period_closes', {
+  id: text('id').primaryKey(),
+  throughDay: text('through_day').notNull(),
+  note: text('note').notNull().default(''),
+  closedBy: text('closed_by').notNull(),
+  closedAt: timestamp('closed_at'),
+  reopenedBy: text('reopened_by'),
+  reopenedAt: text('reopened_at'),
+  reopenReason: text('reopen_reason'),
+}, (t) => [index('acc_period_closes_open_idx').on(t.reopenedAt, t.throughDay)]);
+
+export const accClearedItems = sqliteTable('acc_cleared_items', {
+  accountId: text('account_id').notNull().references(() => accAccounts.id),
+  source: text('source', { enum: ['fee', 'income', 'expense', 'transfer'] }).notNull(),
+  txnId: text('txn_id').notNull(),
+  clearedOn: text('cleared_on').notNull(),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [primaryKey({ columns: [t.accountId, t.source, t.txnId] })]);
+
 // ---- Accounts and student CRM (0004) ----
 
 export const accProjects = sqliteTable('acc_projects', {

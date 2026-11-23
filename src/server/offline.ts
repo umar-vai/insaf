@@ -1,3 +1,4 @@
+import { CLOSED_THROUGH_SQL } from './acc-period';
 import { log } from './admin';
 import { bnDigits } from '../lib/format';
 import { addDays, isYmd, lateInstallments, ledger, parseCharges, PAY_METHODS, PLAN_MONTHS, parseTaka, type Ledger, type PayMethod } from '../lib/offline';
@@ -418,7 +419,7 @@ export async function voidPayment(db: D1Database, actor: string, paymentId: stri
   const r = await db
     .prepare(
       `UPDATE offline_payments SET voided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), voided_by = ?, void_reason = ?
-       WHERE id = ? AND voided_at IS NULL RETURNING enrollment_id AS enrollmentId, receipt_no AS receiptNo, amount_minor AS amount`,
+       WHERE id = ? AND voided_at IS NULL AND paid_on > ${CLOSED_THROUGH_SQL} RETURNING enrollment_id AS enrollmentId, receipt_no AS receiptNo, amount_minor AS amount`,
     )
     .bind(actor, why, paymentId)
     .first<{ enrollmentId: string; receiptNo: number; amount: number }>();

@@ -1,0 +1,244 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import Icon from '../../../components/Icon.astro';
+import {
+  archiveDonorTemplate,
+  closeDonorFollowup,
+  DEFAULT_RECEIPT_TEXT,
+  DONOR_CHANNEL_BN,
+  DONOR_CHANNELS,
+  DONOR_TEMPLATE_VARS,
+  donorEngagement,
+  listDonorContacts,
+  listDonorFollowups,
+  listDonorTemplates,
+  listDonorTickets,
+  markReceiptSent,
+  parseDonorTemplate,
+  receiptMessage,
+  replyDonorTicket,
+  saveDonorTemplate,
+  SEGMENT_BN,
+  SEGMENTS,
+  thanksQueue,
+  TICKET_CATEGORY_BN,
+} from '../../../server/donor-crm';
+import { dayBn, todayDhaka, waNumber } from '../../../lib/offline';
+import { bnDigits, dateBn, receiptLabel, taka } from '../../../lib/format';
+
+// The donor team's daily desk: receipts to send, follow ups due, open
+// tickets, message templates and the engagement report in one place.
+const actor = Astro.locals.staff!;
+const today = todayDhaka();
+const here = '/admin/donors/desk';
+const q = Astro.url.searchParams;
+const tab = (['today', 'tickets', 'log', 'templates', 'report'] as const).find((t) => t === q.get('tab')) ?? 'today';
+
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  const back = (t: string, good: boolean, error = 'action') => Astro.redirect(`${here}?tab=${t}&${good ? 'saved=1' : `error=${error}`}`, 303);
+  if (action === 'receipt') {
+    const ref = String(form.get('reference') ?? '').slice(0, 40);
+    const m = await receiptMessage(env.DB, ref, Astro.url.origin, today);
+    const wa = m?.phone ? waNumber(m.phone) : null;
+    if (!m || !wa) return back('today', false, 'receipt');
+    await markReceiptSent(env.DB, actor, ref, 'whatsapp', Astro.url.origin, today);
+    return Astro.redirect(`https://wa.me/${wa}?text=${encodeURIComponent(m.message)}`, 303);
+  }
+  if (action === 'receipt_done') {
+    const ch = DONOR_CHANNELS.find((c) => c === form.get('channel')) ?? 'call';
+    return back('today', await markReceiptSent(env.DB, actor, String(form.get('reference') ?? '').slice(0, 40), ch, Astro.url.origin, today), 'receipt');
+  }
+  if (action === 'close') return back('today', await closeDonorFollowup(env.DB, actor, String(form.get('id') ?? ''), form.get('status') === 'cancelled' ? 'cancelled' : 'done', String(form.get('outcome') ?? ''), form.get('channel')), 'followup');
+  if (action === 'reply') return back('tickets', await replyDonorTicket(env.DB, actor, String(form.get('id') ?? ''), String(form.get('body') ?? ''), form.get('close') === '1'), 'reply');
+  if (action === 'template') {
+    const v = parseDonorTemplate(form);
+    if (!v.ok) return back('templates', false, v.error);
+    const r = await saveDonorTemplate(env.DB, actor, String(form.get('id') ?? '') || null, v.value);
+    return r.ok ? back('templates', true) : back('templates', false, r.error);
+  }
+  if (action === 'archive') return back('templates', await archiveDonorTemplate(env.DB, actor, String(form.get('id') ?? '')));
+  return back(tab, false);
+}
+
+const [thanks, followups] = tab === 'today' ? await Promise.all([thanksQueue(env.DB, today), listDonorFollowups(env.DB, { status: 'open' })]) : [[], []];
+const tickets = tab === 'tickets' ? await listDonorTickets(env.DB) : [];
+const contacts = tab === 'log' ? await listDonorContacts(env.DB, { limit: 150 }) : [];
+const templates = tab === 'templates' ? await listDonorTemplates(env.DB) : [];
+const editing = templates.find((t) => t.id === q.get('edit'));
+const report = tab === 'report' ? await donorEngagement(env.DB, today) : null;
+const donorHref = (k: string) => `/admin/donors/${encodeURIComponent(k)}`;
+const ERR: Record<string, string> = { receipt: 'রসিদ পাঠানো যায়নি। দাতার নম্বর ও দানের অবস্থা দেখুন।', followup: 'ফলো আপটি আর খোলা নেই।', reply: 'উত্তর লিখুন, অথবা টিকেটটি আগেই বন্ধ হয়েছে।', name: 'টেমপ্লেটের নাম লিখুন।', name_taken: 'এই নামে টেমপ্লেট আছে।', body: 'টেমপ্লেটের লেখা দিন।' };
+const err = q.get('error');
+---
+
+<Admin title="দাতাদের কাজ">
+  <header class="page-head">
+    <div>
+      <p class="eyebrow"><a href="/admin/donors">দাতাগণ</a></p>
+      <h1>দাতাদের কাজ</h1>
+      <p>কাকে রসিদ পাঠানো বাকি, কাকে ফোন করতে হবে, কোন সমস্যার উত্তর বাকি, সব এক জায়গায়।</p>
+    </div>
+  </header>
+  {err && <p class="note note--bad" role="alert">{ERR[err] ?? 'কাজটি করা যায়নি।'}</p>}
+
+  <nav class="tabs desk-tabs" aria-label="অংশ">
+    <a href="?tab=today" aria-current={tab === 'today' ? 'page' : undefined}>আজকের কাজ</a>
+    <a href="?tab=tickets" aria-current={tab === 'tickets' ? 'page' : undefined}>টিকেট</a>
+    <a href="?tab=log" aria-current={tab === 'log' ? 'page' : undefined}>যোগাযোগের খাতা</a>
+    <a href="?tab=templates" aria-current={tab === 'templates' ? 'page' : undefined}>টেমপ্লেট</a>
+    <a href="?tab=report" aria-current={tab === 'report' ? 'page' : undefined}>দাতা রিপোর্ট</a>
+  </nav>
+
+  {tab === 'today' && (
+    <>
+      <section class="card">
+        <div class="card__head"><h2>রসিদ পাঠানো বাকি (শেষ ৩০ দিন)</h2><span class="pill pill--info">{bnDigits(thanks.length)}</span></div>
+        {thanks.length === 0 ? <p class="muted">সবাইকে রসিদ পাঠানো হয়েছে।</p> : (
+          <ul class="list work">{thanks.map((t) => {
+            const wa = t.phone ? waNumber(t.phone) : null;
+            return (
+              <li>
+                <div><a href={donorHref(t.donorKey)}><strong>{t.donorName}</strong></a><small>{taka(t.amountMinor)} · {t.fundTitle} · {dateBn(t.paidAt)} · {receiptLabel(t.receiptNo) || t.reference}</small></div>
+                <div class="row">
+                  {wa && <form method="post" target="_blank"><input type="hidden" name="action" value="receipt" /><input type="hidden" name="reference" value={t.reference} /><button class="button button--sm button--wa"><Icon name="whatsapp" size={16} /> রসিদ পাঠান</button></form>}
+                  <form method="post" class="row"><input type="hidden" name="action" value="receipt_done" /><input type="hidden" name="reference" value={t.reference} />
+                    <select name="channel" aria-label="কীভাবে দেওয়া হলো">{DONOR_CHANNELS.filter((c) => c !== 'whatsapp').map((c) => <option value={c}>{DONOR_CHANNEL_BN[c]}</option>)}</select>
+                    <button class="button button--sm button--ghost">দেওয়া হয়েছে</button></form>
+                </div>
+              </li>
+            );
+          })}</ul>
+        )}
+      </section>
+      <section class="card block">
+        <div class="card__head"><h2>ফলো আপ</h2><span class="pill pill--info">{bnDigits(followups.length)}</span></div>
+        {followups.length === 0 ? <p class="muted">কোনো ফলো আপ বাকি নেই। দাতার পাতা থেকে নতুন ফলো আপ দেওয়া যায়।</p> : (
+          <ul class="list work">{followups.map((f) => (
+            <li class={f.dueOn < today ? 'late' : ''}>
+              <div><strong>{f.title}</strong><small><a href={donorHref(f.donorKey)}>{f.donorName ?? f.donorKey}</a> · <span class={f.dueOn < today ? 'bad' : ''}>{dayBn(f.dueOn)}{f.dueOn < today ? ' (তারিখ পার)' : f.dueOn === today ? ' (আজ)' : ''}</span>{f.assignedTo && ` · ${f.assignedTo}`}{f.phone && <> · <a href={`tel:${f.phone}`}>{f.phone}</a></>}</small></div>
+              <form method="post" class="row">
+                <input type="hidden" name="action" value="close" /><input type="hidden" name="id" value={f.id} />
+                <input name="outcome" maxlength="500" placeholder="ফলাফল" aria-label="ফলাফল" />
+                <select name="channel" aria-label="মাধ্যম">{DONOR_CHANNELS.map((c) => <option value={c}>{DONOR_CHANNEL_BN[c]}</option>)}</select>
+                <button class="button button--sm" name="status" value="done"><Icon name="check" /> শেষ</button>
+                <button class="button button--sm button--ghost" name="status" value="cancelled">বাতিল</button>
+              </form>
+            </li>
+          ))}</ul>
+        )}
+      </section>
+    </>
+  )}
+
+  {tab === 'tickets' && (
+    <section class="card">
+      <div class="card__head"><h2>দাতাদের টিকেট</h2></div>
+      {tickets.length === 0 ? <p class="muted">কোনো টিকেট নেই। দাতার পাতা থেকে টিকেট খোলা যায়।</p> : (
+        <div class="tickets">{tickets.map((t) => (
+          <details open={t.status === 'open'}>
+            <summary><strong>#{bnDigits(t.ticketNo)} {t.subject}</strong> <span class={`pill ${t.status === 'open' ? 'pill--pending' : 'pill--paid'}`}>{t.status === 'open' ? 'খোলা' : 'বন্ধ'}</span> <small class="muted">{t.donorName} · {TICKET_CATEGORY_BN[t.category]}{t.assignedTo && ` · ${t.assignedTo}`}</small></summary>
+            <p><a href={donorHref(t.donorKey)}>দাতার পাতা</a></p>
+            <ul class="list">{t.messages.map((m) => <li><span class="pre">{m.body}<small>{m.author} · {dateBn(m.createdAt, true)}</small></span></li>)}</ul>
+            {t.status === 'open' && (
+              <form method="post" class="form-grid one">
+                <input type="hidden" name="action" value="reply" /><input type="hidden" name="id" value={t.id} />
+                <label class="field"><span>উত্তর বা নোট</span><textarea name="body" rows="2" required maxlength="2000"></textarea></label>
+                <div class="row"><button class="button button--sm">সংরক্ষণ</button><button class="button button--sm button--ghost" name="close" value="1">সংরক্ষণ করে বন্ধ করুন</button></div>
+              </form>
+            )}
+          </details>
+        ))}</div>
+      )}
+    </section>
+  )}
+
+  {tab === 'log' && (
+    <section class="card">
+      <div class="card__head"><h2>সব যোগাযোগ</h2></div>
+      {contacts.length === 0 ? <p class="muted">এখনো কিছু লেখা হয়নি।</p> : (
+        <div class="table-wrap"><table>
+          <thead><tr><th>কখন</th><th>দাতা</th><th>মাধ্যম</th><th>কী হলো</th><th>কে লিখেছেন</th></tr></thead>
+          <tbody>{contacts.map((c) => (
+            <tr><td>{dateBn(c.createdAt, true)}</td><td><a href={donorHref(c.donorKey)}>{c.donorName ?? c.donorKey}</a></td><td>{DONOR_CHANNEL_BN[c.channel]}{c.direction === 'in' && <small class="muted"><br />দাতা থেকে</small>}</td><td>{c.summary}</td><td><small>{c.createdBy}</small></td></tr>
+          ))}</tbody>
+        </table></div>
+      )}
+    </section>
+  )}
+
+  {tab === 'templates' && (
+    <div class="cols">
+      <section class="card">
+        <div class="card__head"><h2>টেমপ্লেট</h2></div>
+        {templates.length === 0 ? <p class="muted">এখনো কোনো টেমপ্লেট নেই। রসিদের জন্য এই লেখা ব্যবহার হচ্ছে: <span class="pre">{DEFAULT_RECEIPT_TEXT}</span></p> : (
+          <ul class="list">{templates.map((t) => (
+            <li>
+              <div><strong>{t.name}</strong> <span class="pill pill--info">{t.purpose === 'receipt' ? 'রসিদ' : 'সাধারণ'}</span><br /><small class="muted pre">{t.body}</small></div>
+              <div class="row">
+                <a class="button button--sm button--ghost" href={`?tab=templates&edit=${t.id}#tpl`}>বদলান</a>
+                <form method="post" data-confirm="টেমপ্লেটটি সরাবেন?"><input type="hidden" name="action" value="archive" /><input type="hidden" name="id" value={t.id} /><button class="button button--sm button--ghost">সরান</button></form>
+              </div>
+            </li>
+          ))}</ul>
+        )}
+      </section>
+      <section class="card" id="tpl">
+        <div class="card__head"><h2>{editing ? 'টেমপ্লেট বদলান' : 'নতুন টেমপ্লেট'}</h2></div>
+        <form method="post" class="form-grid">
+          <input type="hidden" name="action" value="template" />{editing && <input type="hidden" name="id" value={editing.id} />}
+          <label class="field"><span>নাম</span><input name="name" required maxlength="80" value={editing?.name ?? ''} /></label>
+          <label class="field"><span>কাজ</span><select name="purpose"><option value="general" selected={editing?.purpose === 'general'}>সাধারণ বার্তা</option><option value="receipt" selected={editing?.purpose === 'receipt'}>রসিদের বার্তা</option></select></label>
+          <label class="field wide"><span>লেখা</span><textarea name="body" rows="5" required maxlength="1000">{editing?.body ?? ''}</textarea></label>
+          <p class="wide muted"><small>এগুলো প্রত্যেক দাতার জন্য বদলে যাবে: {DONOR_TEMPLATE_VARS.join(' ')} (নাম, টাকা, তহবিল, রসিদ নম্বর, রসিদের লিংক, তারিখ, মোট দান)। টাকা, তহবিল, রসিদ ও লিংক শুধু রসিদের বার্তায় বসে।</small></p>
+          <button class="button"><Icon name="check" /> সংরক্ষণ</button>
+          {editing && <a class="button button--ghost" href="?tab=templates">বাতিল</a>}
+        </form>
+      </section>
+    </div>
+  )}
+
+  {report && (
+    <>
+      <div class="kpis">
+        <div class="kpi"><span class="kpi__label">মোট দাতা</span><strong class="kpi__value">{bnDigits(report.donors)}</strong></div>
+        <div class="kpi"><span class="kpi__label">গত বছরের দাতা এ বছরও দিয়েছেন</span><strong class="kpi__value">{report.retention.percent === null ? 'নেই' : `${bnDigits(report.retention.percent)}%`}</strong><span class="kpi__hint">{bnDigits(report.retention.kept)} / {bnDigits(report.retention.lastYear)} জন</span></div>
+        <div class="kpi"><span class="kpi__label">৩০ দিনে রসিদ পাঠানো</span><strong class="kpi__value">{bnDigits(report.receipts.sent)} / {bnDigits(report.receipts.gifts)}</strong></div>
+        <div class={`kpi ${report.followups.overdue ? 'kpi--bad' : ''}`}><span class="kpi__label">তারিখ পার ফলো আপ</span><strong class="kpi__value">{bnDigits(report.followups.overdue)}</strong><span class="kpi__hint">খোলা {bnDigits(report.followups.open)} · ৩০ দিনে শেষ {bnDigits(report.followups.done30)}</span></div>
+      </div>
+      <div class="cols block">
+        <section class="card">
+          <div class="card__head"><h2>দাতার ধরন</h2></div>
+          <ul class="list">{SEGMENTS.map((s) => <li><span><a href={`/admin/donors?segment=${s}`}>{SEGMENT_BN[s]}</a></span><strong>{bnDigits(report.bySegment[s])}</strong></li>)}</ul>
+        </section>
+        <section class="card">
+          <div class="card__head"><h2>৩০ দিনের যোগাযোগ</h2></div>
+          {report.channels.length === 0 ? <p class="muted">কিছু নেই।</p> : <ul class="list">{report.channels.map((c) => <li><span>{DONOR_CHANNEL_BN[c.channel]}</span><strong>{bnDigits(c.n)}</strong></li>)}</ul>}
+          <p class="muted"><small>খোলা টিকেট {bnDigits(report.tickets.open)}, মোট {bnDigits(report.tickets.total)}</small></p>
+        </section>
+        <section class="card">
+          <div class="card__head"><h2>অনেক দিন দেননি (বড় দাতা আগে)</h2></div>
+          {report.lapsedTop.length === 0 ? <p class="muted">কেউ নেই।</p> : <ul class="list">{report.lapsedTop.map((d) => <li><span><a href={donorHref(d.key)}>{d.name}</a><small>শেষ দান {dateBn(d.lastAt)}</small></span><strong class="num">{taka(d.totalMinor)}</strong></li>)}</ul>}
+        </section>
+      </div>
+    </>
+  )}
+</Admin>
+
+<style>
+  .desk-tabs { margin-bottom: var(--space-5); flex-wrap: wrap; }
+  .block { margin-top: var(--space-5); }
+  .bad { color: var(--bad-600); }
+  .row { display: flex; flex-wrap: wrap; gap: var(--space-1); align-items: center; }
+  .row input { min-width: 130px; width: auto; }
+  .row select { width: auto; }
+  .work li { align-items: start; flex-wrap: wrap; gap: var(--space-3); }
+  .work li > div:first-child { display: grid; gap: 2px; flex: 1 1 240px; }
+  .work li.late { box-shadow: inset 3px 0 0 var(--bad-600); padding-left: var(--space-3); }
+  .tickets { display: grid; gap: var(--space-3); }
+  .tickets details { border: 1px solid var(--color-border); border-radius: var(--radius-md, 8px); padding: var(--space-3); }
+  .one { grid-template-columns: 1fr; }
+  .pre { white-space: pre-wrap; }
+</style>

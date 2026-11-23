@@ -4,7 +4,8 @@ import Admin from '../../../../layouts/Admin.astro';
 import Icon from '../../../../components/Icon.astro';
 import AccountsNav from '../../../../components/admin/AccountsNav.astro';
 import { balancesAsOf, listReconciliations, parseReconcileForm, saveReconciliation, UNASSIGNED } from '../../../../server/accounts';
-import { dateBn } from '../../../../lib/format';
+import { clearingView, saveClearing } from '../../../../server/acc-controls';
+import { bnDigits, dateBn } from '../../../../lib/format';
 import { dayBn, todayDhaka } from '../../../../lib/offline';
 import { taka } from '../../../../lib/format';
 
@@ -17,6 +18,13 @@ const q = Astro.url.searchParams;
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
+  if (form.get('action') === 'clear') {
+    const acct = String(form.get('accountId') ?? '').slice(0, 40);
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(String(form.get('asOf'))) ? String(form.get('asOf')) : today;
+    if (!(await balancesAsOf(env.DB, day)).some((b) => b.id === acct && b.id !== UNASSIGNED)) return Astro.redirect(`${here}?error=account`, 303);
+    await saveClearing(env.DB, actor, acct, form.getAll('shown').map(String), form.getAll('line').map(String), day);
+    return Astro.redirect(`${here}?account=${acct}&asOf=${day}&saved=1#lines`, 303);
+  }
   const v = parseReconcileForm(form, today);
   if (!v.ok) return Astro.redirect(`${here}?error=${v.error}`, 303);
   const r = await saveReconciliation(env.DB, actor, v.value);
@@ -29,6 +37,11 @@ const accounts = balances.filter((b) => b.id !== UNASSIGNED);
 const done = q.get('done') ? recs.find((r) => r.id === q.get('done')) : null;
 const ERR: Record<string, string> = { account: 'হিসাব বাছুন।', day: 'তারিখ সঠিক নয়।', statement: 'স্টেটমেন্ট বা গোনা টাকার অঙ্ক লিখুন।' };
 const signed = (m: number) => `${m < 0 ? '−' : ''}${taka(Math.abs(m))}`;
+// Line by line: every uncleared line, plus the latest cleared ones so a wrong tick can be undone.
+const accountId = accounts.some((a) => a.id === q.get('account')) ? q.get('account')! : '';
+const clearing = accountId ? await clearingView(env.DB, accountId, asOf) : null;
+const shownLines = clearing ? [...clearing.lines.filter((l) => !l.cleared).slice(-250), ...clearing.lines.filter((l) => l.cleared).slice(-30)].sort((a, b) => (a.day < b.day ? 1 : a.day > b.day ? -1 : 0)) : [];
+const hiddenOpen = clearing ? Math.max(0, clearing.lines.filter((l) => !l.cleared).length - 250) : 0;
 ---
 
 <Admin title="ব্যাংক ও ক্যাশ মেলানো">
@@ -70,6 +83,45 @@ const signed = (m: number) => `${m < 0 ? '−' : ''}${taka(Math.abs(m))}`;
       <ul class="list">{accounts.map((b) => <li><span><a href={`/admin/offline/accounts/ledger?account=${b.id}&to=${asOf}`}>{b.name}</a></span><strong class="num">{signed(b.balanceMinor)}</strong></li>)}</ul>
     </section>
   </div>
+
+  <section class="card block" id="lines">
+    <div class="card__head"><h2>লাইন ধরে মেলান</h2></div>
+    <form method="get" class="inline" data-noprint>
+      <input type="hidden" name="asOf" value={asOf} />
+      <label class="field"><span>কোন হিসাব</span><select name="account" required><option value="">বাছুন</option>{accounts.map((b) => <option value={b.id} selected={b.id === accountId}>{b.name}</option>)}</select></label>
+      <button class="button button--ghost">লাইনগুলো দেখুন</button>
+    </form>
+    {clearing && (
+      <>
+        <ul class="list">
+          <li><span>খাতার ব্যালেন্স</span><strong class="num">{signed(clearing.bookMinor)}</strong></li>
+          <li><span>খাতায় আছে, স্টেটমেন্টে এখনো আসেনি (জমা)</span><strong class="num">{signed(clearing.unclearedIn)}</strong></li>
+          <li><span>খাতায় আছে, স্টেটমেন্টে এখনো আসেনি (খরচ)</span><strong class="num">{signed(clearing.unclearedOut)}</strong></li>
+          <li><span><strong>স্টেটমেন্টে যা থাকার কথা</strong></span><strong class="num">{signed(clearing.expectedStatementMinor)}</strong></li>
+        </ul>
+        {shownLines.length === 0 ? <p class="muted">এই হিসাবে কোনো লেনদেন নেই।</p> : (
+          <form method="post">
+            <input type="hidden" name="action" value="clear" /><input type="hidden" name="accountId" value={accountId} /><input type="hidden" name="asOf" value={asOf} />
+            <div class="table-wrap"><table>
+              <thead><tr><th>স্টেটমেন্টে আছে</th><th>তারিখ</th><th>ভাউচার</th><th>বিবরণ</th><th class="num">জমা</th><th class="num">খরচ</th></tr></thead>
+              <tbody>{shownLines.map((l) => {
+                const code = `${l.source}:${l.id}`;
+                return (
+                  <tr>
+                    <td><input type="hidden" name="shown" value={code} /><input type="checkbox" name="line" value={code} checked={l.cleared} aria-label={`${l.ref} মিলেছে`} /></td>
+                    <td>{dayBn(l.day)}</td><td><a href={l.link} target="_blank">{l.ref}</a></td><td>{l.head}<small class="muted"><br />{l.party}</small></td>
+                    <td class="num">{l.inMinor ? taka(l.inMinor) : ''}</td><td class="num">{l.outMinor ? taka(l.outMinor) : ''}</td>
+                  </tr>
+                );
+              })}</tbody>
+            </table></div>
+            {hiddenOpen > 0 && <p class="muted"><small>আরও পুরনো {bnDigits(hiddenOpen)}টি না মেলা লাইন আছে। এগুলো মেলালে সেগুলো দেখা যাবে।</small></p>}
+            <button class="button"><Icon name="check" /> টিক সংরক্ষণ</button>
+          </form>
+        )}
+      </>
+    )}
+  </section>
 
   <section class="card block">
     <div class="card__head"><h2>আগের মেলানো</h2></div>
