@@ -39,12 +39,13 @@ const base: Record<string, string> = {
   permVillage: 'রামপুর',
   permDistrict: 'কুমিল্লা',
   curSame: 'on',
-  department: 'নাজেরা ও হিফজুল কুরআন',
+  courseId: 'dept_nazera',
   desiredClass: 'নাজেরা',
   residence: 'resident',
   guardianName: 'আব্দুর রহমান',
   phone: '01712-345678',
 };
+const DEPTS = [{ id: 'dept_nazera', title: 'আদর্শ নাজেরা শাখা' }, { id: 'dept_hifz', title: 'হিফজুল কুরআন শাখা' }];
 const formOf = (extra: Record<string, string> = {}, drop: string[] = []) => {
   const f = new FormData();
   for (const [k, v] of Object.entries({ ...base, ...extra })) if (!drop.includes(k)) f.set(k, v);
@@ -53,26 +54,26 @@ const formOf = (extra: Record<string, string> = {}, drop: string[] = []) => {
 const signed = { studentSignName: 'আব্দুল্লাহ', guardianSignName: 'আব্দুর রহমান' };
 
 async function submit(extra: Record<string, string> = {}) {
-  const d = parseApplicationDetails(formOf(extra), today);
+  const d = parseApplicationDetails(formOf(extra), today, DEPTS);
   if (!d.ok) throw new Error(d.error);
   return createApplication(db, d.value, signed, 'private/admission/abc.webp');
 }
 
 describe('admission form checks', () => {
   it('accepts the full form and cleans the phone number', () => {
-    const d = parseApplicationDetails(formOf(), today);
+    const d = parseApplicationDetails(formOf(), today, DEPTS);
     expect(d.ok && d.value.phone).toBe('01712345678');
     // "same as permanent" copies the address
     expect(d.ok && d.value.curDistrict).toBe('কুমিল্লা');
   });
 
   it('rejects missing or wrong required fields', () => {
-    expect(parseApplicationDetails(formOf({}, ['studentName']), today)).toEqual({ ok: false, error: 'studentName' });
-    expect(parseApplicationDetails(formOf({ birthDate: '2030-01-01' }), today)).toEqual({ ok: false, error: 'birthDate' });
-    expect(parseApplicationDetails(formOf({ phone: '12' }), today)).toEqual({ ok: false, error: 'phone' });
-    expect(parseApplicationDetails(formOf({ department: 'something else' }), today)).toEqual({ ok: false, error: 'department' });
-    expect(parseApplicationDetails(formOf({ residence: 'hotel' }), today)).toEqual({ ok: false, error: 'residence' });
-    expect(parseApplicationDetails(formOf({ fatherName: '<b>x</b>' }), today)).toEqual({ ok: false, error: 'chars' });
+    expect(parseApplicationDetails(formOf({}, ['studentName']), today, DEPTS)).toEqual({ ok: false, error: 'studentName' });
+    expect(parseApplicationDetails(formOf({ birthDate: '2030-01-01' }), today, DEPTS)).toEqual({ ok: false, error: 'birthDate' });
+    expect(parseApplicationDetails(formOf({ phone: '12' }), today, DEPTS)).toEqual({ ok: false, error: 'phone' });
+    expect(parseApplicationDetails(formOf({ courseId: 'something_else' }), today, DEPTS)).toEqual({ ok: false, error: 'department' });
+    expect(parseApplicationDetails(formOf({ residence: 'hotel' }), today, DEPTS)).toEqual({ ok: false, error: 'residence' });
+    expect(parseApplicationDetails(formOf({ fatherName: '<b>x</b>' }), today, DEPTS)).toEqual({ ok: false, error: 'chars' });
   });
 
   it('needs both pledges ticked and signed with a name', () => {
@@ -166,7 +167,7 @@ describe('application and decision', () => {
     await updateApplication(db, ACTOR, a.id, null, (o as { ok: true; value: any }).value);
     expect((await getApplication(db, a.id))?.feeMinor).toBe(150_000);
     await acceptApplication(db, ACTOR, a.id);
-    const d = parseApplicationDetails(formOf({ studentName: 'অন্য নাম' }), today);
+    const d = parseApplicationDetails(formOf({ studentName: 'অন্য নাম' }), today, DEPTS);
     await updateApplication(db, ACTOR, a.id, d.ok ? d.value : null, (o as { ok: true; value: any }).value);
     expect((await getApplication(db, a.id))?.studentName).toBe('আব্দুল্লাহ');
   });

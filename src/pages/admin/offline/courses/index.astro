@@ -1,9 +1,9 @@
 ---
 import { env } from 'cloudflare:workers';
 import Admin from '../../../../layouts/Admin.astro';
-import { createOfflineCourse, listOfflineCourses, parseOfflineCourseForm } from '../../../../server/offline';
-import { durationBn } from '../../../../lib/offline';
+import { createOfflineCourse, parseOfflineCourseForm } from '../../../../server/offline';
 import { bnDigits, taka } from '../../../../lib/format';
+import { departmentRows } from '../../../../server/departments';
 
 if (Astro.request.method === 'POST') {
   const parsed = parseOfflineCourseForm(await Astro.request.formData());
@@ -11,12 +11,14 @@ if (Astro.request.method === 'POST') {
   await createOfflineCourse(env.DB, Astro.locals.staff!, parsed.value);
   return Astro.redirect('/admin/offline/courses?saved=1', 303);
 }
-const courses = await listOfflineCourses(env.DB);
+const courses = await departmentRows(env.DB);
+const total = courses.reduce((t, c) => ({ students: t.students + c.students, pending: t.pending + c.pending, income: t.income + c.incomeMinor }), { students: 0, pending: 0, income: 0 });
 ---
 
 <Admin title="বিভাগ">
   <header class="page-head"><div><p class="eyebrow">একাডেমিক</p><h1>বিভাগ</h1></div></header>
-  <p class="muted">এই কোর্সগুলো ওয়েবসাইটে দেখানো হয় না। শুধু অফলাইনে ভর্তি হওয়া ছাত্রদের হিসাবের জন্য।</p>
+  <p class="muted">"ওয়েবসাইটে" চিহ্নিত বিভাগগুলো ওয়েবসাইটে দেখা যায় এবং ভর্তির ফর্মে বাছাই করা যায়। ছাত্র, আবেদন ও আয়ের সংখ্যা আসল ভর্তি আর জমা টাকা থেকে নিজে নিজে আসে।</p>
+  <p class="muted">মোট চলমান ছাত্র {bnDigits(total.students)} জন, অপেক্ষায় আবেদন {bnDigits(total.pending)}টি, মোট আয় {taka(total.income)}।</p>
 
   {
     courses.length === 0 ? (
@@ -24,15 +26,15 @@ const courses = await listOfflineCourses(env.DB);
     ) : (
       <div class="table-wrap">
         <table>
-          <thead><tr><th>কোর্স</th><th>কোর্স ফি</th><th>ভর্তি ফি</th><th>মেয়াদ</th><th>চলমান ছাত্র</th><th>অবস্থা</th></tr></thead>
+          <thead><tr><th>বিভাগ</th><th>ওয়েবসাইটে</th><th>চলমান ছাত্র</th><th>আবেদন (অপেক্ষায়)</th><th>আয়</th><th>অবস্থা</th></tr></thead>
           <tbody>
             {courses.map((c) => (
               <tr>
                 <td><a href={`/admin/offline/courses/${c.id}`}>{c.title}</a></td>
-                <td>{taka(c.feeMinor)}</td>
-                <td>{c.admissionFeeMinor ? taka(c.admissionFeeMinor) : <span class="muted">নেই</span>}</td>
-                <td>{durationBn(c.durationMonths)}</td>
-                <td>{bnDigits(c.activeStudents ?? 0)}</td>
+                <td>{c.isPublic ? 'হ্যাঁ' : <span class="muted">না</span>}</td>
+                <td>{bnDigits(c.students)}</td>
+                <td>{bnDigits(c.applications)} ({bnDigits(c.pending)})</td>
+                <td>{taka(c.incomeMinor)}</td>
                 <td><span class={`pill pill--${c.status === 'active' ? 'active' : 'archived'}`}>{c.status === 'active' ? 'চালু' : 'বন্ধ'}</span></td>
               </tr>
             ))}

@@ -2,16 +2,20 @@
 import { env } from 'cloudflare:workers';
 import Admin from '../../../layouts/Admin.astro';
 import Icon from '../../../components/Icon.astro';
-import { adminPost, blogCategories, deletePost, parsePostForm, removePostCover, setPostCover, updatePost, uploadPostImage } from '../../../server/blog';
+import { adminPost, blogCategories, dhakaDate, dhakaTime, deletePost, parsePostForm, removePostCover, setPostCover, updatePost, uploadPostImage } from '../../../server/blog';
 import { mediaUrl } from '../../../lib/format';
 
 const id = Astro.params.id ?? '';
 const actor = Astro.locals.staff!;
+const listUrl = '/admin/blog';
+const publicBase = '/blog';
+const isNotice = true;
 const ERRORS: Record<string, string> = {
   title: 'শিরোনাম ২ থেকে ২০০ অক্ষরের মধ্যে দিন।',
   slug: 'ঠিকানায় শুধু ছোট হাতের ইংরেজি অক্ষর, সংখ্যা আর হাইফেন দিন (যেমন surah-kahf), আর অন্য লেখার সাথে মিলবে না।',
   status: 'অবস্থা বেছে নিন।',
   date: 'তারিখ ঠিক নেই।',
+  time: 'সময় ঠিক নেই।',
   missing: 'ছবি বেছে নিন।',
   type: 'ছবি JPG, PNG বা WebP হতে হবে।',
   size: 'ছবি ৫ MB এর মধ্যে রাখুন।',
@@ -36,7 +40,7 @@ if (Astro.request.method === 'POST') {
     await removePostCover(env.DB, env.MEDIA, actor, id);
     return Astro.redirect(`/admin/blog/${id}?saved=1`, 303);
   } else if (action === 'delete') {
-    if (posted.get('confirm') === 'yes' && (await deletePost(env.DB, env.MEDIA, actor, id))) return Astro.redirect('/admin/blog?saved=1', 303);
+    if (posted.get('confirm') === 'yes' && (await deletePost(env.DB, env.MEDIA, actor, id))) return Astro.redirect(`${listUrl}?saved=1`, 303);
     error = 'মুছতে হলে নিশ্চিত করার ঘরে টিক দিন।';
     posted = null;
   } else {
@@ -59,8 +63,8 @@ const isNew = Astro.url.searchParams.get('new') === '1';
 
 <Admin title={p.title}>
   <p>
-    <a href="/admin/blog">← সব লেখা</a>
-    {p.status === 'published' && <> · <a href={`/blog/${p.slug}`} target="_blank" rel="noopener">সাইটে দেখুন</a></>}
+    <a href={listUrl}>← সব নোটিশ ও লেখা</a>
+    {p.status === 'published' && <> · <a href={`${publicBase}/${p.slug}`} target="_blank" rel="noopener">সাইটে দেখুন</a></>}
   </p>
   <h1>{p.title}</h1>
   {isNew && <p class="panel muted">লেখাটি খসড়া হিসেবে তৈরি হয়েছে। নিচে লিখুন, ছবি দিন, তারপর অবস্থা "চালু" করে সংরক্ষণ করুন।</p>}
@@ -144,7 +148,10 @@ const isNew = Astro.url.searchParams.get('new') === '1';
             <option value="published" selected={val('status', p.status) === 'published'}>চালু (সবাই দেখবে)</option>
           </select>
         </label>
-        <label class="field"><span>প্রকাশের তারিখ</span><input type="date" name="publishedDate" value={val('publishedDate', p.publishedAt?.slice(0, 10) ?? '')} /></label>
+        <label class="field"><span>প্রকাশের তারিখ (ঢাকার সময়)</span><input type="date" name="publishedDate" value={val('publishedDate', dhakaDate(p.publishedAt))} /></label>
+        <label class="field"><span>প্রকাশের সময়</span><input type="time" name="publishedTime" value={val('publishedTime', p.publishedAt ? dhakaTime(p.publishedAt) : '')} /></label>
+        <small class="muted">অবস্থা "চালু" রেখে ভবিষ্যতের তারিখ ও সময় দিলে {isNotice ? 'নোটিশটি' : 'লেখাটি'} ঠিক ওই সময়ে নিজে থেকে সাইটে আসবে (শিডিউল)। আগে পর্যন্ত লুকানো থাকবে।</small>
+        {p.status === 'published' && p.publishedAt && p.publishedAt > new Date().toISOString() && <p class="panel" role="status"><strong>শিডিউল করা আছে।</strong> সাইটে আসবে {p.publishedAt.slice(0, 10)} তারিখে।</p>}
         <label class="check"><input type="checkbox" name="featured" checked={posted ? posted.get('featured') === 'on' : p.featured} /> ব্লগ পেজের সবার উপরে দেখান</label>
         <button class="button button--block" type="submit">সংরক্ষণ করুন</button>
       </div>
@@ -153,12 +160,12 @@ const isNew = Astro.url.searchParams.get('new') === '1';
         <h2>বিস্তারিত</h2>
         <label class="field">
           <span>বিষয়</span>
-          <input name="category" list="cats" maxlength="60" value={val('category', p.category)} placeholder="যেমন: নোটিশ" />
+          <input name="category" list="cats" maxlength="60" value={val('category', p.category)} placeholder={isNotice ? 'যেমন: ভর্তি, পরীক্ষা, ছুটি' : 'যেমন: নোটিশ'} />
           <datalist id="cats">{categories.map((c) => <option value={c.name} />)}</datalist>
         </label>
         <label class="field"><span>লেখক</span><input name="authorName" maxlength="80" value={val('authorName', p.authorName)} placeholder="যেমন: মাদরাসাতুল ইনসাফ" /></label>
         <label class="field">
-          <span>ওয়েব ঠিকানা: /blog/<b>{p.slug}</b></span>
+          <span>ওয়েব ঠিকানা: {publicBase}/<b>{p.slug}</b></span>
           <input name="slug" maxlength="120" value={val('slug', p.slug)} pattern="[a-z0-9]+(-[a-z0-9]+)*" />
           <small class="muted">চালু লেখার ঠিকানা বদলালে পুরোনো লিংক আর কাজ করবে না।</small>
         </label>
@@ -174,7 +181,7 @@ const isNew = Astro.url.searchParams.get('new') === '1';
 
   <form method="post" class="panel danger">
     <input type="hidden" name="action" value="delete" />
-    <strong>লেখাটি মুছে ফেলুন</strong>
+    <strong>{isNotice ? 'নোটিশটি মুছে ফেলুন' : 'লেখাটি মুছে ফেলুন'}</strong>
     <label class="check"><input type="checkbox" name="confirm" value="yes" /> হ্যাঁ, লেখা আর এর ছবিগুলো চিরতরে মুছে যাবে</label>
     <button class="button button--ghost" type="submit"><Icon name="close" size={18} /> মুছুন</button>
   </form>

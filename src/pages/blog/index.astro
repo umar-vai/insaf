@@ -6,6 +6,8 @@ import BlogCard from '../../components/BlogCard.astro';
 import Icon from '../../components/Icon.astro';
 import { blogCategories, publishedPosts } from '../../server/blog';
 import { bnDigits } from '../../lib/format';
+import { ADMISSION_CLASSES, HIGHLIGHTS, POSTER } from '../../lib/madrasa';
+import { SITE } from '../../lib/site';
 
 const category = Astro.url.searchParams.get('category')?.slice(0, 60) || null;
 const [posts, categories] = await Promise.all([publishedPosts(env.DB, { category }), blogCategories(env.DB)]);
@@ -17,15 +19,32 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
   <PageHero
     eyebrow="নোটিশ বোর্ড"
     title="নোটিশ ও খবর"
-    lead="ভর্তি, প্রজেক্ট ও মাদরাসার গুরুত্বপূর্ণ ঘোষণা।"
+    lead="ভর্তির বিজ্ঞপ্তি, প্রজেক্ট ও মাদরাসার গুরুত্বপূর্ণ ঘোষণা।"
     crumbs={[{ href: "/blog", label: "নোটিশ" }]}
   />
+
+  <section class="container admit">
+    <a class="admit__poster" href={POSTER.src} target="_blank" rel="noopener" aria-label="ভর্তির পোস্টার বড় করে দেখুন">
+      <img src={POSTER.src} alt={POSTER.alt} width={POSTER.width} height={POSTER.height} loading="eager" />
+    </a>
+    <div class="admit__text">
+      <p class="eyebrow">ভর্তি চলছে</p>
+      <h2>নূরানি কিন্ডারগার্টেন ও আন্তর্জাতিক মানের হিফজ মাদরাসা</h2>
+      <p>আবাসিক, অনাবাসিক ও ডে-কেয়ার। {ADMISSION_CLASSES}।</p>
+      <ul class="admit__list">{HIGHLIGHTS.map((h) => <li><Icon name="check" size={18} /> {h}</li>)}</ul>
+      <p class="admit__cta">
+        <a class="button" href="/admission/apply">অনলাইনে ভর্তির আবেদন <Icon name="arrow" size={18} /></a>
+        <a class="button button--ghost" href="/admission">বিভাগ ও বৈশিষ্ট্য</a>
+      </p>
+      <p class="muted">যোগাযোগ: {bnDigits(SITE.phone.display)}, {bnDigits('01756-057571')}। {SITE.address}</p>
+    </div>
+  </section>
 
   <section class="container section blog">
     {
       categories.length > 1 && (
         <nav class="cats" aria-label="বিষয়">
-          <a href="/blog" aria-current={!category ? 'page' : undefined}>সব লেখা</a>
+          <a href="/blog" aria-current={!category ? 'page' : undefined}>সব নোটিশ</a>
           {categories.map((c) => (
             <a href={`/blog?category=${encodeURIComponent(c.name)}`} aria-current={category === c.name ? 'page' : undefined}>
               {c.name} <span>{bnDigits(c.count)}</span>
@@ -38,9 +57,9 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
     {
       !lead ? (
         <div class="empty">
-          <h2>{category ? 'এই বিষয়ে এখনো কোনো লেখা নেই' : 'শীঘ্রই নতুন লেখা আসছে, ইনশাআল্লাহ'}</h2>
-          <a class="button" href={category ? '/blog' : '/courses'}>
-            {category ? 'সব লেখা দেখুন' : 'কোর্স দেখুন'} <Icon name="arrow" />
+          <h2>{category ? 'এই বিষয়ে এখনো কোনো লেখা নেই' : 'শীঘ্রই নতুন নোটিশ আসছে, ইনশাআল্লাহ'}</h2>
+          <a class="button" href={category ? '/blog' : '/admission'}>
+            {category ? 'সব নোটিশ দেখুন' : 'ভর্তি তথ্য দেখুন'} <Icon name="arrow" />
           </a>
         </div>
       ) : (
@@ -54,6 +73,54 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
 </Base>
 
 <style>
+  .admit {
+    display: grid;
+    gap: var(--space-6);
+    align-items: center;
+    padding-block: var(--space-8) 0;
+  }
+  @media (min-width: 860px) {
+    .admit {
+      grid-template-columns: minmax(260px, 380px) 1fr;
+      gap: var(--space-10);
+    }
+  }
+  .admit__poster {
+    display: block;
+    border-radius: var(--radius);
+    overflow: hidden;
+    box-shadow: var(--shadow-lg);
+  }
+  .admit__poster img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .admit__text {
+    display: grid;
+    gap: var(--space-3);
+  }
+  .admit__text h2,
+  .admit__text p {
+    margin: 0;
+  }
+  .admit__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-2);
+  }
+  .admit__list li {
+    display: flex;
+    gap: var(--space-2);
+    align-items: flex-start;
+  }
+  .admit__cta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+  }
   .blog {
     display: grid;
     gap: var(--space-8);

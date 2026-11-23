@@ -1,10 +1,13 @@
 ---
+import { env } from 'cloudflare:workers';
 import Base from '../layouts/Base.astro';
 import PageHero from '../components/PageHero.astro';
 import SectionHead from '../components/SectionHead.astro';
 import Icon from '../components/Icon.astro';
 import { FOUNDER, SITE } from '../lib/site';
-import { DEPARTMENTS, FACILITIES } from '../lib/madrasa';
+import FeatureList from '../components/FeatureList.astro';
+import { publicDepartments } from '../server/departments';
+import { FACILITIES } from '../lib/madrasa';
 
 // Copy from the old site's home page ("কেন মাদরাসাতুল ইনসাফ?").
 const PRINCIPLES = [
@@ -13,7 +16,8 @@ const PRINCIPLES = [
   { icon: 'clipboard', title: 'শূরাভিত্তিক পরিচালনা', text: 'সুস্পষ্ট গঠনতন্ত্র ও জবাবদিহিমূলক ব্যবস্থাপনা।' },
   { icon: 'lock', title: 'স্বচ্ছতা ও আমানতদারি', text: 'শিক্ষা, প্রশাসন ও অর্থনীতিতে স্বচ্ছতা, আমানতদারি ও শৃঙ্খলা মৌলিক নীতি।' },
 ] as const;
-Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=3600');
+Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+const departments = await publicDepartments(env.DB);
 ---
 
 <Base title="আমাদের সম্পর্কে" description="মাদরাসাতুল ইনসাফ একটি কুরআন ও সুন্নাহভিত্তিক ইলমি মারকাজ, আহলে সুন্নাত ওয়াল জামাআতের আকিদা ও উলামায়ে কেরামের বিশ্বস্ত ধারার আলোকে পরিচালিত।">
@@ -61,14 +65,16 @@ Astro.response.headers.set('Cache-Control', 'public, max-age=60, s-maxage=3600')
     <SectionHead eyebrow="শিক্ষা কার্যক্রম" title="বিভাগসমূহ" />
     <div class="cards">
       {
-        DEPARTMENTS.map((d) => (
+        departments.map((d) => (
           <article class="card" data-reveal>
             <h3>{d.title}</h3>
-            <p>{d.text}</p>
+            {d.summary && <p>{d.summary}</p>}
           </article>
         ))
       }
     </div>
+    <SectionHead eyebrow="আমাদের বৈশিষ্ট্য" title="আমাদের বৈশিষ্ট্যসমূহ" />
+    <FeatureList />
     <SectionHead eyebrow="সুযোগ-সুবিধা" title="শিক্ষার্থীদের জন্য" />
     <div class="cards">
       {

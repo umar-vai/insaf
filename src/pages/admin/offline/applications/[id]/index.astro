@@ -2,6 +2,7 @@
 import { env } from 'cloudflare:workers';
 import Admin from '../../../../../layouts/Admin.astro';
 import Icon from '../../../../../components/Icon.astro';
+import { allDepartments } from '../../../../../server/departments';
 import AdmissionFields from '../../../../../components/AdmissionFields.astro';
 import EnrollFields from '../../../../../components/admin/OfflineEnrollFields.astro';
 import {
@@ -47,7 +48,7 @@ if (Astro.request.method === 'POST') {
     const o = parseOfficeFields(form);
     if (!o.ok) return fail(o.error);
     // Details are left alone when the office section alone is saved.
-    const d = form.has('studentName') ? parseApplicationDetails(form, today) : null;
+    const d = form.has('studentName') ? parseApplicationDetails(form, today, await allDepartments(env.DB)) : null;
     if (d && !d.ok) return fail(d.error);
     if (!(await updateApplication(env.DB, actor, id, d?.ok ? d.value : null, o.value))) return fail('missing');
     return Astro.redirect(`${here}?saved=1`, 303);
@@ -91,6 +92,7 @@ const ERR: Record<string, string> = {
   fee: 'ধার্যকৃত অর্থ সংখ্যায় লিখুন।',
   missing: 'আবেদনটি পাওয়া যায়নি।',
 };
+const deptChoices = await allDepartments(env.DB);
 const [courses, batches] = a.status === 'pending' ? await Promise.all([listOfflineCourses(env.DB, false), listBatches(env.DB, { activeOnly: true })]) : [[], []];
 const PILL: Record<ApplicationStatus, string> = { pending: 'pending', accepted: 'paid', rejected: 'failed' };
 const age = ageOn(a.birthDate, today);
@@ -180,7 +182,7 @@ const rows = [
         <input type="hidden" name="action" value="save" />
         <h2 class="wide">{a.status === 'accepted' ? 'প্রতিষ্ঠানের জন্য পূরণীয়' : 'তথ্য ঠিক করুন ও প্রতিষ্ঠানের অংশ পূরণ করুন'}</h2>
         {a.status === 'accepted' && <p class="wide muted">ভর্তি হয়ে গেছে। তথ্য বদলাতে ছাত্রের প্রোফাইল ব্যবহার করুন। এখানে শুধু প্রতিষ্ঠানের অংশ বদলানো যায়।</p>}
-        {a.status !== 'accepted' && <AdmissionFields v={a} />}
+        {a.status !== 'accepted' && <AdmissionFields departments={deptChoices} v={a} />}
         <h3>প্রতিষ্ঠানের জন্য পূরণীয়</h3>
         <label class="field"><span>ভর্তি পরীক্ষার নম্বর</span><input name="examMarks" maxlength="40" value={a.examMarks} /></label>
         <label class="field"><span>পরীক্ষকের নাম</span><input name="examinerName" maxlength="120" value={a.examinerName} /></label>
@@ -198,7 +200,7 @@ const rows = [
             {courses.length === 0 ? (
               <p class="wide muted">কোনো চালু কোর্স নেই। এখন শুধু ছাত্র তৈরি হবে, কোর্সে ভর্তি পরে ছাত্রের প্রোফাইল থেকে করতে পারবেন।</p>
             ) : (
-              <EnrollFields courses={courses} batches={batches} today={today} optional />
+              <EnrollFields courses={courses} batches={batches} today={today} optional selected={a.courseId} />
             )}
             <button class="button">আবেদন গ্রহণ করুন</button>
           </form>

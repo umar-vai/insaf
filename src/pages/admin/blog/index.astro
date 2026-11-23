@@ -12,12 +12,15 @@ if (Astro.request.method === 'POST') {
   error = true;
 }
 const posts = await adminPosts(env.DB);
+const nowIso = new Date().toISOString();
+const isScheduled = (p: { status: string; publishedAt: string | null }) => p.status === 'published' && !!p.publishedAt && p.publishedAt > nowIso;
 const live = posts.filter((p) => p.status === 'published').length;
+const scheduled = posts.filter(isScheduled).length;
 ---
 
-<Admin title="ব্লগ">
-  <h1>ব্লগ</h1>
-  <p class="muted">{bnDigits(live)} টি চালু লেখা · {bnDigits(posts.length - live)} টি খসড়া · <a href="/blog" target="_blank" rel="noopener">সাইটে ব্লগ দেখুন</a></p>
+<Admin title="নোটিশ">
+  <h1>ওয়েবসাইটের নোটিশ ও খবর</h1>
+  <p class="muted">{bnDigits(live - scheduled)} টি চালু · {bnDigits(scheduled)} টি শিডিউল করা · {bnDigits(posts.length - live)} টি খসড়া · <a href="/blog" target="_blank" rel="noopener">সাইটে নোটিশ পেজ দেখুন</a></p>
   <form method="post" class="panel create">
     <label class="field">
       <span>নতুন লেখা শুরু করুন</span>
@@ -46,9 +49,9 @@ const live = posts.filter((p) => p.status === 'published').length;
                   <br />
                   <small class="muted">/blog/{p.slug}</small>
                 </td>
-                <td><span class={`pill pill--${p.status}`}>{p.status === 'published' ? 'চালু' : 'খসড়া'}</span></td>
+                <td><span class={`pill pill--${isScheduled(p) ? 'pending' : p.status}`}>{isScheduled(p) ? 'শিডিউল' : p.status === 'published' ? 'চালু' : 'খসড়া'}</span></td>
                 <td>{p.category || 'নেই'}</td>
-                <td>{p.publishedAt ? dateBn(p.publishedAt) : 'নেই'}</td>
+                <td>{p.publishedAt ? dateBn(p.publishedAt, true) : 'নেই'}</td>
                 <td>{bnDigits(p.minutes)} মিনিট</td>
               </tr>
             ))}

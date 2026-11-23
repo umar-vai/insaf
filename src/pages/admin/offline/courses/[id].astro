@@ -1,17 +1,29 @@
 ---
 import { env } from 'cloudflare:workers';
 import Admin from '../../../../layouts/Admin.astro';
+import { departmentApplicants, departmentStudents, parsePublicSettings, savePublicSettings } from '../../../../server/departments';
+import { bnDigits, dateBn, taka } from '../../../../lib/format';
+import { applicationCode } from '../../../../server/admission';
 import { getOfflineCourse, parseOfflineCourseForm, updateOfflineCourse } from '../../../../server/offline';
 
 const id = Astro.params.id!;
 if (Astro.request.method === 'POST') {
-  const parsed = parseOfflineCourseForm(await Astro.request.formData());
+  const form = await Astro.request.formData();
+  if (form.get('action') === 'public') {
+    const pub = parsePublicSettings(form);
+    if (!pub.ok) return Astro.redirect(`/admin/offline/courses/${id}?error=${pub.error}`, 303);
+    await savePublicSettings(env.DB, Astro.locals.staff!, id, pub.value);
+    return Astro.redirect(`/admin/offline/courses/${id}?saved=1`, 303);
+  }
+  const parsed = parseOfflineCourseForm(form);
   if (!parsed.ok) return Astro.redirect(`/admin/offline/courses/${id}?error=${parsed.error}`, 303);
   const ok = await updateOfflineCourse(env.DB, Astro.locals.staff!, id, parsed.value);
   return Astro.redirect(ok ? '/admin/offline/courses?saved=1' : `/admin/offline/courses/${id}?error=1`, 303);
 }
 const course = await getOfflineCourse(env.DB, id);
 if (!course) return new Response('Not found', { status: 404 });
+const pubRow = await env.DB.prepare('SELECT summary, sort_order AS sortOrder, is_public AS isPublic FROM offline_courses WHERE id = ?').bind(id).first<{ summary: string; sortOrder: number; isPublic: number }>();
+const [students, applicants] = await Promise.all([departmentStudents(env.DB, id), departmentApplicants(env.DB, id)]);
 const years = course.durationMonths % 12 === 0;
 ---
 
@@ -47,6 +59,34 @@ const years = course.durationMonths % 12 === 0;
       <a class="button button--ghost" href="/admin/offline/courses">ফিরে যান</a>
     </div>
   </form>
+  <h2>ওয়েবসাইটে এই বিভাগ</h2>
+  <form method="post" class="panel grid">
+    <input type="hidden" name="action" value="public" />
+    <label class="check wide"><input type="checkbox" name="isPublic" checked={Boolean(pubRow?.isPublic)} /> ওয়েবসাইটে দেখান এবং ভর্তির ফর্মে বাছাই করতে দিন</label>
+    <label class="field"><span>ক্রম (ছোট সংখ্যা আগে)</span><input name="sortOrder" inputmode="numeric" value={pubRow?.sortOrder ?? 0} /></label>
+    <label class="field wide"><span>ওয়েবসাইটে ছোট বিবরণ (খালি রাখলে শুধু নাম দেখাবে)</span><textarea name="summary" maxlength="600">{pubRow?.summary ?? ''}</textarea></label>
+    <div class="row"><button class="button">সংরক্ষণ করুন</button></div>
+  </form>
+
+  <h2>এই বিভাগের ছাত্র ({bnDigits(students.length)})</h2>
+  {students.length === 0 ? <p class="panel muted">এখনো কোনো ছাত্র ভর্তি হয়নি।</p> : (
+    <div class="table-wrap"><table>
+      <thead><tr><th>আইডি</th><th>নাম</th><th>মোবাইল</th><th>রোল</th><th>অবস্থা</th><th>জমা</th></tr></thead>
+      <tbody>{students.map((s) => (
+        <tr><td>{s.studentNo ? `MI-${String(s.studentNo).padStart(4, '0')}` : ''}</td><td><a href={`/admin/offline/students/${s.studentId}`}>{s.name}</a></td><td>{s.phone}</td><td>{s.roll}</td><td>{s.status === 'active' ? 'চলমান' : s.status === 'completed' ? 'সম্পন্ন' : 'বাদ'}</td><td>{taka(s.paidMinor)}</td></tr>
+      ))}</tbody>
+    </table></div>
+  )}
+
+  <h2>এই বিভাগে আবেদন ({bnDigits(applicants.length)})</h2>
+  {applicants.length === 0 ? <p class="panel muted">এখনো কোনো আবেদন আসেনি।</p> : (
+    <div class="table-wrap"><table>
+      <thead><tr><th>নম্বর</th><th>নাম</th><th>মোবাইল</th><th>অবস্থা</th><th>তারিখ</th></tr></thead>
+      <tbody>{applicants.map((a) => (
+        <tr><td><a href={`/admin/offline/applications/${a.id}`}>{applicationCode(a.appNo)}</a></td><td>{a.studentName}</td><td>{a.phone}</td><td>{a.status === 'pending' ? 'অপেক্ষায়' : a.status === 'accepted' ? 'গৃহীত' : 'প্রত্যাখ্যাত'}</td><td>{dateBn(a.createdAt.slice(0, 10))}</td></tr>
+      ))}</tbody>
+    </table></div>
+  )}
 </Admin>
 
 <style>

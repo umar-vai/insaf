@@ -1,0 +1,96 @@
+---
+// The madrasa's features from its admission poster, as a grid of numbered
+// cards, plus the three poster highlights. One component so the home, about
+// and admission pages always say the same thing.
+import Icon from './Icon.astro';
+import { FEATURES, HIGHLIGHTS } from '../lib/madrasa';
+import { bnDigits } from '../lib/format';
+
+interface Props {
+  /** Show the poster highlights (6 month classes, CCTV, Befaq result) under the grid. */
+  highlights?: boolean;
+}
+const { highlights = true } = Astro.props;
+---
+
+<ol class="features">
+  {
+    FEATURES.map((f, i) => (
+      <li data-reveal>
+        <span class="features__no">{bnDigits(String(i + 1).padStart(2, '0'))}</span>
+        <span class="features__icon"><Icon name={f.icon} size={20} /></span>
+        <p>{f.text}</p>
+      </li>
+    ))
+  }
+</ol>
+{
+  highlights && (
+    <ul class="highlights">
+      {HIGHLIGHTS.map((h) => <li data-reveal><Icon name="check" size={20} /><span>{h}</span></li>)}
+    </ul>
+  )
+}
+
+<style>
+  .features {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-4);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  }
+  .features li {
+    position: relative;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-2) var(--space-3);
+    align-items: start;
+    padding: var(--space-5);
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius);
+  }
+  .features__icon {
+    grid-row: 1;
+    grid-column: 1;
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--mint-100);
+    color: var(--color-primary);
+  }
+  .features__no {
+    position: absolute;
+    top: var(--space-3);
+    right: var(--space-4);
+    font-size: 0.85rem;
+    color: var(--gold-500);
+    opacity: 0.8;
+  }
+  .features p {
+    grid-column: 2;
+    margin: 0;
+    line-height: 1.7;
+  }
+  .highlights {
+    list-style: none;
+    margin: var(--space-6) 0 0;
+    padding: 0;
+    display: grid;
+    gap: var(--space-3);
+  }
+  .highlights li {
+    display: flex;
+    gap: var(--space-3);
+    align-items: flex-start;
+    padding: var(--space-4) var(--space-5);
+    border-radius: var(--radius);
+    background: var(--color-primary);
+    color: var(--color-primary-ink);
+    font-weight: 600;
+  }
+</style>
