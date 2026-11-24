@@ -2,8 +2,9 @@
 import { env } from 'cloudflare:workers';
 import Admin from '../../../../layouts/Admin.astro';
 import AccountsNav from '../../../../components/admin/AccountsNav.astro';
-import { taka, bnDigits } from '../../../../lib/format';
+import { takaExact as taka, bnDigits } from '../../../../lib/format';
 import { dayBn, todayDhaka } from '../../../../lib/offline';
+import { bankDeliveries, bankDelivery, finishBankDelivery } from '../../../../server/bank-feed';
 import { listAccounts } from '../../../../server/accounts';
 import { matchBankStatement, parseBankStatement, saveBankStatement, statementLineKey } from '../../../../server/bank-statement';
 import { localsMayDo } from '../../../../server/staff';
@@ -11,34 +12,55 @@ import { localsMayDo } from '../../../../server/staff';
 const here = '/admin/offline/accounts/bank-import';
 const accountOptions = (await listAccounts(env.DB)).filter((a) => a.kind === 'bank' || a.kind === 'mobile');
 const canEdit = localsMayDo(Astro.locals, 'accounts', 'edit');
-let account = Astro.url.searchParams.get('account') ?? '';
-let raw = '';
+const variables = env as typeof env & { BANK_FEED_SECRET?: string; BANK_FEED_ACCOUNTS?: string };
+const feedEnabled = Boolean(variables.BANK_FEED_SECRET && variables.BANK_FEED_ACCOUNTS);
+let feedId = (Astro.url.searchParams.get('feed') ?? '').slice(0, 90);
+let item = feedId ? await bankDelivery(env.DB, feedId) : null;
+const deliveries = await bankDeliveries(env.DB);
+const today = todayDhaka();
+let account = item?.accountId ?? Astro.url.searchParams.get('account') ?? '';
+let raw = item?.csv ?? '';
 let error = '';
 let preview: Extract<Awaited<ReturnType<typeof matchBankStatement>>, { ok: true }>['value'] = [];
 if (Astro.request.method === 'POST') {
   if (!canEdit) return new Response('Accounts edit access required', { status: 403 });
   const form = await Astro.request.formData();
-  account = String(form.get('accountId') ?? '').slice(0, 40);
-  raw = String(form.get('csv') ?? '').slice(0, 16_001);
+  feedId = String(form.get('feed') ?? '').slice(0, 90);
+  item = feedId ? await bankDelivery(env.DB, feedId) : null;
+  if (form.get('action') === 'finish-feed') {
+    const result = await finishBankDelivery(env.DB, Astro.locals.staff!, feedId, today, String(form.get('reviewNote') ?? ''));
+    return Astro.redirect(`${here}?${new URLSearchParams(result.ok ? { finished: '1' } : { feed: feedId, error: result.error })}`, 303);
+  }
+  account = item?.accountId ?? String(form.get('accountId') ?? '').slice(0, 40);
+  raw = item?.csv ?? String(form.get('csv') ?? '').slice(0, 16_001);
   const upload = form.get('file');
-  if (upload instanceof File && upload.size) {
+  if (!item && upload instanceof File && upload.size) {
     if (upload.size > 32_000) error = 'size';
     else raw = await upload.text();
   }
-  const parsed = parseBankStatement(raw, todayDhaka());
+  const parsed = parseBankStatement(raw, today);
   if (!error && !parsed.ok) error = parsed.error;
   if (!error && parsed.ok) {
     if (form.get('action') === 'save') {
       const result = await saveBankStatement(env.DB, Astro.locals.staff!, account, parsed.value, form.getAll('line').map(String));
-      if (result.ok) return Astro.redirect(`${here}?${new URLSearchParams({ account, saved: String(result.value) })}`, 303);
+      if (result.ok) return Astro.redirect(`${here}?${new URLSearchParams({ account, saved: String(result.value), ...(feedId ? { feed: feedId } : {}) })}`, 303);
       error = result.error;
     }
     const match = await matchBankStatement(env.DB, account, parsed.value);
     if (match.ok) preview = match.value;
     else error ||= match.error;
   }
+} else if (item) {
+  const parsed = parseBankStatement(raw, today);
+  if (parsed.ok) {
+    const match = await matchBankStatement(env.DB, account, parsed.value);
+    if (match.ok) preview = match.value;
+    else error = match.error;
+  }
 }
+error ||= Astro.url.searchParams.get('error') ?? '';
 const errors: Record<string, string> = {
+  delivery: 'ফিডের ফাইল ও পর্যালোচনার নোট যাচাই করুন।',
   account: 'ব্যাংক বা মোবাইল ব্যাংকিং হিসাব বাছুন।',
   header: 'CSV এর প্রথম লাইনে date,reference,credit,debit ঠিক এই ক্রমে দিন।',
   row: 'তারিখ, রেফারেন্স এবং জমা বা উত্তোলনের অঙ্ক যাচাই করুন। একটি লাইনে যেকোনো একটি অঙ্ক দিন।',
@@ -56,6 +78,14 @@ const saved = Astro.url.searchParams.get('saved');
     <p>CSV দিন, খাতার সঙ্গে মিল দেখুন, তারপর মিলেছে এমন লাইনগুলো অনুমোদন করুন।</p>
   </div></header>
   <AccountsNav />
+  <section class="card">
+    <div class="card__head"><h2>ব্যাংক ফিড</h2></div>
+    <p>{feedEnabled ? 'সংযুক্ত উৎসের পাঠানো স্টেটমেন্ট এখানে পর্যালোচনার জন্য আসবে।' : 'সরাসরি ব্যাংক ফিড সংযুক্ত নেই। আপাতত নিচে CSV দিন।'}</p>
+    {Astro.url.searchParams.has('finished') && <p class="note note--good">ফিডের পর্যালোচনা নথিভুক্ত হয়েছে।</p>}
+    {deliveries.length > 0 && <ul class="list">{deliveries.map((d) => <li>
+      <span>{d.accountName} · {dayBn(d.receivedAt.slice(0, 10))}</span><a href={`?feed=${encodeURIComponent(d.id)}#preview`}>স্টেটমেন্ট দেখুন</a>
+    </li>)}</ul>}
+  </section>
   {saved !== null && /^\d{1,3}$/.test(saved) && <p class="note note--good" role="status">{bnDigits(saved)}টি লাইন মেলানো হিসেবে সংরক্ষণ হয়েছে। <a href={`/admin/offline/accounts/reconcile?account=${encodeURIComponent(account)}#lines`}>হিসাব দেখুন</a></p>}
   {error && <p class="note note--bad" role="alert">{errors[error] ?? 'কাজটি সম্পন্ন করা যায়নি।'}</p>}
   {canEdit && <section class="card">
@@ -72,7 +102,7 @@ const saved = Astro.url.searchParams.get('saved');
   {preview.length > 0 && <section class="card bank-preview" id="preview">
     <div class="card__head"><h2>স্টেটমেন্টের প্রিভিউ</h2></div>
     <form method="post">
-      <input type="hidden" name="action" value="save" /><input type="hidden" name="accountId" value={account} /><input type="hidden" name="csv" value={raw} />
+      <input type="hidden" name="action" value="save" /><input type="hidden" name="feed" value={feedId} /><input type="hidden" name="accountId" value={account} /><input type="hidden" name="csv" value={raw} />
       <ul class="list">
         {preview.map((line) => <li>
           <div><strong>{line.reference}</strong> · {dayBn(line.day)}<small>{line.amountMinor > 0 ? 'জমা' : 'উত্তোলন'} {taka(Math.abs(line.amountMinor))}</small></div>
@@ -82,6 +112,11 @@ const saved = Astro.url.searchParams.get('saved');
       </ul>
       {preview.some((line) => line.state === 'match') && <button class="button">বাছাই করা মিল সংরক্ষণ করুন</button>}
     </form>
+    {canEdit && item && deliveries.some((d) => d.id === item?.id) && <form method="post" class="form-grid">
+      <input type="hidden" name="action" value="finish-feed" /><input type="hidden" name="feed" value={feedId} />
+      <label class="field"><span>পর্যালোচনার নোট</span><input name="reviewNote" minlength="3" maxlength="300" required /></label>
+      <button class="button button--ghost">পর্যালোচনা শেষ করুন</button>
+    </form>}
   </section>}
 </Admin>
 <style>

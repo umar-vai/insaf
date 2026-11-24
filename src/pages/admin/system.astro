@@ -2,12 +2,19 @@
 import { env } from 'cloudflare:workers';
 import Admin from '../../layouts/Admin.astro';
 import Icon from '../../components/Icon.astro';
+import { runMediaBackup } from '../../server/media-backup';
+import { dayBn } from '../../lib/offline';
+import { bnDigits } from '../../lib/format';
 import { institute, saveConfig, saveLogo, savedConfig } from '../../server/config';
 
 // Owners only (middleware: adminModule returns 'owner' for this path).
 const actor = Astro.locals.staff!;
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
+  if (form.get('action') === 'media-backup') {
+    const backup = await runMediaBackup(env.DB, env.MEDIA, (env as typeof env & { BACKUPS?: R2Bucket }).BACKUPS, actor);
+    return Astro.redirect(`/admin/system?mediaBackup=${backup.ok ? 'ok' : 'failed'}#media-backup`, 303);
+  }
   if (form.get('action') === 'logo') {
     const r = await saveLogo(env.DB, env.MEDIA, actor, form.get('logo'));
     return Astro.redirect(`/admin/system?${r.ok ? 'saved=1' : `error=${r.error}`}`, 303);
@@ -16,6 +23,10 @@ if (Astro.request.method === 'POST') {
   return Astro.redirect(`/admin/system?${r.ok ? 'saved=1' : `error=${r.error}`}`, 303);
 }
 const [c, inst] = await Promise.all([savedConfig(env.DB, env), institute(env.DB)]);
+const media = await env.DB.prepare(`SELECT created_at AS at, action, detail_json AS detail FROM admin_events
+ WHERE target = 'backup' AND action IN ('backup.media.ok', 'backup.media.failed') ORDER BY created_at DESC LIMIT 1`)
+ .first<{ at: string; action: string; detail: string }>();
+const mediaCount: number = media?.action === 'backup.media.ok' ? JSON.parse(media.detail).count : 0;
 const fromCloudflare = { store: Boolean(env.SSLCZ_STORE_ID), password: Boolean(env.SSLCZ_STORE_PASSWORD) };
 const mode = c.sslczSandbox === '0' ? 'live' : c.sslczSandbox === '1' ? 'sandbox' : '';
 const cfMode = env.SSLCZ_SANDBOX === '0' ? 'লাইভ' : 'স্যান্ডবক্স (পরীক্ষা)';
@@ -83,6 +94,14 @@ const cfMode = env.SSLCZ_SANDBOX === '0' ? 'লাইভ' : 'স্যান্�
     <p class="wide muted"><small>রসিদ, পে স্লিপ আর আইডি কার্ডে এই লোগো ছাপা হবে।</small></p>
     <button class="button">লোগো বদলান</button>
   </form>
+  <section class="card logo" id="media-backup">
+    <div class="card__head"><h2>ছবি, ভাউচার ও নথির ব্যাকআপ</h2></div>
+    <p>রাতের ব্যাকআপে আপলোড করা ফাইলের কপি ও যাচাইয়ের জন্য তালিকা রাখা হয়।</p>
+    {media ? <p class={`note ${media.action === 'backup.media.ok' ? 'note--good' : 'note--bad'}`}>
+      {dayBn(media.at.slice(0, 10))} · {media.action === 'backup.media.ok' ? `${bnDigits(mediaCount)}টি ফাইলের তালিকা তৈরি হয়েছে` : 'সর্বশেষ কপি সম্পন্ন হয়নি'}
+    </p> : <p class="note">এখনো ফাইল ব্যাকআপের রেকর্ড নেই।</p>}
+    <form method="post"><input type="hidden" name="action" value="media-backup" /><button class="button button--ghost">এখন ফাইলের ব্যাকআপ নিন</button></form>
+  </section>
 </Admin>
 
 <style>

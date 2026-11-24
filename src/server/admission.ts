@@ -139,22 +139,28 @@ const COLS: [keyof ApplicationDetails, string][] = [
 ];
 
 /** Saves a signed application. Returns its id and the number the family keeps. */
-export async function createApplication(db: D1Database, d: ApplicationDetails, s: Signatures, photoKey: string): Promise<{ id: string; appNo: number }> {
+export async function applicationBySubmission(db: D1Database, key: string | null) {
+  return key ? db.prepare('SELECT id, app_no AS appNo FROM admission_applications WHERE submit_key = ?').bind(key).first<{ id: string; appNo: number }>() : null;
+}
+
+export async function createApplication(db: D1Database, d: ApplicationDetails, s: Signatures, photoKey: string, submitKey: string | null = null): Promise<{ id: string; appNo: number }> {
   const id = newId('adm');
   const cols = COLS.map(([, c]) => c);
   for (let attempt = 0; ; attempt++) {
     try {
       const r = await db
         .prepare(
-          `INSERT INTO admission_applications (id, app_no, ${cols.join(', ')}, photo_key, pledge_version, student_sign_name, student_signed_at, guardian_sign_name, guardian_signed_at)
+          `INSERT INTO admission_applications (id, app_no, ${cols.join(', ')}, photo_key, pledge_version, student_sign_name, student_signed_at, guardian_sign_name, guardian_signed_at, submit_key)
            VALUES (?1, (SELECT coalesce(max(app_no), 0) + 1 FROM admission_applications), ${cols.map((_, i) => `?${i + 2}`).join(', ')},
-             ?${cols.length + 2}, ?${cols.length + 3}, ?${cols.length + 4}, strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?${cols.length + 5}, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+             ?${cols.length + 2}, ?${cols.length + 3}, ?${cols.length + 4}, strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?${cols.length + 5}, strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?${cols.length + 6})
            RETURNING app_no AS appNo`,
         )
-        .bind(id, ...COLS.map(([k]) => d[k]), photoKey, PLEDGE_VERSION, s.studentSignName, s.guardianSignName)
+        .bind(id, ...COLS.map(([k]) => d[k]), photoKey, PLEDGE_VERSION, s.studentSignName, s.guardianSignName, submitKey)
         .first<{ appNo: number }>();
       return { id, appNo: r!.appNo };
     } catch (e) {
+      const seen = await applicationBySubmission(db, submitKey);
+      if (seen) return seen;
       if (attempt === 2 || !String(e).includes('UNIQUE')) throw e;
     }
   }

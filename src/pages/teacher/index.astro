@@ -8,6 +8,7 @@ import { nextClass, officeNotices, teacherSession } from '../../server/panels';
 import { DAY_BN, DAY_SHORT_BN, dayBn, parseDays, timeBn, todayDhaka, weekday } from '../../lib/offline';
 import { bnDigits, dateBn, taka } from '../../lib/format';
 import { examLine, masterRoutine, teacherExams } from '../../server/academic';
+import { assignedExamIds, listAssessments } from '../../server/assessment';
 import { listAcademicSessions } from '../../server/school-academic';
 
 Astro.response.headers.set('Cache-Control', 'no-store');
@@ -28,6 +29,15 @@ const myBatchIds = new Set(batches.map((b) => b.id));
 const now = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
 const next = nextClass(batches, today, now);
 const mine = todays.filter((b) => myBatchIds.has(b.id));
+const pendingAssessments = teacher ? (await listAssessments(env.DB, { pending: true, limit: 200 }))
+  .filter((x) => x.status === 'draft' && !x.submittedAt && myBatchIds.has(x.batchId)) : [];
+const pendingAssigned = teacher ? await assignedExamIds(env.DB, teacher.id, pendingAssessments.map((x) => x.examId)) : new Set<string>();
+const marking = pendingAssessments.filter((x) => pendingAssigned.has(x.examId));
+const homework = teacher ? (await env.DB.prepare(`SELECT a.batch_id AS batchId, b.name, count(*) AS total
+  FROM homework_submissions h JOIN homework_assignments a ON a.id = h.assignment_id JOIN offline_batches b ON b.id = a.batch_id
+  JOIN json_each(?) j ON j.value = b.id WHERE h.state = 'submitted' AND a.status IN ('published','closed')
+  GROUP BY a.batch_id ORDER BY b.name`).bind(JSON.stringify([...myBatchIds])).all<{ batchId: string; name: string; total: number }>()).results : [];
+const grading = teacher ? await assignedExamIds(env.DB, teacher.id, exams.map((x) => x.id)) : new Set<string>();
 const students = batches.reduce((a, b) => a + b.students, 0);
 ---
 
@@ -76,6 +86,16 @@ const students = batches.reduce((a, b) => a + b.students, 0);
           </section>
         </div>
 
+        {(marking.length > 0 || homework.length > 0) && <section class="card">
+          <div class="card__head"><h2>আমার বাকি কাজ</h2></div>
+          <ul class="list">
+            {marking.slice(0, 15).map((x) => <li><span>{x.title} · {x.batchName}<small>{x.completed === x.examinees ? 'অফিসে পাঠানো বাকি' : `${bnDigits(x.examinees - x.completed)} জনের নম্বর বাকি`}</small></span>
+              <a href={`/teacher/exam/${x.examId}`}>নম্বরপত্র</a></li>)}
+            {homework.map((h) => <li><span>{h.name}<small>{bnDigits(h.total)}টি হোমওয়ার্ক দেখা বাকি</small></span>
+              <a href={`/teacher/batch/${h.batchId}#homework`}>হোমওয়ার্ক</a></li>)}
+          </ul>
+        </section>}
+
         <div class="kpis">
           <div class="kpi kpi--info"><span class="kpi__icon"><Icon name="calendar" /></span><span class="kpi__label">আমার ব্যাচ</span><strong class="kpi__value">{bnDigits(batches.length)}</strong></div>
           <div class="kpi"><span class="kpi__icon"><Icon name="users" /></span><span class="kpi__label">মোট ছাত্র</span><strong class="kpi__value">{bnDigits(students)}</strong></div>
@@ -87,7 +107,7 @@ const students = batches.reduce((a, b) => a + b.students, 0);
             <div class="card__head"><h2>সামনের পরীক্ষা</h2></div>
             {exams.length === 0 ? <p class="muted">সামনে কোনো পরীক্ষা নেই।</p> : (
               <ul class="list">
-                {exams.map((x) => <li><div><strong>{dayBn(x.examDate)}</strong><small>{examLine(x)} · {x.batchName}</small><a href={`/teacher/exam/${x.id}`}>মার্কশিট খুলুন</a></div>{x.feeMinor > 0 && <small class="muted">ফি {taka(x.feeMinor)}</small>}</li>)}
+                {exams.map((x) => <li><div><strong>{dayBn(x.examDate)}</strong><small>{examLine(x)} · {x.batchName}</small>{grading.has(x.id) && <a href={`/teacher/exam/${x.id}`}>মার্কশিট খুলুন</a>}</div>{x.feeMinor > 0 && <small class="muted">ফি {taka(x.feeMinor)}</small>}</li>)}
               </ul>
             )}
           </section>

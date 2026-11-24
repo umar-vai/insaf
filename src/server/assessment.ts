@@ -1,6 +1,7 @@
 import { log } from './admin';
 import { examEligibleEnrollmentIds } from './academic';
 import { isYmd } from '../lib/offline';
+import { teaches } from './office';
 import { offlineIdsForEmail } from './panels';
 import { notifyStudents, studentsOfBatch } from './notifications';
 
@@ -54,6 +55,12 @@ export type ExamAssessment = {
   examinees: number;
   completed: number;
   publishedAt: string | null;
+  assessorId: string | null;
+  submittedAt: string | null;
+  submittedBy: string | null;
+  reviewedAt: string | null;
+  reviewedBy: string | null;
+  reviewNote: string;
 };
 
 export type ExamMarkRow = {
@@ -74,6 +81,7 @@ export type PublishedResult = {
   subject: string;
   examDate: string;
   batchName: string;
+  studentId: string;
   studentName: string;
   studentNo: number | null;
   obtained: number | null;
@@ -96,7 +104,8 @@ export const resultTone = (score: number | null, pass: number, attendance: strin
 
 const ASSESSMENT_SELECT = `SELECT x.id AS examId, x.batch_id AS batchId, b.name AS batchName, x.title, x.subject,
     x.exam_date AS examDate, x.status AS examStatus, x.roster_frozen AS rosterFrozen, p.max_marks AS maxMarks, p.pass_marks AS passMarks,
-    p.status, p.published_at AS publishedAt,
+    p.status, p.published_at AS publishedAt, x.assessor_id AS assessorId,
+    p.submitted_at AS submittedAt, p.submitted_by AS submittedBy, p.reviewed_at AS reviewedAt, p.reviewed_by AS reviewedBy, coalesce(p.review_note, '') AS reviewNote,
     (SELECT count(*) FROM assessment_examinees ee WHERE ee.exam_id = x.id) AS examinees,
     (SELECT count(*) FROM assessment_marks m WHERE m.exam_id = x.id) AS completed
   FROM offline_exams x JOIN offline_batches b ON b.id = x.batch_id
@@ -171,12 +180,12 @@ export async function examRosterCandidates(db: D1Database, exam: ExamAssessment)
 /** A late enrollment may join the frozen list before the exam, with the same exam fee. */
 export async function addExamCandidate(db: D1Database, actor: string, examId: string, enrollmentId: string, today: string): Promise<Result<boolean>> {
   const exam = await examAssessment(db, examId);
-  if (!exam?.rosterFrozen || exam.examStatus !== 'scheduled' || exam.status === 'published' || exam.examDate < today) return fail('locked');
+  if (!exam?.rosterFrozen || exam.examStatus !== 'scheduled' || exam.status === 'published' || exam.submittedAt || exam.examDate < today) return fail('locked');
   const [added] = await db.batch([
     db.prepare(`INSERT INTO assessment_examinees (exam_id, enrollment_id, captured_by)
       SELECT ?3, e.id, ?4 FROM (${examEligibleEnrollmentIds}) e
       JOIN offline_exams x ON x.id = ?3 AND x.status = 'scheduled' AND x.roster_frozen = 1 AND x.exam_date >= ?6
-      WHERE e.id = ?5 AND NOT EXISTS (SELECT 1 FROM assessment_policies WHERE exam_id = ?3 AND status = 'published')
+      WHERE e.id = ?5 AND NOT EXISTS (SELECT 1 FROM assessment_policies WHERE exam_id = ?3 AND (status = 'published' OR submitted_at IS NOT NULL))
       AND (SELECT count(*) FROM assessment_examinees WHERE exam_id = ?3) < 1000
       ON CONFLICT (exam_id, enrollment_id) DO NOTHING`).bind(exam.batchId, exam.examDate, examId, actor, enrollmentId, today),
     db.prepare(`INSERT INTO offline_charges (id, enrollment_id, kind, label, amount_minor, due_date, source_key, created_by)
@@ -184,7 +193,7 @@ export async function addExamCandidate(db: D1Database, actor: string, examId: st
       FROM assessment_examinees ee JOIN offline_exams x ON x.id = ee.exam_id
       WHERE x.id = ?3 AND ee.enrollment_id = ?4 AND x.status = 'scheduled' AND x.fee_minor > 0 AND x.exam_date >= ?5
         AND NOT EXISTS (SELECT 1 FROM enrollment_assistance a WHERE a.enrollment_id = ee.enrollment_id AND a.kind = 'zakat' AND a.revoked_at IS NULL)
-        AND NOT EXISTS (SELECT 1 FROM assessment_policies WHERE exam_id = ?3 AND status = 'published')
+        AND NOT EXISTS (SELECT 1 FROM assessment_policies WHERE exam_id = ?3 AND (status = 'published' OR submitted_at IS NOT NULL))
         AND changes() = 1
       ON CONFLICT (enrollment_id, source_key) DO NOTHING`).bind(newId('chg'), actor, examId, enrollmentId, today),
   ]);
@@ -248,21 +257,90 @@ export type MarkInput = { enrollmentId: string; obtained: unknown; absent: boole
  * a scheduled exam whose gradebook is still a draft, so nothing can slip in
  * after publishing even if two people press save at the same time.
  */
-const markStatement = (db: D1Database, actor: string, examId: string, enrollmentId: string, obtained: number | null, comment: string) =>
+// A named assessor takes precedence. Otherwise use matching subject teachers,
+ // or the main class teacher when nobody has been assigned that subject.
+const allowedExamTeacher = (id: string) => `EXISTS (
+  SELECT 1 FROM offline_batches b JOIN teachers t ON t.id = ${id} AND t.status = 'active' AND t.role = 'teacher'
+  WHERE b.id = x.batch_id AND ${teaches('t.id')} AND (
+    x.assessor_id = t.id OR (x.assessor_id IS NULL AND (
+      EXISTS (SELECT 1 FROM batch_teachers a WHERE a.batch_id = b.id AND a.teacher_id = t.id
+        AND trim(x.subject) <> '' AND lower(trim(a.subject)) = lower(trim(x.subject))) OR
+      (b.teacher_id = t.id AND NOT EXISTS (SELECT 1 FROM batch_teachers a JOIN teachers at ON at.id = a.teacher_id AND at.status = 'active' AND at.role = 'teacher'
+        WHERE a.batch_id = b.id AND trim(x.subject) <> '' AND lower(trim(a.subject)) = lower(trim(x.subject))))
+    ))
+  ))`;
+
+export async function teacherCanGrade(db: D1Database, examId: string, teacherId: string) {
+  return Boolean(await db.prepare(`SELECT 1 FROM offline_exams x WHERE x.id = ?1 AND ${allowedExamTeacher('?2')}`).bind(examId, teacherId).first());
+}
+
+export async function assignedExamIds(db: D1Database, teacherId: string, ids: readonly string[]) {
+  if (!ids.length) return new Set<string>();
+  const { results } = await db.prepare(`SELECT x.id FROM offline_exams x JOIN json_each(?1) j ON j.value = x.id
+    WHERE ${allowedExamTeacher('?2')}`).bind(JSON.stringify(ids), teacherId).all<{ id: string }>();
+  return new Set(results.map((row) => row.id));
+}
+
+export async function examAssessorChoices(db: D1Database, examId: string) {
+  return (await db.prepare(`SELECT t.id, t.name, coalesce(bt.subject, t.subject) AS subject FROM offline_exams x
+    JOIN offline_batches b ON b.id = x.batch_id JOIN teachers t ON ${teaches('t.id')}
+    LEFT JOIN batch_teachers bt ON bt.batch_id = b.id AND bt.teacher_id = t.id
+    WHERE x.id = ?1 AND t.status = 'active' AND t.role = 'teacher' ORDER BY t.name`).bind(examId).all<{ id: string; name: string; subject: string }>()).results;
+}
+
+export async function assignExamAssessor(db: D1Database, actor: string, examId: string, teacherId: string): Promise<Result<boolean>> {
+  const r = await db.prepare(`UPDATE offline_exams SET assessor_id = ?1 WHERE id = ?2 AND status = 'scheduled'
+    AND NOT EXISTS (SELECT 1 FROM assessment_policies p WHERE p.exam_id = ?2 AND (p.status = 'published' OR p.submitted_at IS NOT NULL))
+    AND (?1 IS NULL OR EXISTS (
+      SELECT 1 FROM offline_batches b JOIN teachers t ON t.id = ?1 AND t.status = 'active' AND t.role = 'teacher'
+      WHERE b.id = offline_exams.batch_id AND ${teaches('t.id')}
+    ))`).bind(teacherId || null, examId).run();
+  if (!r.meta.changes) return fail('assessor');
+  await log(db, actor, 'assessment.assessor', `exam:${examId}`, { teacherId });
+  return { ok: true, value: true };
+}
+
+const allMarksEntered = `EXISTS (SELECT 1 FROM assessment_examinees e WHERE e.exam_id = assessment_policies.exam_id)
+  AND NOT EXISTS (SELECT 1 FROM assessment_examinees e LEFT JOIN assessment_marks m ON m.exam_id = e.exam_id AND m.enrollment_id = e.enrollment_id
+    WHERE e.exam_id = assessment_policies.exam_id AND m.enrollment_id IS NULL)`;
+
+export async function submitAssessment(db: D1Database, actor: string, examId: string, teacherId: string | null = null): Promise<Result<boolean>> {
+  const r = await db.prepare(`UPDATE assessment_policies SET submitted_at = ${NOW}, submitted_by = ?1, review_note = ''
+    WHERE exam_id = ?2 AND status = 'draft' AND submitted_at IS NULL AND ${allMarksEntered}
+    AND EXISTS (SELECT 1 FROM offline_exams x WHERE x.id = ?2 AND x.status = 'scheduled'
+      AND (?3 IS NULL OR ${allowedExamTeacher('?3')}))`).bind(actor, examId, teacherId).run();
+  if (!r.meta.changes) return fail('incomplete');
+  await log(db, actor, 'assessment.submit', `exam:${examId}`);
+  return { ok: true, value: true };
+}
+
+export async function reviewAssessment(db: D1Database, actor: string, examId: string, approve: boolean, noteInput: unknown): Promise<Result<boolean>> {
+  const note = clip(noteInput, 300);
+  if (!approve && note.length < 3) return fail('reason');
+  const review = approve ? `reviewed_at = ${NOW}, reviewed_by = ?1` : 'submitted_at = NULL, submitted_by = NULL, reviewed_at = NULL, reviewed_by = NULL';
+  const r = await db.prepare(`UPDATE assessment_policies SET ${review}, updated_by = ?1, review_note = ?2
+    WHERE exam_id = ?3 AND status = 'draft' AND submitted_at IS NOT NULL
+    AND EXISTS (SELECT 1 FROM offline_exams x WHERE x.id = ?3 AND x.status = 'scheduled')`).bind(actor, note, examId).run();
+  if (!r.meta.changes) return fail('locked');
+  await log(db, actor, approve ? 'assessment.review.approve' : 'assessment.review.return', `exam:${examId}`, { note });
+  return { ok: true, value: true };
+}
+
+const markStatement = (db: D1Database, actor: string, examId: string, enrollmentId: string, obtained: number | null, comment: string, teacherId: string | null = null) =>
   db
     .prepare(
       `INSERT INTO assessment_marks (exam_id, enrollment_id, obtained, attendance, comment, marked_by)
         SELECT ee.exam_id, ee.enrollment_id, ?, ?, ?, ?
         FROM assessment_examinees ee
-        JOIN assessment_policies p ON p.exam_id = ee.exam_id AND p.status = 'draft'
+        JOIN assessment_policies p ON p.exam_id = ee.exam_id AND p.status = 'draft' AND p.submitted_at IS NULL
         JOIN offline_exams x ON x.id = ee.exam_id AND x.status = 'scheduled'
-        WHERE ee.exam_id = ? AND ee.enrollment_id = ?
+        WHERE ee.exam_id = ?5 AND ee.enrollment_id = ?6 AND (?7 IS NULL OR ${allowedExamTeacher('?7')})
         ON CONFLICT (exam_id, enrollment_id) DO UPDATE SET obtained = excluded.obtained,
           attendance = excluded.attendance, comment = excluded.comment, marked_by = excluded.marked_by,
           updated_at = ${NOW}
-        WHERE EXISTS (SELECT 1 FROM assessment_policies p WHERE p.exam_id = excluded.exam_id AND p.status = 'draft')`,
+        WHERE EXISTS (SELECT 1 FROM assessment_policies p WHERE p.exam_id = excluded.exam_id AND p.status = 'draft' AND p.submitted_at IS NULL)`,
     )
-    .bind(obtained, obtained === null ? 'absent' : 'present', comment, actor, examId, enrollmentId);
+    .bind(obtained, obtained === null ? 'absent' : 'present', comment, actor, examId, enrollmentId, teacherId);
 
 /** Checks one row of input against the exam's full marks. "skip" means the row was left blank. */
 function readMark(input: MarkInput, maxMarks: number): { obtained: number | null; comment: string } | 'skip' | 'invalid' {
@@ -285,7 +363,7 @@ export async function recordExamMark(
   commentInput: unknown,
 ): Promise<Result<boolean>> {
   const exam = await examAssessment(db, examId);
-  if (!exam || exam.examStatus !== 'scheduled' || exam.status !== 'draft' || !exam.maxMarks) return fail('locked');
+  if (!exam || exam.examStatus !== 'scheduled' || exam.status !== 'draft' || exam.submittedAt || !exam.maxMarks) return fail('locked');
   const mark = readMark({ enrollmentId, obtained: obtainedInput, absent, comment: commentInput }, exam.maxMarks);
   if (!enrollmentId || mark === 'skip' || mark === 'invalid') return fail('marks');
   const r = await markStatement(db, actor, examId, enrollmentId, mark.obtained, mark.comment).run();
@@ -304,9 +382,11 @@ export async function saveExamMarks(
   actor: string,
   examId: string,
   inputs: MarkInput[],
+  teacherId: string | null = null,
 ): Promise<Result<number>> {
   const exam = await examAssessment(db, examId);
-  if (!exam || exam.examStatus !== 'scheduled' || exam.status !== 'draft' || !exam.maxMarks) return fail('locked');
+  if (!exam || exam.examStatus !== 'scheduled' || exam.status !== 'draft' || exam.submittedAt || !exam.maxMarks) return fail('locked');
+  if (teacherId && !(await teacherCanGrade(db, examId, teacherId))) return fail('permission');
   const current = new Map((await examMarks(db, examId)).map((r) => [r.enrollmentId, r]));
   const changes: { enrollmentId: string; obtained: number | null; comment: string }[] = [];
   for (const input of inputs.slice(0, 1000)) {
@@ -320,7 +400,8 @@ export async function saveExamMarks(
     changes.push({ enrollmentId: input.enrollmentId, ...mark });
   }
   if (changes.length) {
-    await db.batch(changes.map((c) => markStatement(db, actor, examId, c.enrollmentId, c.obtained, c.comment)));
+    const writes = await db.batch(changes.map((c) => markStatement(db, actor, examId, c.enrollmentId, c.obtained, c.comment, teacherId)));
+    if (writes.some((r) => !r.meta.changes)) return fail('locked');
     await log(db, actor, 'assessment.marks', `exam:${examId}`, {
       saved: changes.length,
       marks: changes.slice(0, 60).map((c) => [c.enrollmentId, c.obtained ?? 'absent']),
@@ -341,18 +422,16 @@ export function markInputsFromForm(form: FormData): MarkInput[] {
 }
 
 /** Publishes only when every frozen examinee has a mark or is marked absent. */
-export async function publishAssessment(db: D1Database, actor: string, examId: string): Promise<Result<boolean>> {
+export async function publishAssessment(db: D1Database, actor: string, examId: string, requireReview = false): Promise<Result<boolean>> {
   const out = await db
     .prepare(
       `UPDATE assessment_policies SET status = 'published', published_by = ?, published_at = ${NOW}, updated_by = ?
         WHERE exam_id = ? AND status = 'draft'
-        AND EXISTS (SELECT 1 FROM assessment_examinees e WHERE e.exam_id = assessment_policies.exam_id)
-        AND NOT EXISTS (SELECT 1 FROM assessment_examinees e
-          LEFT JOIN assessment_marks m ON m.exam_id = e.exam_id AND m.enrollment_id = e.enrollment_id
-          WHERE e.exam_id = assessment_policies.exam_id AND m.enrollment_id IS NULL)
+        AND (? = 0 OR (submitted_at IS NOT NULL AND reviewed_at IS NOT NULL))
+        AND ${allMarksEntered}
         AND EXISTS (SELECT 1 FROM offline_exams x WHERE x.id = assessment_policies.exam_id AND x.status = 'scheduled')`,
     )
-    .bind(actor, actor, examId)
+    .bind(actor, actor, examId, Number(requireReview))
     .run();
   if (!out.meta.changes) return fail('incomplete');
   await log(db, actor, 'assessment.publish', `exam:${examId}`);
@@ -365,7 +444,7 @@ export async function publishAssessment(db: D1Database, actor: string, examId: s
 }
 
 /** Published results for the signed-in student, or the children a verified guardian may see. */
-export async function publishedResultsForEmail(db: D1Database, email: string): Promise<PublishedResult[]> {
+export async function publishedResultsForEmail(db: D1Database, email: string, range?: { from: string; to: string }): Promise<PublishedResult[]> {
   const ids = await offlineIdsForEmail(db, email);
   const out: PublishedResult[] = [];
   for (let i = 0; i < ids.length; i += 80) {
@@ -373,7 +452,7 @@ export async function publishedResultsForEmail(db: D1Database, email: string): P
     const { results } = await db
       .prepare(
         `SELECT x.id AS examId, x.title, x.subject, x.exam_date AS examDate, b.name AS batchName,
-            s.name AS studentName, s.student_no AS studentNo, m.obtained, m.attendance,
+            s.id AS studentId, s.name AS studentName, s.student_no AS studentNo, m.obtained, m.attendance,
             p.max_marks AS maxMarks, p.pass_marks AS passMarks, m.comment, p.published_at AS publishedAt
           FROM assessment_marks m
           JOIN assessment_policies p ON p.exam_id = m.exam_id AND p.status = 'published'
@@ -382,13 +461,13 @@ export async function publishedResultsForEmail(db: D1Database, email: string): P
           JOIN offline_enrollments e ON e.id = m.enrollment_id
           JOIN offline_students s ON s.id = e.student_id
           WHERE s.status = 'active' AND s.id IN (${placeholders(chunk.length)})
-          ORDER BY x.exam_date DESC, x.title LIMIT 200`,
+          AND x.exam_date BETWEEN ? AND ? ORDER BY x.exam_date DESC, x.title, x.id LIMIT 501`,
       )
-      .bind(...chunk)
+      .bind(...chunk, range?.from ?? '0000-01-01', range?.to ?? '9999-12-31')
       .all<PublishedResult>();
     out.push(...results);
   }
-  return out.sort((a, b) => b.examDate.localeCompare(a.examDate)).slice(0, 500);
+  return out.sort((a, b) => b.examDate.localeCompare(a.examDate)).slice(0, range ? 501 : 500);
 }
 
 // ---- Homework and lesson plans ----------------------------------------------

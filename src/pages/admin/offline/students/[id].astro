@@ -24,13 +24,14 @@ import {
   updateOfflineStudent,
   voidPayment,
 } from '../../../../server/offline';
+import { costsOfStudent } from '../../../../server/student-costs';
 import { assistanceForStudent, approveAssistance, revokeAssistance } from '../../../../server/enrollment-assistance';
 import { listFunds } from '../../../../server/accounts';
 import { localsMayDo } from '../../../../server/staff';
 import { guardianLinks, linkGuardian, parseGuardianForm, relationBn, revokeGuardian } from '../../../../server/school-academic';
 import { listBatches, studentAttendance } from '../../../../server/office';
 import { ATTENDANCE_BN, ITEM_KIND_BN, dayBn, durationBn, METHOD_BN, OFFLINE_ENROLL_STATUS_BN, PAY_METHODS, PLAN_MONTHS, planBn, studentCode, todayDhaka, waNumber } from '../../../../lib/offline';
-import { bnDigits, dateBn, taka } from '../../../../lib/format';
+import { bnDigits, dateBn, taka, takaExact } from '../../../../lib/format';
 import StudentCrm from '../../../../components/admin/StudentCrm.astro';
 import { addFollowup, allTags, closeFollowup, CHANNELS, listFollowups, listTemplates, logContact, parseContactForm, parseFollowupForm, parseTags, setTags, studentTimeline, tagsOf, type Channel } from '../../../../server/crm';
 
@@ -155,9 +156,7 @@ const [courses, batches, attendance, charges, guardians, crmTags, tagChoices, fo
   listTemplates(env.DB),
   studentTimeline(env.DB, id),
 ]);
-const costs = accounts ? (await env.DB.prepare(
-  "SELECT id, category, spent_on AS day, amount_minor AS amount FROM expenses WHERE student_id = ? AND voided_at IS NULL AND status = 'approved' ORDER BY spent_on DESC, id DESC",
-).bind(id).all<{ id: string; category: string; day: string; amount: number }>()).results : [];
+const costs = accounts ? await costsOfStudent(env.DB, id) : [];
 const active = enrollments.filter((e) => e.status === 'active');
 const [assistance, fundList, stay] = await Promise.all([
   assistanceForStudent(env.DB, id),
@@ -580,8 +579,8 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
 
   {accounts && <section class="card" id="student-costs">
     <div class="card__head"><h2>এই ছাত্রের খরচ</h2>{writeExpenses && student.studentNo && <a href={`/admin/offline/expenses?new=1&student=${encodeURIComponent(studentCode(student.studentNo))}#new`}>খরচ লিখুন</a>}</div>
-    {costs.length ? <><p>অনুমোদিত খরচ {taka(costs.reduce((sum, cost) => sum + cost.amount, 0))}</p><ul class="list">
-      {costs.map((cost) => <li><a href={`/admin/offline/accounts/voucher/${cost.id}`}>{cost.category} · {dayBn(cost.day)}</a><strong>{taka(cost.amount)}</strong></li>)}
+    {costs.length ? <><p>অনুমোদিত খরচ {takaExact(costs.reduce((sum, cost) => sum + cost.amount, 0))}</p><ul class="list">
+      {costs.map((cost) => <li><a href={`/admin/offline/accounts/voucher/${cost.id}`}>{cost.category} · {dayBn(cost.day)}{cost.shared ? ' · যৌথ খরচের ভাগ' : ' · সরাসরি খরচ'}</a><strong>{takaExact(cost.amount)}</strong></li>)}
     </ul></> : <p class="muted">এই ছাত্রের নামে কোনো অনুমোদিত খরচ নেই।</p>}
   </section>}
   <h2 id="enroll">নতুন কোর্সে ভর্তি</h2>

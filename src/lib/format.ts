@@ -9,6 +9,11 @@ export function taka(minor: number): string {
   return `${bnDigits(Math.round(minor / 100).toLocaleString('en-IN'))} টাকা`;
 }
 
+/** Ledger amounts that include fractional taka, such as a shared expense or bank entry. */
+export function takaExact(minor: number): string {
+  return `${bnDigits((minor / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 }))} টাকা`;
+}
+
 /** 5400 -> "১ ঘণ্টা ৩০ মিনিট". */
 export function duration(sec: number): string {
   const h = Math.floor(sec / 3600);

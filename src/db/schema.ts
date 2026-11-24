@@ -666,6 +666,7 @@ export const offlineExams = sqliteTable(
     startTime: text('start_time').notNull().default(''),
     feeMinor: integer('fee_minor').notNull().default(0),
     note: text('note').notNull().default(''),
+    assessorId: text('assessor_id').references(() => teachers.id),
     rosterFrozen: integer('roster_frozen').notNull().default(0),
     status: text('status', { enum: ['scheduled', 'cancelled'] }).notNull().default('scheduled'),
     createdBy: text('created_by').notNull(),
@@ -828,6 +829,11 @@ export const assessmentPolicies = sqliteTable('assessment_policies', {
   status: text('status', { enum: ['draft','published'] }).notNull().default('draft'),
   publishedBy: text('published_by'),
   publishedAt: text('published_at'),
+  submittedAt: text('submitted_at'),
+  submittedBy: text('submitted_by'),
+  reviewedAt: text('reviewed_at'),
+  reviewedBy: text('reviewed_by'),
+  reviewNote: text('review_note').notNull().default(''),
   updatedBy: text('updated_by').notNull(),
   createdAt: timestamp('created_at'),
 }, t=>[check('assessment_max_positive',sql`${t.maxMarks} BETWEEN 1 AND 1000`),
@@ -972,6 +978,7 @@ export const certificates = sqliteTable('certificates', {
   body: text('body').notNull(),
   issuedOn: text('issued_on').notNull(),
   issuedBy: text('issued_by').notNull(),
+  clearanceJson: text('clearance_json'),
   status: text('status', { enum: ['issued', 'revoked'] }).notNull().default('issued'),
   revokedBy: text('revoked_by'),
   revokedAt: text('revoked_at'),
@@ -1015,15 +1022,18 @@ export const admissionInquiries = sqliteTable('admission_inquiries', {
   message: text('message').notNull().default(''),
   status: text('status', { enum: ['new', 'contacted', 'admitted', 'closed'] }).notNull().default('new'),
   staffNote: text('staff_note').notNull().default(''),
+  studentId: text('student_id').references(() => offlineStudents.id),
   handledBy: text('handled_by'),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
-}, (t) => [index('admission_inquiries_status_idx').on(t.status, t.createdAt)]);
+}, (t) => [index('admission_inquiries_status_idx').on(t.status, t.createdAt),
+  uniqueIndex('admission_inquiries_student_idx').on(t.studentId).where(sql`${t.studentId} IS NOT NULL`)]);
 
 /** The full online admission form with both signed pledges. A student record exists only after the office accepts it. */
 export const admissionApplications = sqliteTable('admission_applications', {
   id: text('id').primaryKey(),
   appNo: integer('app_no').notNull(),
+  submitKey: text('submit_key'),
   status: text('status', { enum: ['pending', 'accepted', 'rejected'] }).notNull().default('pending'),
   studentName: text('student_name').notNull(),
   birthDate: text('birth_date').notNull().default(''),
@@ -1066,7 +1076,9 @@ export const admissionApplications = sqliteTable('admission_applications', {
   studentId: text('student_id').references(() => offlineStudents.id),
   createdAt: timestamp('created_at'),
   updatedAt: timestamp('updated_at'),
-}, (t) => [uniqueIndex('admission_applications_no_idx').on(t.appNo), index('admission_applications_status_idx').on(t.status, t.createdAt), index('admission_applications_phone_idx').on(t.phone)]);
+}, (t) => [uniqueIndex('admission_applications_no_idx').on(t.appNo), uniqueIndex('admission_submission_once_idx').on(t.submitKey).where(sql`${t.submitKey} IS NOT NULL`),
+  index('admission_duplicate_review_idx').on(t.phone, t.birthDate, t.studentName),
+  index('admission_applications_status_idx').on(t.status, t.createdAt), index('admission_applications_phone_idx').on(t.phone)]);
 
 export const portalNotifications = sqliteTable('portal_notifications', {
   id: text('id').primaryKey(),
@@ -1352,3 +1364,33 @@ export const residentialStays = sqliteTable('residential_stays', {
   uniqueIndex('residential_stays_current_student_idx').on(t.studentId).where(sql`${t.endsOn} IS NULL`),
   index('residential_stays_room_idx').on(t.roomId, t.endsOn),
 ]);
+
+export const admissionDrafts = sqliteTable('admission_drafts', {
+  id: text('id').primaryKey(),
+  fields: text('fields').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+}, (t) => [index('admission_drafts_expiry_idx').on(t.expiresAt)]);
+
+export const sharedExpenseAllocations = sqliteTable('shared_expense_allocations', {
+  expenseId: text('expense_id').primaryKey().references(() => expenses.id),
+  batchId: text('batch_id').notNull().references(() => offlineBatches.id),
+  amountMinor: integer('amount_minor').notNull(),
+  reason: text('reason').notNull(),
+  postedBy: text('posted_by').notNull(),
+  createdAt: timestamp('created_at'),
+});
+
+export const sharedExpenseShares = sqliteTable('shared_expense_shares', {
+  expenseId: text('expense_id').notNull().references(() => sharedExpenseAllocations.expenseId),
+  studentId: text('student_id').notNull().references(() => offlineStudents.id),
+  amountMinor: integer('amount_minor').notNull(),
+}, (t) => [primaryKey({ columns: [t.expenseId, t.studentId] }), index('shared_expense_student_idx').on(t.studentId)]);
+
+export const bankStatementDeliveries = sqliteTable('bank_statement_deliveries', {
+  id: text('id').primaryKey(),
+  accountId: text('account_id').notNull().references(() => accAccounts.id),
+  csv: text('csv').notNull(),
+  receivedAt: timestamp('received_at'),
+  reviewedAt: text('reviewed_at'),
+  reviewedBy: text('reviewed_by'),
+}, (t) => [index('bank_statement_review_idx').on(t.reviewedAt, t.receivedAt)]);

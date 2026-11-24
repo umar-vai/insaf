@@ -280,13 +280,14 @@ export async function editPayroll(db: D1Database, actor: string, id: string, for
 }
 
 /** The owner approves draft rows of a month (all, or the ids given). */
-export async function approvePayroll(db: D1Database, actor: string, month: string, ids?: string[]): Promise<number> {
+export async function approvePayroll(db: D1Database, actor: string, month: string, ids?: string[], verified = false): Promise<number> {
   const only = ids?.length ? ` AND id IN (${ids.map(() => '?').join(',')})` : '';
   const r = await db
-    .prepare(`UPDATE payroll SET status = 'approved', approved_by = ?, approved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE month = ? AND status = 'draft'${only}`)
-    .bind(actor, month, ...(ids ?? []))
+    .prepare(`UPDATE payroll SET status = 'approved', approved_by = ?, approved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE month = ? AND status = 'draft'
+      AND (? = 0 OR (bonus_minor = 0 AND other_deduction_minor = 0) OR length(trim(note)) >= 3)${only}`)
+    .bind(actor, month, Number(verified), ...(ids ?? []))
     .run();
-  if (r.meta.changes) await log(db, actor, 'payroll.approve', `payroll:${month}`, { rows: r.meta.changes });
+  if (r.meta.changes) await log(db, actor, 'payroll.approve', `payroll:${month}`, { rows: r.meta.changes, verified });
   return r.meta.changes;
 }
 

@@ -9,7 +9,7 @@ import { createNotice, listNotices, roster, saveAttendance } from '../../../serv
 import { addMaterial, batchForTeacher, hideMaterial, listMaterials, teacherSession } from '../../../server/panels';
 import { getSettings } from '../../../server/settings';
 import { sameOrigin } from '../../../server/session';
-import { assignmentStatusBn, assignmentsForBatch, createAssignment, homeworkKindBn, listBatchAssessments } from '../../../server/assessment';
+import { assignedExamIds, assignmentStatusBn, assignmentsForBatch, createAssignment, homeworkKindBn, listBatchAssessments } from '../../../server/assessment';
 import { DAY_BN, dayBn, isYmd, parseDays, studentCode, timeBn, todayDhaka } from '../../../lib/offline';
 import { bnDigits, dateBn } from '../../../lib/format';
 
@@ -78,6 +78,7 @@ const exams = allExams.filter((x) => x.examStatus === 'scheduled');
 const batchNotices = notices.filter((n) => n.targetId === id && n.status === 'published');
 const saved = Astro.url.searchParams.has('saved');
 const failed = Astro.url.searchParams.has('error');
+const canGrade = teacher ? await assignedExamIds(env.DB, teacher.id, allExams.map((x) => x.examId)) : new Set<string>();
 ---
 
 {
@@ -137,7 +138,7 @@ const failed = Astro.url.searchParams.has('error');
                   <span class={`pill pill--${x.status === 'published' ? 'published' : x.status === 'draft' ? 'draft' : 'pending'}`}>
                     {x.status === 'published' ? 'ফল প্রকাশিত' : x.status === 'draft' ? `নম্বর ${bnDigits(x.completed)} / ${bnDigits(x.examinees)}` : 'অফিস গ্রেডবুক খুলবে'}
                   </span>
-                  {x.status && <a class="button button--ghost button--sm" href={`/teacher/exam/${x.examId}`}>{x.status === 'draft' ? 'নম্বর দিন' : 'দেখুন'}</a>}
+                  {x.status && canGrade.has(x.examId) && <a class="button button--ghost button--sm" href={`/teacher/exam/${x.examId}`}>{x.status === 'draft' ? 'নম্বর দিন' : 'দেখুন'}</a>}
                 </li>
               ))}
             </ul>

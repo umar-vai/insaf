@@ -20,8 +20,9 @@ interface Props {
   bottomNav?: boolean;
   /** Foundation-branded campaign pages only. */
   foundationTheme?: boolean;
+  analytics?: boolean;
 }
-const { title, description = SITE.tagline, image = '/images/students-quran-1280.webp', whatsapp, bottomNav = true, foundationTheme = false } = Astro.props;
+const { title, description = SITE.tagline, image = '/images/students-quran-1280.webp', whatsapp, bottomNav = true, foundationTheme = false, analytics = true } = Astro.props;
 const canonical = new URL(Astro.url.pathname, Astro.site);
 const fullTitle = title === SITE.name ? `${SITE.nameBn} | ${SITE.slogan}` : `${title} | ${SITE.nameBn}`;
 ---
@@ -45,8 +46,7 @@ const fullTitle = title === SITE.name ? `${SITE.nameBn} | ${SITE.slogan}` : `${t
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content={new URL(image, Astro.site)} />
     <script is:inline>document.documentElement.classList.add('js');</script>
-    <MetaPixel />
-    <Analytics />
+    {analytics && <><MetaPixel /><Analytics /></>}
     <slot name="head" />
   </head>
   <body class={foundationTheme ? 'foundation-theme' : undefined}>

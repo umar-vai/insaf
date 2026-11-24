@@ -127,12 +127,13 @@ export function parseOfflineStudentForm(form: FormData): Result<StudentInput> {
   };
 }
 
-export function offlineStudentInsert(db: D1Database, id: string, v: StudentInput, application?: { id: string; updatedAt: string; photoKey: string }) {
+export function offlineStudentInsert(db: D1Database, id: string, v: StudentInput, application?: { id: string; updatedAt: string; photoKey: string }, inquiryId?: string) {
   return db.prepare(
     `INSERT INTO offline_students (id, student_no, name, phone, guardian_phone, email, address, note, application_id, photo_key)
      SELECT ?1, (SELECT coalesce(max(student_no), 0) + 1 FROM offline_students), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
-     WHERE ?8 IS NULL OR EXISTS (SELECT 1 FROM admission_applications WHERE id = ?8 AND status = 'pending' AND updated_at = ?10)`,
-  ).bind(id, v.name, v.phone, v.guardianPhone, v.email, v.address, v.note, application?.id ?? null, application?.photoKey ?? '', application?.updatedAt ?? '');
+     WHERE (?8 IS NULL OR EXISTS (SELECT 1 FROM admission_applications WHERE id = ?8 AND status = 'pending' AND updated_at = ?10))
+     AND (?11 IS NULL OR EXISTS (SELECT 1 FROM admission_inquiries WHERE id = ?11 AND status IN ('new', 'contacted') AND student_id IS NULL))`,
+  ).bind(id, v.name, v.phone, v.guardianPhone, v.email, v.address, v.note, application?.id ?? null, application?.photoKey ?? '', application?.updatedAt ?? '', inquiryId ?? null);
 }
 
 export async function createOfflineStudent(db: D1Database, actor: string, v: StudentInput): Promise<string> {
@@ -142,11 +143,15 @@ export async function createOfflineStudent(db: D1Database, actor: string, v: Stu
   return id;
 }
 
-export async function admitOfflineStudent(db: D1Database, actor: string, v: StudentInput, enrollment: EnrollInput): Promise<string | null> {
+export async function admitOfflineStudent(db: D1Database, actor: string, v: StudentInput, enrollment: EnrollInput, inquiryId?: string): Promise<string | null> {
   const id = newId('ofs');
   const prepared = await prepareOfflineEnrollment(db, id, enrollment);
   if (!prepared) return null;
-  await db.batch([offlineStudentInsert(db, id, v), prepared.statement]);
+  const writes = [offlineStudentInsert(db, id, v, undefined, inquiryId), prepared.statement];
+  if (inquiryId) writes.push(db.prepare(`UPDATE admission_inquiries SET student_id = ?1, status = 'admitted', handled_by = ?2,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?3 AND EXISTS (SELECT 1 FROM offline_students WHERE id = ?1)`).bind(id, actor, inquiryId));
+  const [inserted] = await db.batch(writes);
+  if (!inserted?.meta.changes) return null;
   await log(db, actor, 'offline.student.create', `offline_student:${id}`, { name: v.name });
   await log(db, actor, 'offline.enroll', `offline_student:${id}`, { enrollmentId: prepared.id, courseId: enrollment.courseId });
   return id;

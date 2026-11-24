@@ -7,7 +7,8 @@ import {
   CERT_KIND_BN, CERT_KINDS, certificateTemplate, issueCertificate, listCertificates, parseCertificateForm, revokeCertificate, studentFacts, type CertKind,
 } from '../../../../server/certificates';
 import { dayBn, studentCode, todayDhaka } from '../../../../lib/offline';
-import { bnDigits } from '../../../../lib/format';
+import { clearanceKey, transferClearance } from '../../../../server/transfer-clearance';
+import { bnDigits, taka } from '../../../../lib/format';
 
 // Issue a certificate in two steps: pick the student and the kind (the
 // template is filled from the record), edit the wording, then issue.
@@ -25,6 +26,14 @@ if (Astro.request.method === 'POST') {
   }
   const v = parseCertificateForm(form, today);
   if (!v.ok) return Astro.redirect(`${here}?error=${v.error}`, 303);
+  if (v.value.kind === 'transfer') {
+    const clearance = await transferClearance(env.DB, v.value.studentId, today);
+    const review = String(form.get('exception') ?? '').trim().slice(0, 300);
+    const bad = !clearance || form.get('clearanceConfirmed') !== 'yes' || form.get('cardReviewed') !== 'yes' || form.get('portalReviewed') !== 'yes'
+      || form.get('clearanceKey') !== await clearanceKey(clearance) || ((clearance.balanceMinor > 0 || clearance.books.length > 0) && (!full || review.length < 3));
+    if (bad) return Astro.redirect(`${here}?${new URLSearchParams({ studentId: v.value.studentId, kind: 'transfer', error: 'clearance' })}`, 303);
+    v.value.clearanceJson = JSON.stringify({ ...clearance, exception: review, idCardReviewed: true, portalReviewed: true });
+  }
   const r = await issueCertificate(env.DB, actor, v.value);
   if (!r.ok) return Astro.redirect(`${here}?error=${r.error}`, 303);
   return Astro.redirect(`${here}/${r.value}`, 303);
@@ -34,6 +43,8 @@ const q = Astro.url.searchParams;
 const studentId = (q.get('studentId') ?? '').slice(0, 40);
 const kind = ((CERT_KINDS as readonly string[]).includes(q.get('kind') ?? '') ? q.get('kind') : '') as CertKind | '';
 const facts = studentId && kind ? await studentFacts(env.DB, studentId) : null;
+const clearance = kind === 'transfer' && facts ? await transferClearance(env.DB, studentId, today) : null;
+const key = clearance ? await clearanceKey(clearance) : '';
 const draft = facts && kind ? certificateTemplate(kind, facts) : null;
 const [list, students] = await Promise.all([
   listCertificates(env.DB),
@@ -41,6 +52,7 @@ const [list, students] = await Promise.all([
 ]);
 const ERR: Record<string, string> = {
   student: 'ছাত্র বাছুন।', kind: 'সনদের ধরন বাছুন।', title: 'শিরোনাম লিখুন।', body: 'সনদের লেখা দিন।', date: 'তারিখ সঠিক নয় (ভবিষ্যতের তারিখ হবে না)।',
+  clearance: 'বকেয়া, বই, আইডি ও পোর্টাল আবার যাচাই করুন। বকেয়া বা বই থাকলে অফিসের পূর্ণ অনুমতি ও কারণ প্রয়োজন।',
   busy: 'আবার চেষ্টা করুন।', full: 'সনদ বাতিল করতে অফিসে সম্পূর্ণ অনুমতি লাগবে।', revoke: 'বাতিলের কারণ লিখুন।',
 };
 const err = q.get('error');
@@ -74,10 +86,24 @@ const err = q.get('error');
         <input type="hidden" name="studentId" value={studentId} />
         <input type="hidden" name="kind" value={kind} />
         <p class="wide note">নিচের লেখাটি ছাত্রের রেকর্ড থেকে বসানো একটি শুরু মাত্র। প্রিন্টের আগে মাদরাসার অনুমোদিত ভাষা অনুযায়ী পড়ে ঠিক করে নিন।</p>
+        {clearance && <fieldset class="wide card">
+          <legend>ছাড়পত্রের আগে যাচাই</legend>
+          <input type="hidden" name="clearanceKey" value={key} />
+          <p>ফি বকেয়া {taka(clearance.balanceMinor)} · ফেরত দেওয়া বাকি {bnDigits(clearance.books.length)}টি বই</p>
+          {clearance.books.length > 0 && <ul>{clearance.books.map((b) => <li>{b.title}</li>)}</ul>}
+          <p>ছাত্রের পোর্টাল {clearance.portalLinked ? 'সংযুক্ত' : 'সংযোগ নেই'} · সক্রিয় অভিভাবক {bnDigits(clearance.guardians)} জন</p>
+          <a href={`/admin/offline/students/${studentId}`}>ছাত্র প্রোফাইলে ফি ও পোর্টাল দেখুন</a>
+          <label class="check"><input type="checkbox" name="clearanceConfirmed" value="yes" required /> ফি ও বই যাচাই করেছি</label>
+          <label class="check"><input type="checkbox" name="cardReviewed" value="yes" required /> আইডি কার্ড যাচাই করেছি</label>
+          <label class="check"><input type="checkbox" name="portalReviewed" value="yes" required /> পোর্টালের প্রয়োজনীয় ব্যবস্থা যাচাই করেছি</label>
+          {(clearance.balanceMinor > 0 || clearance.books.length > 0) && (full
+            ? <label class="field"><span>বকেয়া বা বই থাকা অবস্থায় ছাড়পত্রের কারণ</span><input name="exception" minlength="3" maxlength="300" required /></label>
+            : <p class="note note--warn">বকেয়া বা বই থাকলে অফিসের পূর্ণ অনুমতি লাগবে।</p>)}
+        </fieldset>}
         <label class="field wide"><span>শিরোনাম</span><input name="title" required maxlength="120" value={draft.title} /></label>
         <label class="field wide"><span>সনদের লেখা</span><textarea name="body" rows="6" required maxlength="3000">{draft.body}</textarea></label>
         <label class="field"><span>তারিখ</span><input type="date" name="issuedOn" max={today} value={today} /></label>
-        <button class="button"><Icon name="certificate" /> সনদ তৈরি করুন</button>
+        <button class="button" disabled={Boolean(clearance && !full && (clearance.balanceMinor > 0 || clearance.books.length > 0))}><Icon name="certificate" /> সনদ তৈরি করুন</button>
       </form>
     )}
   </section>

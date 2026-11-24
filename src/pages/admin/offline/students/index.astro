@@ -12,27 +12,32 @@ import {
   parseOfflineStudentForm,
   studentsWithPhone,
 } from '../../../../server/offline';
+import { getInquiry } from '../../../../server/inquiries';
 import { listBatches } from '../../../../server/office';
 import { dayBn, studentCode, todayDhaka } from '../../../../lib/offline';
 import { bnDigits, taka } from '../../../../lib/format';
 
 const today = todayDhaka();
 const actor = Astro.locals.staff!;
+const inquiryKey = (Astro.url.searchParams.get('inquiry') ?? '').slice(0, 40);
+const inquiry = inquiryKey ? await getInquiry(env.DB, inquiryKey) : null;
+const canConvert = inquiry && (inquiry.status === 'new' || inquiry.status === 'contacted');
+const inquiryParam = canConvert ? `&inquiry=${encodeURIComponent(inquiry.id)}` : '';
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const student = parseOfflineStudentForm(form);
-  if (!student.ok) return Astro.redirect(`/admin/offline/students?new=1&error=${student.error}`, 303);
+  if (!student.ok) return Astro.redirect(`/admin/offline/students?new=1&error=${student.error}${inquiryParam}`, 303);
   // Same phone already here: open that person instead of making a second one, unless told to.
   if (form.get('confirmDuplicate') !== 'on') {
     const same = await studentsWithPhone(env.DB, student.value.phone);
-    if (same.length) return Astro.redirect(`/admin/offline/students?new=1&dup=${encodeURIComponent(same[0]!.id)}`, 303);
+    if (same.length) return Astro.redirect(`/admin/offline/students?new=1&dup=${encodeURIComponent(same[0]!.id)}${inquiryParam}`, 303);
   }
   const enroll = form.get('courseId') ? parseEnrollForm(form) : null;
-  if (enroll && !enroll.ok) return Astro.redirect(`/admin/offline/students?new=1&error=${enroll.error}`, 303);
-  if (enroll?.ok && !enroll.value.batchId) return Astro.redirect('/admin/offline/students?new=1&error=batch#new', 303);
-  const id = enroll?.ok ? await admitOfflineStudent(env.DB, actor, student.value, enroll.value) : await createOfflineStudent(env.DB, actor, student.value);
-  if (!id) return Astro.redirect('/admin/offline/students?new=1&error=batch#new', 303);
+  if (enroll && !enroll.ok) return Astro.redirect(`/admin/offline/students?new=1&error=${enroll.error}${inquiryParam}`, 303);
+  if ((enroll?.ok && !enroll.value.batchId) || (inquiryKey && (!canConvert || !enroll))) return Astro.redirect(`/admin/offline/students?new=1&error=batch${inquiryParam}#new`, 303);
+  const id = enroll?.ok ? await admitOfflineStudent(env.DB, actor, student.value, enroll.value, canConvert ? inquiry.id : undefined) : await createOfflineStudent(env.DB, actor, student.value);
+  if (!id) return Astro.redirect(`/admin/offline/students?new=1&error=batch${inquiryParam}#new`, 303);
   return Astro.redirect(`/admin/offline/students/${id}?saved=1`, 303);
 }
 
@@ -70,8 +75,9 @@ const link = (k: string) => `/admin/offline/students?${new URLSearchParams({ ...
     }
     <form method="post" class="form-grid">
       <h3>ছাত্রের তথ্য</h3>
-      <label class="field"><span>ছাত্রের নাম</span><input name="name" required minlength="2" maxlength="200" /></label>
-      <label class="field"><span>ফোন নম্বর</span><input name="phone" type="tel" required placeholder="01XXXXXXXXX" /></label>
+      {canConvert && <p class="note wide">এই ভর্তিটি পুরোনো যোগাযোগের সঙ্গে যুক্ত হবে। বিভাগ ও ক্লাস বাছুন।</p>}
+      <label class="field"><span>ছাত্রের নাম</span><input name="name" required minlength="2" maxlength="200" value={canConvert ? inquiry.studentName : ''} /></label>
+      <label class="field"><span>ফোন নম্বর</span><input name="phone" type="tel" required placeholder="01XXXXXXXXX" value={canConvert ? inquiry.phone : ''} /></label>
       <label class="field"><span>অভিভাবকের ফোন (ঐচ্ছিক)</span><input name="guardianPhone" type="tel" /></label>
       <label class="field"><span>Gmail (প্যানেলে লগইনের জন্য, ঐচ্ছিক)</span><input name="email" type="email" placeholder="name@gmail.com" /></label>
       <label class="field wide"><span>ঠিকানা</span><textarea name="address" maxlength="500"></textarea></label>
@@ -82,7 +88,7 @@ const link = (k: string) => `/admin/offline/students?${new URLSearchParams({ ...
         courses.length === 0 ? (
           <p class="wide muted">এখনো কোনো চালু বিভাগ নেই। আগে <a href="/admin/offline/courses">কোর্স যোগ করুন</a>, অথবা এখন শুধু ছাত্রের তথ্য রেখে পরে ভর্তি করুন।</p>
         ) : (
-          <EnrollFields courses={courses} batches={batches} today={today} optional requireBatch />
+          <EnrollFields courses={courses} batches={batches} today={today} optional={!canConvert} requireBatch />
         )
       }
       {dup && <label class="check wide"><input type="checkbox" name="confirmDuplicate" /> তবুও নতুন করে রাখুন</label>}
