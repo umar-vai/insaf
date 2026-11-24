@@ -36,7 +36,7 @@ Astro on Cloudflare Workers, D1 (SQLite) for data, R2 for uploaded pictures and 
 
 **Student CRM (যোগাযোগ ও ফলো আপ):** `/admin/offline/crm` and the CRM card on each student's page: tags (orphan, residential, hifz...), follow ups with a date and who does them (due ones show on the dashboard), the contact log (calls, visits, WhatsApp, SMS; group messages and due reminders are logged on their own), message templates with `{name} {id} {course} {class} {due} {date}`, one timeline per student (admission, payments, charges, contacts, follow ups, tickets, leave, certificates, notifications, library, absences) and the engagement report. Group messages can go to a tag. Every fee payment sends the digital receipt to the student's portal at once.
 
-**Donor CRM and accounting controls (migration `0007`):** the CRM only reads `donations`; what counts as a gift stays in `src/server/donations.ts`.
+**Donor CRM and accounting controls (migration `0009`):** the CRM only reads `donations`; what counts as a gift stays in `src/server/donations.ts`.
 - `/admin/donors`: segments (new, regular, once, active, lapsed), tags, minimum amount filter. `/admin/donors/<key>`: profile note, preferred channel, do not contact, full timeline, contact log, follow ups, tickets, receipt by WhatsApp.
 - `/admin/donors/desk`: the daily desk: receipts still to send (last 30 days), follow ups, tickets, contact log, templates, engagement report with year on year retention. Receipts are one tap; nothing is sent without a staff click, because SMS costs money.
 - `/admin/offline/accounts/close`: close the books through a past day. Nothing dated inside can be added, approved or voided until an owner reopens with a reason. Verified online fee payments are never refused.
@@ -113,7 +113,7 @@ Restore after a mistake or loss (always ask the owner first, it replaces data):
 | `src/server/offline.ts`, `office.ts`, `hr.ts`, `academic.ts`, `panels.ts` | The madrasa office (ERP) and the portals. |
 | `src/server/fee-bills.ts`, `library.ts`, `certificates.ts`, `staff-attendance.ts`, `student-leave.ts`, `inquiries.ts`, `notifications.ts` | School operations (migration `0003`). |
 | `src/server/accounts.ts`, `accounts-ledger.ts`, `crm.ts` | Accounts book and student CRM (migration `0004`). |
-| `src/server/donor-crm.ts`, `acc-period.ts`, `acc-controls.ts` | Donor CRM, closed periods, restricted funds, clearing, consolidated report (migration `0007`). |
+| `src/server/donor-crm.ts`, `acc-period.ts`, `acc-controls.ts` | Donor CRM, closed periods, restricted funds, clearing, consolidated report (migration `0009`). |
 | `src/server/sslcommerz.ts`, `fee-pay.ts` | The gateway; fees paid online. |
 | `src/pages/land.astro`, `src/pages/donate/` | Donation pages. |
 | `src/pages/admin/` | Admin: `dashboard`, `donations`, `donors`, `funds` (CRM); `offline/` (ERP). |
