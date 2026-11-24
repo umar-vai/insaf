@@ -1,5 +1,5 @@
 import { log } from './admin';
-import { roster } from './office';
+import { examEligibleEnrollmentIds } from './academic';
 import { isYmd } from '../lib/offline';
 import { offlineIdsForEmail } from './panels';
 import { notifyStudents, studentsOfBatch } from './notifications';
@@ -46,6 +46,7 @@ export type ExamAssessment = {
   subject: string;
   examDate: string;
   examStatus: 'scheduled' | 'cancelled';
+  rosterFrozen: number;
   maxMarks: number | null;
   passMarks: number | null;
   /** null: the gradebook is not set up yet. */
@@ -94,7 +95,7 @@ export const resultTone = (score: number | null, pass: number, attendance: strin
   attendance === 'absent' ? 'absent' : score === null ? 'draft' : score >= pass ? 'present' : 'failed';
 
 const ASSESSMENT_SELECT = `SELECT x.id AS examId, x.batch_id AS batchId, b.name AS batchName, x.title, x.subject,
-    x.exam_date AS examDate, x.status AS examStatus, p.max_marks AS maxMarks, p.pass_marks AS passMarks,
+    x.exam_date AS examDate, x.status AS examStatus, x.roster_frozen AS rosterFrozen, p.max_marks AS maxMarks, p.pass_marks AS passMarks,
     p.status, p.published_at AS publishedAt,
     (SELECT count(*) FROM assessment_examinees ee WHERE ee.exam_id = x.id) AS examinees,
     (SELECT count(*) FROM assessment_marks m WHERE m.exam_id = x.id) AS completed
@@ -139,29 +140,81 @@ export async function configureAssessment(
   const exam = await examAssessment(db, examId);
   if (!exam || exam.examStatus !== 'scheduled') return fail('exam');
   if (exam.status) return fail('already_configured');
-  // The list is the batch as it stood on the exam day; later admissions or
-  // promotions do not change who sat this exam.
-  const rows = await roster(db, exam.batchId, exam.examDate);
-  const ids = [...new Set(rows.filter((r) => r.studentId).map((r) => r.enrollmentId))];
+  const ids = exam.rosterFrozen
+    ? (await db.prepare('SELECT enrollment_id AS id FROM assessment_examinees WHERE exam_id = ?').bind(examId).all<{ id: string }>()).results.map((r) => r.id)
+    : (await db.prepare(examEligibleEnrollmentIds).bind(exam.batchId, exam.examDate).all<{ id: string }>()).results.map((r) => r.id);
   if (!ids.length) return fail('empty_roster');
   if (ids.length > 1000) return fail('roster_too_large');
-  // One batch, so the policy and its examinees land together or not at all.
   const [policy] = await db.batch([
-    db
-      .prepare(`INSERT INTO assessment_policies (exam_id, max_marks, pass_marks, status, updated_by)
-        VALUES (?, ?, ?, 'draft', ?) ON CONFLICT (exam_id) DO NOTHING`)
-      .bind(examId, max, pass, actor),
-    ...ids.map((id) =>
-      db
-        .prepare(`INSERT INTO assessment_examinees (exam_id, enrollment_id, captured_by) VALUES (?, ?, ?)
-          ON CONFLICT (exam_id, enrollment_id) DO NOTHING`)
-        .bind(examId, id, actor),
-    ),
+    db.prepare(`INSERT INTO assessment_policies (exam_id, max_marks, pass_marks, status, updated_by)
+      SELECT ?1, ?2, ?3, 'draft', ?4 FROM offline_exams x WHERE x.id = ?1 AND x.status = 'scheduled'
+      ON CONFLICT (exam_id) DO NOTHING`).bind(examId, max, pass, actor),
+    db.prepare(`INSERT INTO assessment_examinees (exam_id, enrollment_id, captured_by)
+      SELECT ?1, value, ?2 FROM json_each(?3)
+      WHERE EXISTS (SELECT 1 FROM offline_exams x JOIN assessment_policies p ON p.exam_id = x.id
+        WHERE x.id = ?1 AND x.status = 'scheduled' AND x.roster_frozen = 0 AND p.status = 'draft')
+      ON CONFLICT (exam_id, enrollment_id) DO NOTHING`).bind(examId, actor, JSON.stringify(ids)),
+    db.prepare("UPDATE offline_exams SET roster_frozen = 1 WHERE id = ? AND status = 'scheduled' AND EXISTS (SELECT 1 FROM assessment_policies WHERE exam_id = offline_exams.id)").bind(examId),
   ]);
-  // Someone else set it up a moment ago: theirs stands.
   if (!policy?.meta.changes) return fail('already_configured');
   await log(db, actor, 'assessment.configure', `exam:${examId}`, { max, pass, examinees: ids.length });
   return { ok: true, value: ids.length };
+}
+
+export async function examRosterCandidates(db: D1Database, exam: ExamAssessment) {
+  return (await db.prepare(`SELECT e.id, s.name, e.roll FROM offline_enrollments e JOIN offline_students s ON s.id = e.student_id
+    WHERE e.id IN (${examEligibleEnrollmentIds})
+      AND NOT EXISTS (SELECT 1 FROM assessment_examinees ee WHERE ee.exam_id = ?3 AND ee.enrollment_id = e.id)
+    ORDER BY s.student_no, s.name LIMIT 1000`).bind(exam.batchId, exam.examDate, exam.examId).all<{ id: string; name: string; roll: string }>()).results;
+}
+
+/** A late enrollment may join the frozen list before the exam, with the same exam fee. */
+export async function addExamCandidate(db: D1Database, actor: string, examId: string, enrollmentId: string, today: string): Promise<Result<boolean>> {
+  const exam = await examAssessment(db, examId);
+  if (!exam?.rosterFrozen || exam.examStatus !== 'scheduled' || exam.status === 'published' || exam.examDate < today) return fail('locked');
+  const [added] = await db.batch([
+    db.prepare(`INSERT INTO assessment_examinees (exam_id, enrollment_id, captured_by)
+      SELECT ?3, e.id, ?4 FROM (${examEligibleEnrollmentIds}) e
+      JOIN offline_exams x ON x.id = ?3 AND x.status = 'scheduled' AND x.roster_frozen = 1 AND x.exam_date >= ?6
+      WHERE e.id = ?5 AND NOT EXISTS (SELECT 1 FROM assessment_policies WHERE exam_id = ?3 AND status = 'published')
+      AND (SELECT count(*) FROM assessment_examinees WHERE exam_id = ?3) < 1000
+      ON CONFLICT (exam_id, enrollment_id) DO NOTHING`).bind(exam.batchId, exam.examDate, examId, actor, enrollmentId, today),
+    db.prepare(`INSERT INTO offline_charges (id, enrollment_id, kind, label, amount_minor, due_date, source_key, created_by)
+      SELECT ?1, ee.enrollment_id, 'exam', 'পরীক্ষার ফি: ' || x.title, x.fee_minor, x.exam_date, 'exam:' || x.id, ?2
+      FROM assessment_examinees ee JOIN offline_exams x ON x.id = ee.exam_id
+      WHERE x.id = ?3 AND ee.enrollment_id = ?4 AND x.status = 'scheduled' AND x.fee_minor > 0 AND x.exam_date >= ?5
+        AND NOT EXISTS (SELECT 1 FROM assessment_policies WHERE exam_id = ?3 AND status = 'published')
+        AND changes() = 1
+      ON CONFLICT (enrollment_id, source_key) DO NOTHING`).bind(newId('chg'), actor, examId, enrollmentId, today),
+  ]);
+  if (!added?.meta.changes) return fail('not_eligible');
+  await log(db, actor, 'assessment.roster.add', `exam:${examId}`, { enrollmentId });
+  return { ok: true, value: true };
+}
+
+export async function correctPublishedMark(db: D1Database, actor: string, examId: string, input: MarkInput, reason: string): Promise<Result<boolean>> {
+  const why = clip(reason, 300);
+  if (why.length < 3) return fail('reason');
+  const exam = await examAssessment(db, examId);
+  if (!exam || exam.examStatus !== 'scheduled' || exam.status !== 'published' || !exam.maxMarks) return fail('locked');
+  const mark = readMark(input, exam.maxMarks);
+  if (mark === 'skip' || mark === 'invalid') return fail('marks');
+  const revision = newId('rev');
+  const [stored, changed] = await db.batch([
+    db.prepare(`INSERT INTO assessment_mark_revisions (id, exam_id, enrollment_id, before_mark, after_mark, before_comment, after_comment, reason, revised_by)
+      SELECT ?1, m.exam_id, m.enrollment_id, m.obtained, ?2, m.comment, ?3, ?4, ?5
+      FROM assessment_marks m JOIN assessment_policies p ON p.exam_id = m.exam_id AND p.status = 'published'
+      WHERE m.exam_id = ?6 AND m.enrollment_id = ?7 AND (m.obtained IS NOT ?2 OR m.comment <> ?3)`)
+      .bind(revision, mark.obtained, mark.comment, why, actor, examId, input.enrollmentId),
+    db.prepare(`UPDATE assessment_marks SET obtained = ?1, attendance = ?2, comment = ?3, marked_by = ?4, updated_at = ${NOW}
+      WHERE exam_id = ?5 AND enrollment_id = ?6 AND EXISTS (SELECT 1 FROM assessment_mark_revisions WHERE id = ?7)`)
+      .bind(mark.obtained, mark.obtained === null ? 'absent' : 'present', mark.comment, actor, examId, input.enrollmentId, revision),
+  ]);
+  if (!stored?.meta.changes || !changed?.meta.changes) return fail('no_change');
+  await log(db, actor, 'assessment.result.correct', `exam:${examId}`, { enrollmentId: input.enrollmentId, revision, reason: why });
+  const student = await db.prepare('SELECT student_id AS id FROM offline_enrollments WHERE id = ?').bind(input.enrollmentId).first<{ id: string }>();
+  if (student) await notifyStudents(db, actor, [student.id], { title: 'পরীক্ষার ফল সংশোধন হয়েছে', link: '/account/offline/results', sourceKey: `result:${revision}` });
+  return { ok: true, value: true };
 }
 
 /** The examinees with whatever has been entered for them, in roll order. */

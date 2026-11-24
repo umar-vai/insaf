@@ -21,7 +21,8 @@ const departments = await publicDepartments(env.DB);
   <PageHero image="admission-hero" crumbs={[{ href: '/admission', label: 'ভর্তি' }]} eyebrow="ভর্তি" title="আপনার সন্তানের ইলমিযাত্রা শুরু হোক এখান থেকে" lead="ভর্তি, আসন ও ফি সম্পর্কে জানতে অফিসে যোগাযোগ করুন বা সরাসরি মাদরাসায় আসুন।">
     <div class="hero-cta">
       <a class="button button--gold" href="/admission/apply"><Icon name="check" size={18} /> অনলাইনে আবেদন</a>
-      <a class="button button--gold" href={`tel:${SITE.phone.tel}`}><Icon name="phone" size={18} /> {bnDigits(SITE.phone.display)}</a>
+      <a class="button button--ghost" href="/admission/status">আবেদনের অবস্থা</a>
+      <a class="button button--ghost" href={`tel:${SITE.phone.tel}`}><Icon name="phone" size={18} /> {bnDigits(SITE.phone.display)}</a>
       <a class="button button--ghost" href={whatsappUrl('আসসালামু আলাইকুম, ভর্তি সম্পর্কে জানতে চাই।')} rel="noopener"><Icon name="whatsapp" size={18} /> WhatsApp</a>
     </div>
   </PageHero>

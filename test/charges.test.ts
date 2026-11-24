@@ -9,6 +9,7 @@ import {
   createOfflineStudent,
   enrollOffline,
   getOfflineStudent,
+  getReceipt,
   parsePaymentForm,
   recordPayment,
   voidCharge,
@@ -49,6 +50,20 @@ const pay = (amount: string, paidOn = today) => {
 const ledgerOfStudent = async (id: string) => (await getOfflineStudent(db, id, today))!.enrollments[0]!.ledger;
 
 describe('charges in the ledger', () => {
+  it('takes a partial fee against a chosen charge instead of older tuition', async () => {
+    const { studentId, enrollmentId } = await setup();
+    await addOtherCharge(db, ACTOR, enrollmentId, { label: 'Books', amountTaka: 500, dueDate: today });
+    const charge = (await chargesOfStudent(db, studentId))[0]!;
+    const allocationKey = `charge:${charge.id}`;
+    const paid = await recordPayment(db, ACTOR, enrollmentId, { ...pay('200'), allocationKey }, today);
+    expect(paid.ok).toBe(true);
+    const l = await ledgerOfStudent(studentId);
+    expect(l.byKind.admission.dueMinor).toBe(50_000);
+    expect(l.installments.find((i) => i.key === allocationKey)).toMatchObject({ paidMinor: 20_000, state: 'today' });
+    if (paid.ok) expect((await getReceipt(db, paid.id, today))?.payment.allocationLabel).toBe('Books');
+    expect(await recordPayment(db, ACTOR, enrollmentId, { ...pay('301'), allocationKey }, today)).toEqual({ ok: false, error: 'allocation' });
+  });
+
   const terms = { feeMinor: 600_000, admissionFeeMinor: 0, discountMinor: 0, durationMonths: 2, planMonths: 1, startDate: '2026-10-01' };
 
   it('adds charges to what is owed and splits the total by kind', () => {

@@ -5,6 +5,7 @@ import Icon from './Icon.astro';
 const path = Astro.url.pathname;
 const items = [
   { href: '/', label: 'হোম', icon: 'home', on: path === '/' },
+  { href: '/admission', label: 'ভর্তি', icon: 'child', on: path.startsWith('/admission') },
   { href: '/land', label: 'জমি প্রজেক্ট', icon: 'pin', on: path.startsWith('/land') },
   { href: '/donate', label: 'দান করুন', icon: 'heart', on: path.startsWith('/donate') || path.startsWith('/zakat') },
   { href: '/account', label: 'লগইন', icon: 'user', on: path.startsWith('/account') || path.startsWith('/teacher') },
@@ -36,7 +37,7 @@ const items = [
       inset: auto 0 0;
       z-index: 46;
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       height: var(--bnav-h);
       padding-bottom: env(safe-area-inset-bottom);
       background: rgb(255 255 255 / 0.97);

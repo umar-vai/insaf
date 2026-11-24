@@ -31,8 +31,8 @@ const ERR: Record<string, string> = {
   gateway: 'পেমেন্ট পেজ খোলা যায়নি। একটু পরে আবার চেষ্টা করুন।',
 };
 const error = ERR[Astro.url.searchParams.get('error') ?? ''];
-const STATE_BN = { paid: 'পরিশোধিত', partial: 'কিছু দেওয়া হয়েছে', overdue: 'তারিখ পার', upcoming: 'সামনে' } as const;
-const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'absent', upcoming: 'draft' } as const;
+const STATE_BN = { paid: 'পরিশোধিত', partial: 'কিছু দেওয়া হয়েছে', overdue: 'তারিখ পার', upcoming: 'সামনে', today: 'আজ দিতে হবে' } as const;
+const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'absent', upcoming: 'draft', today: 'pending' } as const;
 ---
 
 {
@@ -48,11 +48,12 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'absent', upcomi
           <p class="note note--warn" role="status">আপনার পেমেন্ট ({taka(mine.amountMinor)}) যাচাই হচ্ছে। টাকা কাটা হয়ে থাকলে অফিস দেখে জমা করে দেবে। দরকার হলে <a href={whatsappUrl(`আমার অনলাইন ফি পেমেন্ট ${mine.reference} যাচাই হচ্ছে দেখাচ্ছে`)}>WhatsApp এ জানান</a>।</p>
         )}
         {mine && (mine.status === 'failed' || mine.status === 'cancelled') && <p class="note note--bad" role="status">পেমেন্ট সম্পন্ন হয়নি, কোনো টাকা জমা হয়নি। চাইলে আবার চেষ্টা করুন।</p>}
+        {mine?.status === 'resolved' && <p class="note" role="status">অফিস আপনার অনলাইন পেমেন্টটি যাচাই করেছে। {mine.paymentId ? <a href={`/account/offline/receipt/${mine.paymentId}`}>রসিদ দেখুন</a> : 'বিস্তারিত জানতে এই পেমেন্টের রেফারেন্স দিয়ে অফিসে যোগাযোগ করুন।'}</p>}
         {error && <p class="note note--bad" role="alert">{error}</p>}
 
         {panel.enrollments.map((e) => {
           const L = e.ledger;
-          const choices = canPay ? feeChoices(e) : [];
+          const choices = canPay ? feeChoices(e, true) : [];
           return (
             <section class="card block">
               <div class="card__head">
@@ -69,7 +70,7 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'absent', upcomi
                 <div><span class="muted">পরের টাকা দেওয়ার শেষ তারিখ</span><strong>{L.next ? dayBn(L.next.dueDate) : 'নেই'}</strong>{L.next && <small class="muted">{taka(L.next.amountMinor)}</small>}</div>
               </div>
               <div class="kinds">
-                {(['fee', 'exam', 'late', 'other'] as const).filter((k) => L.byKind[k].totalMinor > 0).map((k) => (
+                {(['admission', 'fee', 'exam', 'late', 'other'] as const).filter((k) => L.byKind[k].totalMinor > 0).map((k) => (
                   <span><span class="muted">{ITEM_KIND_BN[k]}</span> {taka(L.byKind[k].totalMinor)}{L.byKind[k].dueMinor > 0 && <small class="muted"> (বাকি {taka(L.byKind[k].dueMinor)})</small>}</span>
                 ))}
               </div>

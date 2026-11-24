@@ -121,35 +121,36 @@ export async function teacherExams(db: D1Database, teacherId: string, from: stri
   return results;
 }
 
-/**
- * Sets an exam. A fee becomes a charge ("exam:<id>") on every active
- * student of the batch, due on the exam date. Students who join the batch
- * later are not charged automatically; the office adds it by hand if needed.
- */
-export async function createExam(db: D1Database, actor: string, v: ExamInput): Promise<{ id: string; charged: number } | null> {
-  const batch = await db.prepare(`SELECT name FROM offline_batches WHERE id = ?`).bind(v.batchId).first<{ name: string }>();
+// The applicable promotion is selected by session dates. A planned session cannot move a student early.
+export const examEligibleEnrollmentIds = `SELECT e.id FROM offline_enrollments e
+  JOIN offline_students s ON s.id = e.student_id
+  WHERE e.status = 'active' AND s.status = 'active' AND e.start_date <= ?2
+  AND coalesce((SELECT p.to_batch_id FROM academic_promotions p JOIN academic_sessions ss ON ss.id = p.to_session_id
+    WHERE p.enrollment_id = e.id AND ss.status IN ('active','archived') AND ss.starts_on <= ?2
+    ORDER BY ss.starts_on DESC, p.created_at DESC, p.id DESC LIMIT 1), e.batch_id) = ?1`;
+
+/** Capture one roster for the exam and its fees, even when there is no fee. */
+export async function createExam(db: D1Database, actor: string, v: ExamInput): Promise<{ id: string; charged: number; examinees: number } | null> {
+  const batch = await db.prepare("SELECT 1 FROM offline_batches WHERE id = ? AND status = 'active'").bind(v.batchId).first();
   if (!batch) return null;
   const id = newId('exm');
   const statements = [
-    db
-      .prepare('INSERT INTO offline_exams (id, batch_id, title, subject, exam_date, start_time, fee_minor, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    db.prepare(`INSERT INTO offline_exams (id, batch_id, title, subject, exam_date, start_time, fee_minor, note, created_by, roster_frozen)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`)
       .bind(id, v.batchId, v.title, v.subject, v.examDate, v.startTime, v.feeTaka * 100, v.note, actor),
+    db.prepare(`INSERT INTO assessment_examinees (exam_id, enrollment_id, captured_by)
+      SELECT ?3, eligible.id, ?4 FROM (${examEligibleEnrollmentIds}) eligible`)
+      .bind(v.batchId, v.examDate, id, actor),
+    db.prepare(`INSERT INTO offline_charges (id, enrollment_id, kind, label, amount_minor, due_date, source_key, created_by)
+      SELECT 'chg_' || lower(hex(randomblob(8))), e.enrollment_id, 'exam', ?, ?, ?, ?, ?
+      FROM assessment_examinees e WHERE e.exam_id = ? AND ? > 0`)
+      .bind(`পরীক্ষার ফি: ${v.title}`, v.feeTaka * 100, v.examDate, `exam:${id}`, actor, id, v.feeTaka),
   ];
-  if (v.feeTaka > 0) {
-    statements.push(
-      db
-        .prepare(
-          `INSERT INTO offline_charges (id, enrollment_id, kind, label, amount_minor, due_date, source_key, created_by)
-           SELECT 'chg_' || lower(hex(randomblob(8))), e.id, 'exam', ?, ?, ?, ?, ? FROM offline_enrollments e
-           WHERE e.batch_id = ? AND e.status = 'active' ON CONFLICT (enrollment_id, source_key) DO NOTHING`,
-        )
-        .bind(`পরীক্ষার ফি: ${v.title}`, v.feeTaka * 100, v.examDate, `exam:${id}`, actor, v.batchId),
-    );
-  }
-  const out = await db.batch(statements);
-  const charged = v.feeTaka > 0 ? (out[1]?.meta.changes ?? 0) : 0;
-  await log(db, actor, 'exam.create', `batch:${v.batchId}`, { examId: id, title: v.title, date: v.examDate, fee: v.feeTaka, charged });
-  return { id, charged };
+  const [, roster, fees] = await db.batch(statements);
+  const charged = fees?.meta.changes ?? 0;
+  const examinees = roster?.meta.changes ?? 0;
+  await log(db, actor, 'exam.create', `batch:${v.batchId}`, { examId: id, title: v.title, date: v.examDate, fee: v.feeTaka, charged, examinees });
+  return { id, charged, examinees };
 }
 
 /** Cancels an exam and waives its fee where it is still on record (money already taken stays with the student's account). */

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { check, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 // Money is always stored as integer poisha (1 BDT = 100 minor units).
 
@@ -359,6 +359,10 @@ export const offlinePayments = sqliteTable(
     enrollmentId: text('enrollment_id')
       .notNull()
       .references(() => offlineEnrollments.id),
+    allocationKey: text('allocation_key').notNull().default(''),
+    allocationLabel: text('allocation_label').notNull().default(''),
+    postedAccountId: text('posted_account_id'),
+    postedProjectId: text('posted_project_id'),
     amountMinor: integer('amount_minor').notNull(),
     paidOn: text('paid_on').notNull(),
     method: text('method', { enum: ['cash', 'bkash', 'nagad', 'rocket', 'bank', 'other', 'online'] }).notNull(),
@@ -407,6 +411,8 @@ export const expenses = sqliteTable(
     id: text('id').primaryKey(),
     spentOn: text('spent_on').notNull(),
     category: text('category').notNull(),
+    postedAccountId: text('posted_account_id'),
+    studentId: text('student_id').references(() => offlineStudents.id),
     amountMinor: integer('amount_minor').notNull(),
     description: text('description').notNull().default(''),
     method: text('method').notNull().default('cash'),
@@ -569,6 +575,9 @@ export const offlineOnlinePayments = sqliteTable(
     studentId: text('student_id')
       .notNull()
       .references(() => students.id),
+    allocationKey: text('allocation_key').notNull().default(''),
+    resolutionKind: text('resolution_kind').notNull().default(''),
+    resolutionReference: text('resolution_reference').notNull().default(''),
     amountMinor: integer('amount_minor').notNull(),
     status: text('status', { enum: ['pending', 'paid', 'failed', 'cancelled', 'review', 'resolved'] }).notNull().default('pending'),
     valId: text('val_id'),
@@ -647,6 +656,7 @@ export const offlineExams = sqliteTable(
     startTime: text('start_time').notNull().default(''),
     feeMinor: integer('fee_minor').notNull().default(0),
     note: text('note').notNull().default(''),
+    rosterFrozen: integer('roster_frozen').notNull().default(0),
     status: text('status', { enum: ['scheduled', 'cancelled'] }).notNull().default('scheduled'),
     createdBy: text('created_by').notNull(),
     createdAt: timestamp('created_at'),
@@ -828,6 +838,22 @@ export const assessmentMarks = sqliteTable('assessment_marks',{
   primaryKey({columns:[t.examId,t.enrollmentId]}),
   check('assessment_marks_attendance_valid',sql`(${t.attendance} = 'absent' AND ${t.obtained} IS NULL) OR (${t.attendance} = 'present' AND ${t.obtained} IS NOT NULL AND ${t.obtained} >= 0)`)
 ]);
+export const assessmentMarkRevisions = sqliteTable('assessment_mark_revisions', {
+  id: text('id').primaryKey(),
+  examId: text('exam_id').notNull(),
+  enrollmentId: text('enrollment_id').notNull(),
+  beforeMark: integer('before_mark'),
+  afterMark: integer('after_mark'),
+  beforeComment: text('before_comment').notNull(),
+  afterComment: text('after_comment').notNull(),
+  reason: text('reason').notNull(),
+  revisedBy: text('revised_by').notNull(),
+  createdAt: timestamp('created_at'),
+}, (t) => [
+  foreignKey({ columns: [t.examId, t.enrollmentId], foreignColumns: [assessmentExaminees.examId, assessmentExaminees.enrollmentId] }),
+  index('assessment_mark_revisions_exam_idx').on(t.examId, t.createdAt),
+]);
+
 export const homeworkAssignments=sqliteTable('homework_assignments',{
   id:text('id').primaryKey(),
   batchId:text('batch_id').notNull().references(()=>offlineBatches.id),
@@ -859,6 +885,9 @@ export const feeBillRuns = sqliteTable('fee_bill_runs', {
   title: text('title').notNull(),
   amountMinor: integer('amount_minor').notNull(),
   dueDate: text('due_date').notNull(),
+  feeHead: text('fee_head').notNull().default('other'),
+  billingPeriod: text('billing_period').notNull().default(''),
+  titleKey: text('title_key').notNull().default(''),
   targetKind: text('target_kind', { enum: ['all', 'course', 'batch'] }).notNull(),
   targetId: text('target_id').notNull().default(''),
   useConcessions: integer('use_concessions').notNull().default(1),
@@ -1186,6 +1215,7 @@ export const accEntries = sqliteTable('acc_entries', {
   kind: text('kind', { enum: ['income', 'transfer'] }).notNull(),
   voucherNo: integer('voucher_no').notNull(),
   day: text('day').notNull(),
+  donationId: text('donation_id').references(() => donations.id),
   amountMinor: integer('amount_minor').notNull(),
   accountId: text('account_id').notNull().references(() => accAccounts.id),
   fromAccountId: text('from_account_id').references(() => accAccounts.id),

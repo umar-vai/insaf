@@ -17,6 +17,11 @@ import { addDays, isYmd, parseTaka, PAY_METHODS, type PayMethod } from '../lib/o
 export const ALL_METHODS = [...PAY_METHODS, 'online'] as const satisfies readonly PayMethod[];
 export const GENERAL_FUND = 'fund_general';
 export const UNASSIGNED = 'unassigned';
+export const DONATION_TRANSFER_CATEGORY = 'দান তহবিল থেকে স্থানান্তর';
+/** Only used with a bound parameter or a stored method column. */
+export const postedAccount = (method: string) => `coalesce((SELECT id FROM acc_accounts
+  WHERE status = 'active' AND instr(',' || methods || ',', ',' || ${method} || ',') > 0
+  ORDER BY created_at, id LIMIT 1), '${UNASSIGNED}')`;
 
 export const ACCOUNT_KINDS = ['cash', 'bank', 'mobile', 'gateway'] as const;
 export type AccountKind = (typeof ACCOUNT_KINDS)[number];
@@ -219,6 +224,7 @@ export type EntryInput = {
   description: string;
   reference: string;
   nonce: string | null;
+  donationReference?: string;
 };
 
 export function parseEntryForm(form: FormData, today: string): Result<EntryInput> {
@@ -231,7 +237,9 @@ export function parseEntryForm(form: FormData, today: string): Result<EntryInput
   if (!accountId) return fail('account');
   const fromAccountId = kind === 'transfer' ? text(form, 'fromAccountId', 40) : '';
   if (kind === 'transfer' && (!fromAccountId || fromAccountId === accountId)) return fail('from_account');
-  const category = kind === 'income' ? text(form, 'category', 60) : 'স্থানান্তর';
+  const donationReference = kind === 'income' ? text(form, 'donationReference', 80).toUpperCase() : '';
+  const category = donationReference ? DONATION_TRANSFER_CATEGORY : kind === 'income' ? text(form, 'category', 60) : 'স্থানান্তর';
+  if (category === DONATION_TRANSFER_CATEGORY && (!donationReference || !text(form, 'reference', 80))) return fail('donation');
   if (category.length < 2) return fail('category');
   return ok({
     kind,
@@ -246,6 +254,7 @@ export function parseEntryForm(form: FormData, today: string): Result<EntryInput
     description: longText(form, 'description', 500),
     reference: text(form, 'reference', 80),
     nonce: nonceOf(form),
+    donationReference,
   });
 }
 
@@ -258,19 +267,26 @@ export async function recordEntry(db: D1Database, actor: string, v: EntryInput):
   if (await dayIsClosed(db, v.day)) return fail('closed');
   const accounts = await listAccounts(db, false);
   if (!accounts.some((a) => a.id === v.accountId) || (v.fromAccountId && !accounts.some((a) => a.id === v.fromAccountId))) return fail('account');
+  const donation = v.donationReference ? await db.prepare(`SELECT id, amount_minor AS amount FROM donations
+    WHERE (upper(reference) = ?1 OR ('RCP-' || printf('%06d', receipt_no)) = ?1)
+    AND status = 'paid' AND voided_at IS NULL`).bind(v.donationReference).first<{ id: string; amount: number }>() : null;
+  if (v.donationReference && (!donation || v.kind !== 'income' || v.amountMinor > donation.amount || !v.reference)) return fail('donation');
   const id = newId('ace');
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const r = await db
         .prepare(
-          `INSERT INTO acc_entries (id, kind, voucher_no, day, amount_minor, account_id, from_account_id, project_id, fund_id, category, party, description, reference, recorded_by, nonce)
-           VALUES (?1, ?2, (SELECT coalesce(max(voucher_no), 0) + 1 FROM acc_entries WHERE kind = ?2), ?3, ?4, ?5, ?6,
-                   (SELECT id FROM acc_projects WHERE id = ?7), (SELECT id FROM acc_funds WHERE id = ?8), ?9, ?10, ?11, ?12, ?13, ?14)
+          `INSERT INTO acc_entries (id, kind, voucher_no, day, amount_minor, account_id, from_account_id, project_id, fund_id, category, party, description, reference, recorded_by, nonce, donation_id)
+           SELECT ?1, ?2, (SELECT coalesce(max(voucher_no), 0) + 1 FROM acc_entries WHERE kind = ?2), ?3, ?4, ?5, ?6,
+                   (SELECT id FROM acc_projects WHERE id = ?7), (SELECT id FROM acc_funds WHERE id = ?8), ?9, ?10, ?11, ?12, ?13, ?14, ?15
+           WHERE ?15 IS NULL OR (EXISTS (SELECT 1 FROM donations d WHERE d.id = ?15 AND d.status = 'paid' AND d.voided_at IS NULL)
+             AND NOT EXISTS (SELECT 1 FROM acc_entries x WHERE x.donation_id = ?15 AND x.voided_at IS NULL))
            RETURNING voucher_no AS voucherNo`,
         )
-        .bind(id, v.kind, v.day, v.amountMinor, v.accountId, v.fromAccountId, v.projectId ?? '', v.fundId ?? '', v.category, v.party, v.description, v.reference, actor, v.nonce)
+        .bind(id, v.kind, v.day, v.amountMinor, v.accountId, v.fromAccountId, v.projectId ?? '', v.fundId ?? '', donation ? DONATION_TRANSFER_CATEGORY : v.category, v.party, v.description, v.reference, actor, v.nonce, donation?.id ?? null)
         .first<{ voucherNo: number }>();
-      await log(db, actor, `accounts.${v.kind}`, `acc_entry:${id}`, { voucherNo: r!.voucherNo, amount: v.amountMinor / 100, day: v.day, category: v.category });
+      if (!r) return fail('donation');
+      await log(db, actor, `accounts.${v.kind}`, `acc_entry:${id}`, { voucherNo: r!.voucherNo, amount: v.amountMinor / 100, day: v.day, category: donation ? DONATION_TRANSFER_CATEGORY : v.category, donationId: donation?.id });
       return ok({ id, voucherNo: r!.voucherNo });
     } catch (e) {
       const again = await seen();
@@ -314,6 +330,7 @@ export type Entry = {
   party: string;
   description: string;
   reference: string;
+  donationReference: string | null;
   recordedBy: string;
   voidedAt: string | null;
   voidReason: string | null;
@@ -322,9 +339,9 @@ export type Entry = {
 
 const ENTRY_SELECT = `SELECT x.id, x.kind, x.voucher_no AS voucherNo, x.day, x.amount_minor AS amountMinor, x.account_id AS accountId, a.name AS accountName,
   x.from_account_id AS fromAccountId, fa.name AS fromAccountName, x.project_id AS projectId, p.name AS projectName, x.fund_id AS fundId, f.name AS fundName,
-  x.category, x.party, x.description, x.reference, x.recorded_by AS recordedBy, x.voided_at AS voidedAt, x.void_reason AS voidReason, x.created_at AS createdAt
+  d.reference AS donationReference, x.category, x.party, x.description, x.reference, x.recorded_by AS recordedBy, x.voided_at AS voidedAt, x.void_reason AS voidReason, x.created_at AS createdAt
   FROM acc_entries x JOIN acc_accounts a ON a.id = x.account_id LEFT JOIN acc_accounts fa ON fa.id = x.from_account_id
-  LEFT JOIN acc_projects p ON p.id = x.project_id LEFT JOIN acc_funds f ON f.id = x.fund_id`;
+  LEFT JOIN acc_projects p ON p.id = x.project_id LEFT JOIN acc_funds f ON f.id = x.fund_id LEFT JOIN donations d ON d.id = x.donation_id`;
 
 export async function listEntries(db: D1Database, from: string, to: string, limit = 500): Promise<Entry[]> {
   const { results } = await db.prepare(`${ENTRY_SELECT} WHERE x.day BETWEEN ? AND ? ORDER BY x.day DESC, x.created_at DESC LIMIT ?`).bind(from, to, limit).all<Entry>();
@@ -363,14 +380,14 @@ export async function transactions(db: D1Database, from: string, to: string, lim
   const [fees, spent, entries] = await db.batch([
     db
       .prepare(
-        `SELECT p.id, p.paid_on AS day, p.receipt_no AS no, p.amount_minor AS amount, p.method, coalesce(c.project_id, '') AS projectId, c.title AS head, s.name AS party, s.id AS studentId
+        `SELECT p.id, p.paid_on AS day, p.receipt_no AS no, p.amount_minor AS amount, p.method, p.posted_account_id AS accountId, coalesce(p.posted_project_id, c.project_id, '') AS projectId, coalesce(nullif(p.allocation_label, ''), c.title) AS head, s.name AS party, s.id AS studentId
          FROM offline_payments p JOIN offline_enrollments e ON e.id = p.enrollment_id JOIN offline_courses c ON c.id = e.course_id JOIN offline_students s ON s.id = e.student_id
          WHERE p.voided_at IS NULL AND p.paid_on BETWEEN ? AND ? ORDER BY p.paid_on, p.receipt_no LIMIT ?`,
       )
       .bind(from, to, limit),
     db
       .prepare(
-        `SELECT id, spent_on AS day, voucher_no AS no, amount_minor AS amount, method, coalesce(project_id, '') AS projectId, coalesce(fund_id, '${GENERAL_FUND}') AS fundId,
+        `SELECT id, spent_on AS day, voucher_no AS no, amount_minor AS amount, method, posted_account_id AS accountId, coalesce(project_id, '') AS projectId, coalesce(fund_id, '${GENERAL_FUND}') AS fundId,
          category AS head, CASE WHEN party <> '' THEN party ELSE description END AS party
          FROM expenses WHERE voided_at IS NULL AND status = 'approved' AND spent_on BETWEEN ? AND ? ORDER BY spent_on, created_at LIMIT ?`,
       )
@@ -388,10 +405,10 @@ export async function transactions(db: D1Database, from: string, to: string, lim
     if (t.day >= (opening.get(t.accountId) ?? '')) out.push(t);
   };
   for (const r of fees!.results as Row[]) {
-    push({ id: r.id, day: r.day, source: 'fee', ref: `রসিদ ${r.no}`, link: `/admin/offline/receipt/${r.id}`, accountId: byMethod.get(r.method!) ?? UNASSIGNED, projectId: r.projectId, fundId: GENERAL_FUND, head: r.head, party: r.party, inMinor: r.amount, outMinor: 0 });
+    push({ id: r.id, day: r.day, source: 'fee', ref: `রসিদ ${r.no}`, link: `/admin/offline/receipt/${r.id}`, accountId: r.accountId ?? byMethod.get(r.method!) ?? UNASSIGNED, projectId: r.projectId, fundId: GENERAL_FUND, head: r.head, party: r.party, inMinor: r.amount, outMinor: 0 });
   }
   for (const r of spent!.results as Row[]) {
-    push({ id: r.id, day: r.day, source: 'expense', ref: voucherCode('expense', r.no) || 'বেতন', link: `/admin/offline/accounts/voucher/${r.id}`, accountId: byMethod.get(r.method!) ?? UNASSIGNED, projectId: r.projectId, fundId: r.fundId!, head: r.head, party: r.party, inMinor: 0, outMinor: r.amount });
+    push({ id: r.id, day: r.day, source: 'expense', ref: voucherCode('expense', r.no) || 'বেতন', link: `/admin/offline/accounts/voucher/${r.id}`, accountId: r.accountId ?? byMethod.get(r.method!) ?? UNASSIGNED, projectId: r.projectId, fundId: r.fundId!, head: r.head, party: r.party, inMinor: 0, outMinor: r.amount });
   }
   for (const r of entries!.results as Row[]) {
     const base = { id: r.id, day: r.day, link: `/admin/offline/accounts/voucher/${r.id}`, projectId: r.projectId, fundId: r.fundId!, head: r.head, party: r.party };
@@ -411,17 +428,19 @@ export async function balancesAsOf(db: D1Database, day: string): Promise<Balance
   const accounts = await listAccounts(db);
   const byMethod = methodMap(accounts);
   const openOf = new Map(accounts.map((a) => [a.id, a.openingOn]));
-  const pairs = ALL_METHODS.map((m) => [m, openOf.get(byMethod.get(m) ?? '') ?? ''] as const);
-  const values = pairs.map(() => '(?, ?)').join(', ');
-  const flat = pairs.flatMap(([m, s]) => [m, s]);
+  const pairs = ALL_METHODS.map((m) => [m, byMethod.get(m) ?? UNASSIGNED, openOf.get(byMethod.get(m) ?? '') ?? ''] as const);
+  const values = pairs.map(() => '(?, ?, ?)').join(', ');
+  const flat = pairs.flat();
   const [fees, spent, entries] = await db.batch([
     db
-      .prepare(`WITH m(method, start) AS (VALUES ${values}) SELECT p.method, sum(p.amount_minor) AS v FROM offline_payments p JOIN m ON m.method = p.method
-                WHERE p.voided_at IS NULL AND p.paid_on >= m.start AND p.paid_on <= ? GROUP BY p.method`)
+      .prepare(`WITH m(method, account, start) AS (VALUES ${values}) SELECT coalesce(p.posted_account_id,m.account) AS account, sum(p.amount_minor) AS v
+                FROM offline_payments p JOIN m ON m.method = p.method LEFT JOIN acc_accounts a ON a.id = p.posted_account_id
+                WHERE p.voided_at IS NULL AND p.paid_on >= (CASE WHEN p.posted_account_id IS NULL THEN m.start ELSE coalesce(a.opening_on,'') END) AND p.paid_on <= ? GROUP BY 1`)
       .bind(...flat, day),
     db
-      .prepare(`WITH m(method, start) AS (VALUES ${values}) SELECT x.method, sum(x.amount_minor) AS v FROM expenses x JOIN m ON m.method = x.method
-                WHERE x.voided_at IS NULL AND x.status = 'approved' AND x.spent_on >= m.start AND x.spent_on <= ? GROUP BY x.method`)
+      .prepare(`WITH m(method, account, start) AS (VALUES ${values}) SELECT coalesce(x.posted_account_id,m.account) AS account, sum(x.amount_minor) AS v
+                FROM expenses x JOIN m ON m.method = x.method LEFT JOIN acc_accounts a ON a.id = x.posted_account_id
+                WHERE x.voided_at IS NULL AND x.status = 'approved' AND x.spent_on >= (CASE WHEN x.posted_account_id IS NULL THEN m.start ELSE coalesce(a.opening_on,'') END) AND x.spent_on <= ? GROUP BY 1`)
       .bind(...flat, day),
     db
       .prepare(
@@ -437,8 +456,8 @@ export async function balancesAsOf(db: D1Database, day: string): Promise<Balance
     rows.set(a.id, { id: a.id, name: a.name, kind: a.kind, numberHint: a.numberHint, openingMinor: counted ? a.openingMinor : 0, inMinor: 0, outMinor: 0, balanceMinor: 0, status: a.status });
   }
   rows.set(UNASSIGNED, { id: UNASSIGNED, name: 'কোনো হিসাবে বসানো হয়নি', kind: 'none', numberHint: '', openingMinor: 0, inMinor: 0, outMinor: 0, balanceMinor: 0, status: 'active' });
-  for (const r of fees!.results as { method: string; v: number }[]) rows.get(byMethod.get(r.method) ?? UNASSIGNED)!.inMinor += r.v;
-  for (const r of spent!.results as { method: string; v: number }[]) rows.get(byMethod.get(r.method) ?? UNASSIGNED)!.outMinor += r.v;
+  for (const r of fees!.results as { account: string; v: number }[]) (rows.get(r.account) ?? rows.get(UNASSIGNED))!.inMinor += r.v;
+  for (const r of spent!.results as { account: string; v: number }[]) (rows.get(r.account) ?? rows.get(UNASSIGNED))!.outMinor += r.v;
   for (const r of entries!.results as { id: string; inV: number; outV: number }[]) {
     const b = rows.get(r.id);
     if (!b) continue;

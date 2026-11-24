@@ -92,6 +92,14 @@ describe('accounts: balances, funds, projects', () => {
     expect((await balancesAsOf(db, '2026-11-09')).reduce((a, x) => a + x.balanceMinor, 0)).toBe(0);
   });
 
+  it('retains the original account when its payment method is moved', async () => {
+    const { enrollmentId } = await studentWithFee();
+    await recordPayment(db, ACTOR, enrollmentId, { amountTaka: 1000, paidOn: today, method: 'cash', reference: '', note: '', nonce: null }, today);
+    await saveAccount(db, ACTOR, 'acct_bank', { name: 'Bank', kind: 'bank', methods: ['cash', 'bank'], numberHint: '', openingMinor: 0, openingOn: '', status: 'active' });
+    expect((await transactions(db, today, today)).filter((r) => r.source === 'fee').map((r) => r.accountId)).toEqual(['acct_cash']);
+    expect((await balancesAsOf(db, today)).find((b) => b.id === 'acct_cash')?.balanceMinor).toBe(100_000);
+  });
+
   it('gives running voucher numbers per kind, saves once per form, and voids with a reason', async () => {
     const nonce = crypto.randomUUID();
     const a = await recordEntry(db, ACTOR, income({ nonce }));

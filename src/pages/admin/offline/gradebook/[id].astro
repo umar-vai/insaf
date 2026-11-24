@@ -4,9 +4,9 @@ import Admin from '../../../../layouts/Admin.astro';
 import Icon from '../../../../components/Icon.astro';
 import MarkSheet from '../../../../components/MarkSheet.astro';
 import { localsMayDo } from '../../../../server/staff';
-import { configureAssessment, examAssessment, examMarks, markInputsFromForm, publishAssessment, saveExamMarks } from '../../../../server/assessment';
+import { addExamCandidate, configureAssessment, correctPublishedMark, examAssessment, examMarks, examRosterCandidates, markInputsFromForm, publishAssessment, saveExamMarks } from '../../../../server/assessment';
 import { bnDigits } from '../../../../lib/format';
-import { dayBn } from '../../../../lib/offline';
+import { dayBn, todayDhaka } from '../../../../lib/offline';
 
 // One exam's gradebook. Academic Full sets it up and publishes; anyone with
 // Academic Edit (and the batch's teachers, on their own page) enters marks.
@@ -22,6 +22,10 @@ if (Astro.request.method === 'POST') {
   let result: { ok: boolean; error?: string } = { ok: false, error: 'permission' };
   if (action === 'configure' && full) {
     result = await configureAssessment(env.DB, actor, id, form.get('max'), form.get('pass'), form.get('confirm') === 'yes');
+  } else if (action === 'add-candidate' && full) {
+    result = await addExamCandidate(env.DB, actor, id, String(form.get('enrollmentId') ?? ''), todayDhaka());
+  } else if (action === 'correct' && full) {
+    result = await correctPublishedMark(env.DB, actor, id, { enrollmentId: String(form.get('enrollmentId') ?? ''), obtained: form.get('obtained'), absent: form.get('absent') === 'on', comment: form.get('comment') }, String(form.get('reason') ?? ''));
   } else if (action === 'marks' && edit) {
     result = await saveExamMarks(env.DB, actor, id, markInputsFromForm(form));
   } else if (action === 'publish' && full) {
@@ -32,9 +36,12 @@ if (Astro.request.method === 'POST') {
 
 const exam = await examAssessment(env.DB, id);
 if (!exam) return new Response('পরীক্ষাটি পাওয়া যায়নি।', { status: 404 });
-const rows = exam.status ? await examMarks(env.DB, id) : [];
+const rows = exam.status || exam.rosterFrozen ? await examMarks(env.DB, id) : [];
+const candidates = full && exam.rosterFrozen && exam.examStatus === 'scheduled' && exam.status !== 'published' && exam.examDate >= todayDhaka()
+  ? await examRosterCandidates(env.DB, exam) : [];
 const ready = exam.status === 'draft' && exam.examStatus === 'scheduled' && exam.examinees > 0 && exam.completed === exam.examinees;
 const ERRORS: Record<string, string> = {
+  reason: 'সংশোধনের কারণ লিখুন।', no_change: 'আগের ফলের সাথে কোনো পরিবর্তন নেই।', not_eligible: 'ছাত্রটি এই পরীক্ষার জন্য যোগ করা যাচ্ছে না।',
   marks: 'নম্বর পূর্ণমানের মধ্যে লিখুন। কিছুই সংরক্ষণ হয়নি, ঠিক করে আবার সংরক্ষণ করুন।',
   confirm: 'নিশ্চিত করার ঘরে টিক দিন।',
   exam: 'বাতিল পরীক্ষার গ্রেডবুক তৈরি করা যায় না।',
@@ -65,10 +72,19 @@ const err = Astro.url.searchParams.get('error');
     <div class={`kpi ${exam.status === 'published' ? 'kpi--info' : ''}`}><span class="kpi__icon"><Icon name="chart" /></span><span class="kpi__label">ফল</span><strong class="kpi__value">{exam.status === 'published' ? 'প্রকাশিত' : exam.status === 'draft' ? 'খসড়া' : 'শুরু হয়নি'}</strong></div>
   </div>
 
+  {candidates.length > 0 && <details class="card block">
+    <summary>পরে ভর্তি হওয়া পরীক্ষার্থী যোগ করুন</summary>
+    <form method="post" class="form-grid" data-confirm="পরীক্ষার্থী ও প্রযোজ্য পরীক্ষার ফি যোগ করবেন?">
+      <input type="hidden" name="action" value="add-candidate" />
+      <label class="field"><span>যোগ্য ছাত্র</span><select name="enrollmentId" required><option value="">বাছুন</option>{candidates.map((r) => <option value={r.id}>{r.name} · {r.roll}</option>)}</select></label>
+      <button class="button">পরীক্ষার্থী যোগ করুন</button>
+    </form>
+  </details>}
   {!exam.status && exam.examStatus === 'scheduled' && (
     <section class="card block">
       <h2>গ্রেডবুক তৈরি করুন</h2>
-      <p class="muted">পরীক্ষার দিন ব্যাচে যারা আছে তারাই এই পরীক্ষার পরীক্ষার্থী হিসেবে স্থির হবে। পরে কেউ ভর্তি বা প্রমোশন হলেও এই তালিকা বদলাবে না। পূর্ণমান ও পাস নম্বর মাদরাসার নিয়ম অনুযায়ী দিন; পরে বদলানো যাবে না।</p>
+      <p class="muted">পরীক্ষার্থীর তালিকা যাচাই করে পূর্ণমান ও পাস নম্বর দিন।</p>
+      {exam.rosterFrozen > 0 && (rows.length ? <details><summary>পরীক্ষার্থীর তালিকা ({bnDigits(rows.length)} জন)</summary><ul>{rows.map((r) => <li>{r.roll && `${r.roll} · `}{r.studentName}</li>)}</ul></details> : <p class="note note--warn">পরীক্ষার্থী নেই। ক্লাসের ভর্তি যাচাই করে তালিকা হালনাগাদ করুন।</p>)}
       {full ? (
         <form method="post" class="form-grid" data-confirm="পরীক্ষার্থী তালিকা, পূর্ণমান ও পাস নম্বর স্থির করবেন?">
           <input type="hidden" name="action" value="configure" />
@@ -90,7 +106,7 @@ const err = Astro.url.searchParams.get('error');
         <p class="note">সব {bnDigits(exam.examinees)} জনের নম্বর বা অনুপস্থিতি দেওয়া হলে ফল প্রকাশ করা যাবে। বাকি {bnDigits(exam.examinees - exam.completed)} জন।</p>
       )}
       {ready && full && (
-        <form method="post" class="card block publish" data-confirm="ফল প্রকাশের পরে কোনো নম্বর বদলানো যাবে না। প্রকাশ করবেন?">
+        <form method="post" class="card block publish" data-confirm="যাচাই করা ফল প্রকাশ করবেন? প্রকাশিত ফল সংশোধনে কারণ লিখতে হবে।">
           <input type="hidden" name="action" value="publish" />
           <h2>ফল প্রকাশ</h2>
           <label class="check"><input type="checkbox" name="confirm" value="yes" required /> সবার নম্বর ও অনুপস্থিতি যাচাই করেছি। ছাত্র ও যাচাই করা অভিভাবকের জন্য ফল প্রকাশ করছি।</label>
@@ -101,6 +117,18 @@ const err = Astro.url.searchParams.get('error');
       {exam.status === 'published' && <p class="note note--good">ফল প্রকাশিত। ছাত্র ও যাচাই করা অভিভাবক তাদের রিপোর্ট কার্ডে এটি দেখতে পাচ্ছেন।</p>}
     </>
   )}
+  {exam.status === 'published' && full && <details class="card block">
+    <summary>প্রকাশিত ফল সংশোধন</summary>
+    <form method="post" class="form-grid" data-confirm="সংশোধিত ফল প্রকাশ করবেন? আগের নম্বর ইতিহাসে থাকবে।">
+      <input type="hidden" name="action" value="correct" />
+      <label class="field"><span>পরীক্ষার্থী</span><select name="enrollmentId" required><option value="">বাছুন</option>{rows.map((r) => <option value={r.enrollmentId}>{r.studentName} · {r.obtained === null ? 'অনুপস্থিত' : bnDigits(r.obtained)}</option>)}</select></label>
+      <label class="field"><span>সংশোধিত নম্বর</span><input name="obtained" inputmode="numeric" /></label>
+      <label class="check"><input name="absent" type="checkbox" /> অনুপস্থিত</label>
+      <label class="field"><span>মন্তব্য (ঐচ্ছিক)</span><input name="comment" maxlength="500" /></label>
+      <label class="field wide"><span>সংশোধনের কারণ</span><textarea name="reason" minlength="3" maxlength="300" required></textarea></label>
+      <button class="button">সংশোধিত ফল প্রকাশ করুন</button>
+    </form>
+  </details>}
 </Admin>
 
 <style>

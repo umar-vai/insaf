@@ -1,8 +1,9 @@
 ---
 import { env } from 'cloudflare:workers';
 import Admin from '../../../layouts/Admin.astro';
+import FeeAllocationField from '../../../components/admin/FeeAllocationField.astro';
 import Icon from '../../../components/Icon.astro';
-import { getOfflineStudent, listOfflineStudents } from '../../../server/offline';
+import { getOfflineStudent, getReceipt, listOfflineStudents } from '../../../server/offline';
 import { recentPayments } from '../../../server/office';
 import { dayBn, METHOD_BN, PAY_METHODS, studentCode, todayDhaka, type PayMethod } from '../../../lib/offline';
 import { bnDigits, taka } from '../../../lib/format';
@@ -14,6 +15,9 @@ const q = (Astro.url.searchParams.get('q') ?? '').trim();
 const found = q ? (await listOfflineStudents(env.DB, q, today)).slice(0, 8) : [];
 const details = await Promise.all(found.map((s) => getOfflineStudent(env.DB, s.id, today)));
 const recent = await recentPayments(env.DB, 8);
+const paid = Astro.url.searchParams.get('paid');
+const completed = paid ? await getReceipt(env.DB, paid, today) : null;
+const error = Astro.url.searchParams.get('error');
 ---
 
 <Admin title="ফি আদায়">
@@ -25,6 +29,8 @@ const recent = await recentPayments(env.DB, 8);
     </div>
   </header>
 
+  {completed && <div class="note note--good" role="status">{completed.enrollment.studentName} · {taka(completed.payment.amountMinor)} জমা হয়েছে। <a href={`/admin/offline/receipt/${completed.payment.id}`} target="_blank" rel="noopener">রসিদ #{bnDigits(completed.payment.receiptNo)} প্রিন্ট করুন</a></div>}
+  {error && <p class="note note--bad" role="alert">জমা হয়নি। খাতের বর্তমান বাকি, অঙ্ক এবং তারিখ যাচাই করুন।</p>}
   <form class="card search" method="get">
     <Icon name="search" size={22} />
     <input name="q" value={q} placeholder="আইডি, ফোন বা নাম" aria-label="ছাত্র খুঁজুন" autofocus />
@@ -59,6 +65,8 @@ const recent = await recentPayments(env.DB, 8);
                     <input type="hidden" name="enrollmentId" value={e.id} />
                     <input type="hidden" name="nonce" value={crypto.randomUUID()} />
                     <input type="hidden" name="paidOn" value={today} />
+                    <input type="hidden" name="counterQuery" value={q} />
+                    <FeeAllocationField ledger={e.ledger} />
                     <label class="field"><span>টাকা</span><input name="amount" inputmode="numeric" required value={Math.round((e.ledger.overdueMinor || e.ledger.next?.amountMinor || e.ledger.dueMinor) / 100)} /></label>
                     <label class="field"><span>মাধ্যম</span><select name="method">{PAY_METHODS.map((m) => <option value={m}>{METHOD_BN[m]}</option>)}</select></label>
                     <label class="field"><span>ট্রানজেকশন আইডি</span><input name="reference" maxlength="80" /></label>

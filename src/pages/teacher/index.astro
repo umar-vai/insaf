@@ -48,7 +48,7 @@ const students = batches.reduce((a, b) => a + b.students, 0);
 
         <div class="cols">
           <section class="card">
-            <div class="card__head"><h2>আজকের ক্লাস</h2></div>
+            <div class="card__head"><h2>আজকের ক্লাস ও হাজিরা</h2></div>
             {mine.length === 0 ? (
               <div class="empty"><Icon name="calendar" size={28} /><p>আজ আপনার কোনো ক্লাস নেই।{next && <> পরের ক্লাস {next.day === today ? 'আজ' : DAY_BN[weekday(next.day)]} {timeBn(next.batch.startTime)}, {next.batch.name}।</>}</p></div>
             ) : (
@@ -56,7 +56,7 @@ const students = batches.reduce((a, b) => a + b.students, 0);
                 {mine.map((b) => (
                   <li>
                     <div><strong>{b.name}</strong> <span class="muted">· {b.courseTitle}</span><small>{[timeBn(b.startTime), b.room].filter(Boolean).join(' · ')} · {bnDigits(b.students)} জন</small></div>
-                    {b.marked > 0 ? <span class="pill pill--present">হাজিরা নেওয়া হয়েছে</span> : <a class="button" href={`/teacher/batch/${b.id}?day=${today}#attendance`}><Icon name="clipboard" /> হাজিরা নিন</a>}
+                    {b.students > 0 && b.marked >= b.students ? <span class="pill pill--present">হাজিরা নেওয়া হয়েছে</span> : <a class="button" href={`/teacher/batch/${b.id}?day=${today}#attendance`}><Icon name="clipboard" /> {b.marked ? `বাকি হাজিরা (${bnDigits(b.marked)}/${bnDigits(b.students)})` : 'হাজিরা নিন'}</a>}
                   </li>
                 ))}
               </ul>
@@ -87,7 +87,7 @@ const students = batches.reduce((a, b) => a + b.students, 0);
             <div class="card__head"><h2>সামনের পরীক্ষা</h2></div>
             {exams.length === 0 ? <p class="muted">সামনে কোনো পরীক্ষা নেই।</p> : (
               <ul class="list">
-                {exams.map((x) => <li><div><strong>{dayBn(x.examDate)}</strong><small>{examLine(x)} · {x.batchName}</small></div>{x.feeMinor > 0 && <small class="muted">ফি {taka(x.feeMinor)}</small>}</li>)}
+                {exams.map((x) => <li><div><strong>{dayBn(x.examDate)}</strong><small>{examLine(x)} · {x.batchName}</small><a href={`/teacher/exam/${x.id}`}>মার্কশিট খুলুন</a></div>{x.feeMinor > 0 && <small class="muted">ফি {taka(x.feeMinor)}</small>}</li>)}
               </ul>
             )}
           </section>

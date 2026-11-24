@@ -1,7 +1,7 @@
 import { log } from './admin';
 import { recordPayment, type EnrollmentWithLedger } from './offline';
 import type { Validation } from './sslcommerz';
-import { todayDhaka } from '../lib/offline';
+import { dayBn, todayDhaka } from '../lib/offline';
 
 // Offline course fees paid online through SSLCommerz, by a student signed in
 // with the Gmail the office saved for them.
@@ -13,16 +13,19 @@ import { todayDhaka } from '../lib/offline';
 // offline payment with a receipt number, exactly once (the reference is the
 // payment's nonce). Anything that does not match waits in 'review' for staff.
 
-export type FeeChoice = { key: 'overdue' | 'next' | 'all'; amountMinor: number; label: string };
+export type FeeChoice = { key: string; amountMinor: number; label: string; allocationKey?: string };
 
 /** What the student may pay now: what is late, the next installment, or everything still due. */
-export function feeChoices(e: Pick<EnrollmentWithLedger, 'ledger' | 'status'>): FeeChoice[] {
+export function feeChoices(e: Pick<EnrollmentWithLedger, 'ledger' | 'status'>, specific = false): FeeChoice[] {
   if (e.status !== 'active' || e.ledger.dueMinor <= 0) return [];
   const out: FeeChoice[] = [];
   const add = (c: FeeChoice) => c.amountMinor > 0 && !out.some((x) => x.amountMinor === c.amountMinor) && out.push(c);
   if (e.ledger.overdueMinor > 0) add({ key: 'overdue', amountMinor: e.ledger.overdueMinor, label: 'তারিখ পার হওয়া বকেয়া' });
   else if (e.ledger.next) add({ key: 'next', amountMinor: e.ledger.next.amountMinor, label: 'পরের কিস্তি' });
   add({ key: 'all', amountMinor: e.ledger.dueMinor, label: 'পুরো বাকি টাকা' });
+  if (specific) for (const item of e.ledger.installments.filter((i) => i.paidMinor < i.amountMinor)) {
+    out.push({ key: item.key, allocationKey: item.key, amountMinor: item.amountMinor - item.paidMinor, label: `${item.label} · ${dayBn(item.dueDate)}` });
+  }
   return out;
 }
 
@@ -41,12 +44,15 @@ export type FeePayment = {
   amountMinor: number;
   status: 'pending' | 'paid' | 'failed' | 'cancelled' | 'review' | 'resolved';
   paymentId: string | null;
+  allocationKey: string;
+  resolutionKind: string;
+  resolutionReference: string;
   reviewReason: string | null;
   createdAt: string;
 };
 
 const SELECT = `SELECT id, reference, enrollment_id AS enrollmentId, student_id AS studentId, amount_minor AS amountMinor, status, payment_id AS paymentId,
-  review_reason AS reviewReason, created_at AS createdAt FROM offline_online_payments`;
+  review_reason AS reviewReason, allocation_key AS allocationKey, resolution_kind AS resolutionKind, resolution_reference AS resolutionReference, created_at AS createdAt FROM offline_online_payments`;
 
 export const feePaymentByReference = (db: D1Database, reference: string) => db.prepare(`${SELECT} WHERE reference = ?`).bind(reference).first<FeePayment>();
 
@@ -61,18 +67,18 @@ export async function createFeePayment(
   // Only enrollments of offline students with this account's email are passed in.
   const e = enrollments.find((x) => x.id === enrollmentId);
   if (!e) return { ok: false, reason: 'not_found' };
-  const c = feeChoices(e).find((x) => x.key === choice);
+  const c = feeChoices(e, true).find((x) => x.key === choice);
   if (!c) return { ok: false, reason: 'nothing_due' };
   const id = `ofop_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const reference = newFeeReference();
   await db
-    .prepare('INSERT INTO offline_online_payments (id, reference, enrollment_id, student_id, amount_minor) VALUES (?, ?, ?, ?, ?)')
-    .bind(id, reference, e.id, account.id, c.amountMinor)
+    .prepare('INSERT INTO offline_online_payments (id, reference, enrollment_id, student_id, amount_minor, allocation_key) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(id, reference, e.id, account.id, c.amountMinor, c.allocationKey ?? '')
     .run();
   await log(db, account.email, 'fee_online.start', `offline_student:${e.studentId}`, { reference, amount: c.amountMinor / 100, choice });
   return {
     ok: true,
-    payment: { id, reference, enrollmentId: e.id, studentId: account.id, amountMinor: c.amountMinor, status: 'pending', paymentId: null, reviewReason: null, createdAt: '' },
+    payment: { id, reference, enrollmentId: e.id, studentId: account.id, amountMinor: c.amountMinor, status: 'pending', paymentId: null, reviewReason: null, allocationKey: c.allocationKey ?? '', resolutionKind: '', resolutionReference: '', createdAt: '' },
     title: `${e.courseTitle} কোর্সের ফি`,
     phone: e.studentPhone,
     name: e.studentName,
@@ -112,7 +118,7 @@ export async function applyFeeValidation(db: D1Database, v: Validation | null, e
     db,
     'sslcommerz',
     p.enrollmentId,
-    { amountTaka: Math.round(p.amountMinor / 100), paidOn: today, method: 'online', reference: v.bank_tran_id ?? p.reference, note: `অনলাইন পেমেন্ট ${p.reference}`, nonce: p.reference },
+    { amountTaka: Math.round(p.amountMinor / 100), paidOn: today, method: 'online', reference: v.bank_tran_id ?? p.reference, note: `অনলাইন পেমেন্ট ${p.reference}`, nonce: p.reference, allocationKey: p.allocationKey },
     today,
   );
   if (!r.ok) {
@@ -145,14 +151,24 @@ export async function feePaymentsToReview(db: D1Database) {
   return results;
 }
 
-/** Staff have dealt with a review (recorded it by hand, refunded, ...). */
-export async function resolveFeeReview(db: D1Database, actor: string, id: string, note: string): Promise<boolean> {
+export const FEE_RESOLUTIONS = { receipt: 'রসিদে জমা হয়েছে', refund: 'ফেরত দেওয়া হয়েছে', no_funds: 'ব্যাংকে টাকা আসেনি' } as const;
+
+/** Link the receipt or retain the external reference for the reviewed decision. */
+export async function resolveFeeReview(db: D1Database, actor: string, id: string, note: string, kind: string, evidence: string): Promise<boolean> {
   const why = note.trim().slice(0, 300);
-  if (why.length < 2) return false;
-  const r = await db
-    .prepare(`UPDATE offline_online_payments SET status = 'resolved', review_reason = coalesce(review_reason, '') || ' | ' || ? WHERE id = ? AND status = 'review'`)
-    .bind(`${actor}: ${why}`, id)
-    .run();
-  if (r.meta.changes) await log(db, actor, 'fee_online.resolve', `fee_online:${id}`, { note: why });
+  const reference = evidence.trim().slice(0, 120);
+  if (why.length < 2 || !reference || !Object.hasOwn(FEE_RESOLUTIONS, kind)) return false;
+  const receiptNo = Number(reference.replace(/[০-৯]/g, (d) => String('০১২৩৪৫৬৭৮৯'.indexOf(d))).replace(/^#/, ''));
+  const r = await db.prepare(`UPDATE offline_online_payments AS op SET status = 'resolved',
+      review_reason = coalesce(review_reason, '') || ' | ' || ?1, resolution_kind = ?2, resolution_reference = ?3,
+      updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+      payment_id = CASE WHEN ?2 = 'receipt' THEN (SELECT id FROM offline_payments WHERE receipt_no = ?4) ELSE op.payment_id END
+      WHERE op.id = ?5 AND op.status = 'review' AND (?2 <> 'receipt' OR EXISTS (
+        SELECT 1 FROM offline_payments p WHERE p.receipt_no = ?4 AND p.enrollment_id = op.enrollment_id
+        AND p.amount_minor = op.amount_minor AND p.voided_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM offline_online_payments other WHERE other.payment_id = p.id AND other.id <> op.id)
+      ))`)
+    .bind(`${actor}: ${why}`, kind, reference, Number.isSafeInteger(receiptNo) ? receiptNo : null, id).run();
+  if (r.meta.changes) await log(db, actor, 'fee_online.resolve', `fee_online:${id}`, { note: why, kind, reference });
   return r.meta.changes > 0;
 }

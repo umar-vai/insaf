@@ -58,6 +58,18 @@ describe('fee bills and concessions', () => {
     expect(afterConcession(50000, 100)).toBe(0);
   });
 
+  it('blocks a second bill for the same head and month across overlapping targets', async () => {
+    await seed();
+    const input = { title: 'Books December', feeHead: 'books' as const, billingPeriod: '2026-12', amountMinor: 50000, dueDate: '2026-12-10', target: { kind: 'batch' as const, id: 'b1' }, useConcessions: false };
+    expect((await postBillRun(db, actor, input, 'first00000000001', today)).ok).toBe(true);
+    const other = { ...input, title: 'New title', dueDate: '2026-12-20', target: { kind: 'all' as const, id: '' } };
+    expect((await billPreview(db, other, today)).map((l) => l.skip)).toEqual(['already', 'already', '']);
+    expect((await postBillRun(db, actor, other, 'second0000000001', today))).toMatchObject({ ok: true, value: { created: 1 } });
+    expect((await postBillRun(db, actor, input, 'third00000000001', today))).toEqual({ ok: false, error: 'already' });
+    const tuition = { ...input, title: 'Tuition', feeHead: 'tuition' as const };
+    expect((await billPreview(db, tuition, today)).map((l) => l.skip)).toEqual(['tuition', 'tuition']);
+  });
+
   it('posts once per run key, applies concessions, and cancelling voids the charges', async () => {
     await seed();
     expect(await setConcession(db, actor, { studentId: 's2', percent: 50, reason: 'orphan' })).toBe(true);

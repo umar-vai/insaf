@@ -25,6 +25,8 @@ const today = '2026-11-23';
 
 beforeEach(async () => {
   await db.batch([
+    db.prepare('DELETE FROM offline_enrollments'),
+    db.prepare('DELETE FROM offline_batches'),
     db.prepare('DELETE FROM admission_applications'),
     db.prepare('DELETE FROM offline_students'),
     db.prepare('DELETE FROM students'),
@@ -127,6 +129,21 @@ describe('application and decision', () => {
     const row = await getApplication(db, a.id);
     expect(row?.status).toBe('accepted');
     expect(row?.studentId).toBe(r!.studentId);
+  });
+
+  it('commits the reviewed class and agreed fee together, and leaves rejected placements pending', async () => {
+    const a = await submit();
+    const { updatedAt } = (await getApplication(db, a.id))!;
+    await db.prepare("INSERT INTO offline_batches (id, course_id, name) VALUES ('class1', 'dept_nazera', 'Nazera A')").run();
+    const enrollment = { courseId: 'dept_nazera', batchId: 'class1', roll: '1', startDate: today, discountTaka: 0, planMonths: 1, note: '' };
+    const placement = { enrollment, admissionMinor: 150_000, updatedAt, confirmFree: false };
+    expect(await acceptApplication(db, ACTOR, a.id, { ...placement, enrollment: { ...enrollment, batchId: 'missing' } })).toBeNull();
+    expect((await getApplication(db, a.id))?.status).toBe('pending');
+    expect(await db.prepare('SELECT id FROM offline_students').first()).toBeNull();
+    const attempts = await Promise.all([acceptApplication(db, ACTOR, a.id, placement), acceptApplication(db, ACTOR, a.id, placement)]);
+    expect(attempts.filter(Boolean)).toHaveLength(1);
+    expect((await db.prepare('SELECT batch_id AS batch, admission_fee_minor AS fee FROM offline_enrollments').all()).results).toEqual([{ batch: 'class1', fee: 150_000 }]);
+    expect((await getApplication(db, a.id))?.feeMinor).toBe(150_000);
   });
 
   it('the ID card (student panel) opens only after acceptance', async () => {

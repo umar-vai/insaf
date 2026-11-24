@@ -21,13 +21,13 @@ import {
   updateApplication,
   type ApplicationStatus,
 } from '../../../../../server/admission';
-import { enrollOffline, listOfflineCourses, parseEnrollForm } from '../../../../../server/offline';
+import { listOfflineCourses, parseEnrollForm } from '../../../../../server/offline';
 import { listBatches } from '../../../../../server/office';
 import { grantPasswordLogin, phoneEmail } from '../../../../../server/password';
 import { normalizePhone } from '../../../../../server/account';
 import { PLEDGE_VERSION } from '../../../../../lib/pledges';
 import { SITE } from '../../../../../lib/site';
-import { todayDhaka, waNumber } from '../../../../../lib/offline';
+import { parseTaka, todayDhaka, waNumber } from '../../../../../lib/offline';
 import { bnDigits, dateBn } from '../../../../../lib/format';
 
 const id = Astro.params.id!;
@@ -50,15 +50,22 @@ if (Astro.request.method === 'POST') {
     // Details are left alone when the office section alone is saved.
     const d = form.has('studentName') ? parseApplicationDetails(form, today, await allDepartments(env.DB)) : null;
     if (d && !d.ok) return fail(d.error);
-    if (!(await updateApplication(env.DB, actor, id, d?.ok ? d.value : null, o.value))) return fail('missing');
+    if (!(await updateApplication(env.DB, actor, id, d?.ok ? d.value : null, { ...o.value, feeMinor: first.feeMinor }))) return fail('missing');
     return Astro.redirect(`${here}?saved=1`, 303);
   }
   if (action === 'accept') {
-    const enroll = form.get('courseId') ? parseEnrollForm(form) : null;
-    if (enroll && !enroll.ok) return fail(enroll.error);
-    const done = await acceptApplication(env.DB, actor, id);
-    if (!done) return fail('state');
-    if (enroll?.ok) await enrollOffline(env.DB, actor, done.studentId, enroll.value);
+    const enroll = parseEnrollForm(form);
+    if (!enroll.ok) return fail(enroll.error);
+    if (!enroll.value.batchId) return fail('batch');
+    const rawFee = String(form.get('admissionFee') ?? '').trim();
+    const fee = rawFee ? parseTaka(rawFee) : undefined;
+    if (fee === null || (fee !== undefined && fee > 10_000_000)) return fail('fee');
+    if (form.get('updatedAt') !== first.updatedAt) return fail('state');
+    const done = await acceptApplication(env.DB, actor, id, {
+      enrollment: enroll.value, admissionMinor: fee === undefined ? undefined : fee * 100,
+      updatedAt: first.updatedAt, confirmFree: form.get('confirmFree') === 'on',
+    });
+    if (!done) return fail('placement');
     // One mobile number is one login for the whole family. If that login
     // already has a password (a brother or sister), keep it and only link.
     const phone = normalizePhone(first.phone);
@@ -72,7 +79,7 @@ if (Astro.request.method === 'POST') {
         if (g.ok) granted = { login: g.login, password: g.password, studentId: done.studentId };
       }
     }
-    if (!granted) return Astro.redirect(`/admin/offline/students/${done.studentId}?saved=1`, 303);
+    if (!granted) return Astro.redirect(`/admin/offline/students/${done.studentId}?saved=1&loginPending=1`, 303);
   }
   if (action === 'reject') {
     if (!(await rejectApplication(env.DB, actor, id, String(form.get('reason') ?? '')))) return fail('reason');
@@ -88,6 +95,9 @@ const a = (await getApplication(env.DB, id))!;
 const q = Astro.url.searchParams;
 const ERR: Record<string, string> = {
   state: 'এই আবেদনের অবস্থা এর মধ্যে বদলে গেছে। পাতাটি নতুন করে খুলুন।',
+  batch: 'চালু বিভাগ ও ক্লাস বাছুন।',
+  course: 'বিভাগ বাছুন।',
+  placement: 'ক্লাস ও ফি যাচাই করুন। মোট ফি শূন্য হলে তা নিশ্চিত করুন। আবেদন বদলে গেলে পাতা নতুন করে খুলুন।',
   reason: 'প্রত্যাখ্যানের কারণ লিখুন (অন্তত ৩ অক্ষর)।',
   fee: 'ধার্যকৃত অর্থ সংখ্যায় লিখুন।',
   missing: 'আবেদনটি পাওয়া যায়নি।',
@@ -186,7 +196,7 @@ const rows = [
         <h3>প্রতিষ্ঠানের জন্য পূরণীয়</h3>
         <label class="field"><span>ভর্তি পরীক্ষার নম্বর</span><input name="examMarks" maxlength="40" value={a.examMarks} /></label>
         <label class="field"><span>পরীক্ষকের নাম</span><input name="examinerName" maxlength="120" value={a.examinerName} /></label>
-        <label class="field"><span>ধার্যকৃত অর্থ (টাকা)</span><input name="feeTaka" inputmode="numeric" maxlength="12" value={a.feeMinor ? String(a.feeMinor / 100) : ''} /></label>
+        {a.status === 'accepted' && <p class="wide">সম্মত ভর্তি ফি {bnDigits(a.feeMinor / 100)} টাকা</p>}
         <label class="field wide"><span>অফিসের নোট (শুধু অফিস দেখবে)</span><textarea name="officeNote" rows="2" maxlength="1000">{a.officeNote}</textarea></label>
         <button class="button">সংরক্ষণ</button>
       </form>
@@ -195,14 +205,16 @@ const rows = [
         <div class="decide">
           <form method="post" class="card form-grid">
             <input type="hidden" name="action" value="accept" />
+            <input type="hidden" name="updatedAt" value={a.updatedAt} />
             <h2 class="wide">আবেদন গ্রহণ করুন</h2>
-            <p class="wide muted">গ্রহণ করলে ছাত্র তৈরি হবে, আইডি নম্বর পাবে এবং অভিভাবকের মোবাইল নম্বরে ছাত্র প্যানেলের লগইন খুলবে। আগে উপরের তথ্য সংরক্ষণ করে নিন।</p>
+            <p class="wide muted">তথ্য সংশোধন করলে আগে সংরক্ষণ করুন। তারপর বিভাগ, ক্লাস ও ফি মিলিয়ে ভর্তি নিশ্চিত করুন।</p>
             {courses.length === 0 ? (
-              <p class="wide muted">কোনো চালু কোর্স নেই। এখন শুধু ছাত্র তৈরি হবে, কোর্সে ভর্তি পরে ছাত্রের প্রোফাইল থেকে করতে পারবেন।</p>
+              <p class="wide muted">ভর্তি নিশ্চিত করতে আগে চালু বিভাগ ও ক্লাস তৈরি করুন।</p>
             ) : (
-              <EnrollFields courses={courses} batches={batches} today={today} optional selected={a.courseId} />
+              <EnrollFields courses={courses} batches={batches} today={today} requireBatch selected={a.courseId} admissionFee={a.feeMinor ? String(a.feeMinor / 100) : ''} />
             )}
-            <button class="button">আবেদন গ্রহণ করুন</button>
+            <label class="check wide"><input type="checkbox" name="confirmFree" /> মোট ফি শূন্য হলে বিনা ফিতে ভর্তি অনুমোদন করছি</label>
+            <button class="button" disabled={!courses.length || !batches.length}>ভর্তি নিশ্চিত করুন</button>
           </form>
           <form method="post" class="card form-grid">
             <input type="hidden" name="action" value="reject" />

@@ -1,7 +1,8 @@
+import { listAccounts, methodMap, UNASSIGNED } from './accounts';
 import { CLOSED_THROUGH_SQL } from './acc-period';
 import { log } from './admin';
 import { bnDigits } from '../lib/format';
-import { addDays, isYmd, lateInstallments, ledger, parseCharges, PAY_METHODS, PLAN_MONTHS, parseTaka, type Ledger, type PayMethod } from '../lib/offline';
+import { addDays, isYmd, lateInstallments, ledger, parseCharges, PAY_METHODS, PLAN_MONTHS, parseTaka, type Ledger, type PayMethod, type PaymentAllocation } from '../lib/offline';
 
 // The offline course ledger: courses taught in person, the people in them,
 // what each agreed to pay and every taka received. Kept apart from the
@@ -126,24 +127,28 @@ export function parseOfflineStudentForm(form: FormData): Result<StudentInput> {
   };
 }
 
+export function offlineStudentInsert(db: D1Database, id: string, v: StudentInput, application?: { id: string; updatedAt: string; photoKey: string }) {
+  return db.prepare(
+    `INSERT INTO offline_students (id, student_no, name, phone, guardian_phone, email, address, note, application_id, photo_key)
+     SELECT ?1, (SELECT coalesce(max(student_no), 0) + 1 FROM offline_students), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+     WHERE ?8 IS NULL OR EXISTS (SELECT 1 FROM admission_applications WHERE id = ?8 AND status = 'pending' AND updated_at = ?10)`,
+  ).bind(id, v.name, v.phone, v.guardianPhone, v.email, v.address, v.note, application?.id ?? null, application?.photoKey ?? '', application?.updatedAt ?? '');
+}
+
 export async function createOfflineStudent(db: D1Database, actor: string, v: StudentInput): Promise<string> {
   const id = newId('ofs');
-  // The ID number is the next free one; two saves at the same moment retry.
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await db
-        .prepare(
-          `INSERT INTO offline_students (id, student_no, name, phone, guardian_phone, email, address, note)
-           VALUES (?1, (SELECT coalesce(max(student_no), 0) + 1 FROM offline_students), ?2, ?3, ?4, ?5, ?6, ?7)`,
-        )
-        .bind(id, v.name, v.phone, v.guardianPhone, v.email, v.address, v.note)
-        .run();
-      break;
-    } catch (e) {
-      if (attempt === 2 || !String(e).includes('UNIQUE')) throw e;
-    }
-  }
+  await offlineStudentInsert(db, id, v).run();
   await log(db, actor, 'offline.student.create', `offline_student:${id}`, { name: v.name });
+  return id;
+}
+
+export async function admitOfflineStudent(db: D1Database, actor: string, v: StudentInput, enrollment: EnrollInput): Promise<string | null> {
+  const id = newId('ofs');
+  const prepared = await prepareOfflineEnrollment(db, id, enrollment);
+  if (!prepared) return null;
+  await db.batch([offlineStudentInsert(db, id, v), prepared.statement]);
+  await log(db, actor, 'offline.student.create', `offline_student:${id}`, { name: v.name });
+  await log(db, actor, 'offline.enroll', `offline_student:${id}`, { enrollmentId: prepared.id, courseId: enrollment.courseId });
   return id;
 }
 
@@ -207,23 +212,29 @@ export type EnrollmentRow = {
   paidMinor: number;
   /** Charges (exam fee, late fee, other) as a JSON array; read with parseCharges. */
   chargesJson: string;
+  allocationsJson: string;
 };
 export type EnrollmentWithLedger = EnrollmentRow & { ledger: Ledger };
+
+const ENROLL_CHARGES = `(SELECT json_group_array(json_object('id', x.id, 'kind', x.kind, 'label', x.label, 'amountMinor', x.amount_minor, 'dueDate', x.due_date))
+  FROM (SELECT * FROM offline_charges WHERE enrollment_id = e.id AND voided_at IS NULL ORDER BY id) x)`;
+const allocationSums = (receiptLimit = '') => `(SELECT json_group_array(json_object('key', allocation_key, 'amountMinor', amount)) FROM
+  (SELECT p.allocation_key, sum(p.amount_minor) AS amount FROM offline_payments p
+   WHERE p.enrollment_id = e.id AND p.voided_at IS NULL AND p.allocation_key <> '' ${receiptLimit} GROUP BY p.allocation_key ORDER BY p.allocation_key))`;
 
 const ENROLL_SELECT = `SELECT e.id, e.student_id AS studentId, s.name AS studentName, s.phone AS studentPhone, s.student_no AS studentNo, e.course_id AS courseId,
   c.title AS courseTitle, coalesce(b.name, e.batch) AS batch, e.batch_id AS batchId, e.roll, e.start_date AS startDate, e.fee_minor AS feeMinor, e.admission_fee_minor AS admissionFeeMinor,
   e.discount_minor AS discountMinor, e.duration_months AS durationMonths, e.plan_months AS planMonths, e.status, e.note,
   coalesce((SELECT sum(p.amount_minor) FROM offline_payments p WHERE p.enrollment_id = e.id AND p.voided_at IS NULL), 0) AS paidMinor,
-  (SELECT json_group_array(json_object('id', x.id, 'kind', x.kind, 'label', x.label, 'amountMinor', x.amount_minor, 'dueDate', x.due_date))
-     FROM offline_charges x WHERE x.enrollment_id = e.id AND x.voided_at IS NULL) AS chargesJson
+  ${ENROLL_CHARGES} AS chargesJson, ${allocationSums()} AS allocationsJson
   FROM offline_enrollments e JOIN offline_students s ON s.id = e.student_id JOIN offline_courses c ON c.id = e.course_id
   LEFT JOIN offline_batches b ON b.id = e.batch_id`;
 
 /** The ledger of one enrollment row, with its charges. */
-export const ledgerOf = (r: EnrollmentRow, paidMinor: number, today: string) => ledger(r, paidMinor, today, parseCharges(r.chargesJson));
+export const ledgerOf = (r: EnrollmentRow, paidMinor: number, today: string) => ledger(r, paidMinor, today, parseCharges(r.chargesJson), JSON.parse(r.allocationsJson ?? '[]') as PaymentAllocation[]);
 const withLedger = (rows: EnrollmentRow[], today: string): EnrollmentWithLedger[] => rows.map((r) => ({ ...r, ledger: ledgerOf(r, r.paidMinor, today) }));
 
-type EnrollInput = { courseId: string; batchId: string | null; roll: string; startDate: string; discountTaka: number; planMonths: number; note: string };
+export type EnrollInput = { courseId: string; batchId: string | null; roll: string; startDate: string; discountTaka: number; planMonths: number; note: string };
 
 export function parseEnrollForm(form: FormData): Result<EnrollInput> {
   const courseId = text(form, 'courseId', 40);
@@ -240,26 +251,29 @@ export function parseEnrollForm(form: FormData): Result<EnrollInput> {
   };
 }
 
-/** Copies the course's current fee and length into the enrollment. */
-export async function enrollOffline(db: D1Database, actor: string, studentId: string, v: EnrollInput): Promise<string | null> {
+/** Use department defaults unless the office confirms an individual admission fee. */
+export async function prepareOfflineEnrollment(db: D1Database, studentId: string, v: EnrollInput, admissionMinor?: number) {
   const course = await db
     .prepare(`SELECT fee_minor AS fee, admission_fee_minor AS admission, duration_months AS months FROM offline_courses WHERE id = ? AND status = 'active'`)
     .bind(v.courseId)
     .first<{ fee: number; admission: number; months: number }>();
-  const student = await db.prepare('SELECT 1 AS ok FROM offline_students WHERE id = ?').bind(studentId).first();
-  if (!course || !student) return null;
-  if (v.batchId && !(await batchOfCourse(db, v.batchId, v.courseId))) return null;
-  const discount = Math.min(v.discountTaka * 100, course.fee + course.admission);
+  if (!course || (v.batchId && !(await db.prepare("SELECT 1 FROM offline_batches WHERE id = ? AND course_id = ? AND status = 'active'").bind(v.batchId, v.courseId).first()))) return null;
+  const admission = admissionMinor ?? course.admission;
+  const discount = Math.min(v.discountTaka * 100, course.fee + admission);
   const id = newId('ofe');
-  await db
-    .prepare(
-      `INSERT INTO offline_enrollments (id, student_id, course_id, batch_id, roll, start_date, fee_minor, admission_fee_minor, discount_minor, duration_months, plan_months, note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(id, studentId, v.courseId, v.batchId, v.roll, v.startDate, course.fee, course.admission, discount, course.months, v.planMonths, v.note)
-    .run();
-  await log(db, actor, 'offline.enroll', `offline_student:${studentId}`, { enrollmentId: id, courseId: v.courseId, plan: v.planMonths, discount: discount / 100 });
-  return id;
+  const statement = db.prepare(
+    `INSERT INTO offline_enrollments (id, student_id, course_id, batch_id, roll, start_date, fee_minor, admission_fee_minor, discount_minor, duration_months, plan_months, note)
+     SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
+     WHERE EXISTS (SELECT 1 FROM offline_students WHERE id = ?2)`,
+  ).bind(id, studentId, v.courseId, v.batchId, v.roll, v.startDate, course.fee, admission, discount, course.months, v.planMonths, v.note);
+  return { id, statement, admissionMinor: admission, tuitionMinor: course.fee, discountMinor: discount };
+}
+
+export async function enrollOffline(db: D1Database, actor: string, studentId: string, v: EnrollInput): Promise<string | null> {
+  const prepared = await prepareOfflineEnrollment(db, studentId, v);
+  if (!prepared || !(await prepared.statement.run()).meta.changes) return null;
+  await log(db, actor, 'offline.enroll', `offline_student:${studentId}`, { enrollmentId: prepared.id, courseId: v.courseId, plan: v.planMonths, discount: prepared.discountMinor / 100 });
+  return prepared.id;
 }
 
 type EnrollmentEdit = { status: EnrollmentRow['status']; planMonths: number; discountTaka: number; batchId: string | null; roll: string; startDate: string; note: string };
@@ -295,17 +309,18 @@ export function parseEnrollmentEdit(form: FormData): Result<EnrollmentEdit> {
 export async function updateEnrollment(db: D1Database, actor: string, id: string, v: EnrollmentEdit): Promise<boolean> {
   const before = await db
     .prepare(
-      'SELECT student_id AS studentId, course_id AS courseId, status, plan_months AS plan, discount_minor AS discount, fee_minor AS fee, admission_fee_minor AS admission FROM offline_enrollments WHERE id = ?',
+      'SELECT student_id AS studentId, course_id AS courseId, status, plan_months AS plan, discount_minor AS discount, fee_minor AS fee, admission_fee_minor AS admission, start_date AS startDate FROM offline_enrollments WHERE id = ?',
     )
     .bind(id)
-    .first<{ studentId: string; courseId: string; status: string; plan: number; discount: number; fee: number; admission: number }>();
+    .first<{ studentId: string; courseId: string; status: string; plan: number; discount: number; fee: number; admission: number; startDate: string }>();
   if (!before) return false;
   if (v.batchId && !(await batchOfCourse(db, v.batchId, before.courseId))) return false;
   const discount = Math.min(v.discountTaka * 100, before.fee + before.admission);
-  await db
-    .prepare('UPDATE offline_enrollments SET status = ?, plan_months = ?, discount_minor = ?, batch_id = ?, roll = ?, start_date = ?, note = ? WHERE id = ?')
-    .bind(v.status, v.planMonths, discount, v.batchId, v.roll, v.startDate, v.note, id)
-    .run();
+  const financialChange = before.plan !== v.planMonths || before.discount !== discount || before.startDate !== v.startDate;
+  const changed = await db.prepare(`UPDATE offline_enrollments SET status = ?1, plan_months = ?2, discount_minor = ?3, batch_id = ?4, roll = ?5, start_date = ?6, note = ?7
+    WHERE id = ?8 AND (?9 = 0 OR NOT EXISTS(SELECT 1 FROM offline_payments WHERE enrollment_id = ?8 AND voided_at IS NULL AND (allocation_key = 'admission' OR allocation_key LIKE 'fee:%')))`)
+    .bind(v.status, v.planMonths, discount, v.batchId, v.roll, v.startDate, v.note, id, Number(financialChange)).run();
+  if (!changed.meta.changes) return false;
   await log(db, actor, 'offline.enrollment.update', `offline_student:${before.studentId}`, {
     enrollmentId: id,
     before: { status: before.status, plan: before.plan, discount: before.discount / 100 },
@@ -319,6 +334,7 @@ export async function updateEnrollment(db: D1Database, actor: string, id: string
 export type OfflinePayment = {
   id: string;
   receiptNo: number;
+  allocationLabel: string;
   enrollmentId: string;
   amountMinor: number;
   paidOn: string;
@@ -333,10 +349,10 @@ export type OfflinePayment = {
 };
 
 const PAYMENT_SELECT = `SELECT p.id, p.receipt_no AS receiptNo, p.enrollment_id AS enrollmentId, p.amount_minor AS amountMinor, p.paid_on AS paidOn,
-  p.method, p.reference, p.note, p.recorded_by AS recordedBy, p.voided_at AS voidedAt, p.voided_by AS voidedBy, p.void_reason AS voidReason,
+  p.method, p.reference, p.note, p.allocation_label AS allocationLabel, p.recorded_by AS recordedBy, p.voided_at AS voidedAt, p.voided_by AS voidedBy, p.void_reason AS voidReason,
   p.created_at AS createdAt FROM offline_payments p`;
 
-type PaymentInput = { amountTaka: number; paidOn: string; method: PayMethod; reference: string; note: string; nonce: string | null };
+type PaymentInput = { amountTaka: number; paidOn: string; method: PayMethod; reference: string; note: string; nonce: string | null; allocationKey?: string };
 
 export function parsePaymentForm(form: FormData, today: string): Result<PaymentInput> {
   const amount = parseTaka(form.get('amount'));
@@ -346,9 +362,11 @@ export function parsePaymentForm(form: FormData, today: string): Result<PaymentI
   const method = text(form, 'method') as PayMethod;
   if (!(PAY_METHODS as readonly string[]).includes(method)) return { ok: false, error: 'method' };
   const nonce = text(form, 'nonce', 40);
+  const allocationKey = text(form, 'allocationKey', 64);
+  if (allocationKey && !/^(admission|fee:[1-9][0-9]{0,2}|charge:[a-zA-Z0-9_-]{1,48})$/.test(allocationKey)) return { ok: false, error: 'allocation' };
   return {
     ok: true,
-    value: { amountTaka: amount, paidOn, method, reference: text(form, 'reference', 80), note: longText(form, 'note', 500), nonce: /^[0-9a-f-]{36}$/.test(nonce) ? nonce : null },
+    value: { amountTaka: amount, paidOn, method, allocationKey, reference: text(form, 'reference', 80), note: longText(form, 'note', 500), nonce: /^[0-9a-f-]{36}$/.test(nonce) ? nonce : null },
   };
 }
 
@@ -362,7 +380,7 @@ export async function recordPayment(
   enrollmentId: string,
   v: PaymentInput,
   today: string,
-): Promise<{ ok: true; id: string; receiptNo: number } | { ok: false; error: 'missing' | 'too_much' }> {
+): Promise<{ ok: true; id: string; receiptNo: number } | { ok: false; error: 'missing' | 'too_much' | 'allocation' }> {
   // The same form sent twice (double click, browser resend): show the first one again.
   if (v.nonce) {
     const seen = await db.prepare('SELECT id, receipt_no AS receiptNo FROM offline_payments WHERE nonce = ?').bind(v.nonce).first<{ id: string; receiptNo: number }>();
@@ -370,7 +388,11 @@ export async function recordPayment(
   }
   const row = await db.prepare(`${ENROLL_SELECT} WHERE e.id = ?`).bind(enrollmentId).first<EnrollmentRow>();
   if (!row) return { ok: false, error: 'missing' };
-  if (v.amountTaka * 100 > ledgerOf(row, row.paidMinor, today).dueMinor) return { ok: false, error: 'too_much' };
+  const ledger = ledgerOf(row, row.paidMinor, today);
+  if (v.amountTaka * 100 > ledger.dueMinor) return { ok: false, error: 'too_much' };
+  const item = v.allocationKey ? ledger.installments.find((i) => i.key === v.allocationKey) : undefined;
+  if (v.allocationKey && (!item || v.amountTaka * 100 > item.amountMinor - item.paidMinor)) return { ok: false, error: 'allocation' };
+  const accountId = methodMap(await listAccounts(db, false)).get(v.method) ?? UNASSIGNED;
   const id = newId('ofp');
   // Two people saving at the same moment could pick the same number; the
   // unique index refuses the second, which then takes the next one.
@@ -381,17 +403,23 @@ export async function recordPayment(
       // pass the check with the same old balance.
       const r = await db
         .prepare(
-          `INSERT INTO offline_payments (id, receipt_no, enrollment_id, amount_minor, paid_on, method, reference, note, recorded_by, nonce)
-           SELECT ?1, (SELECT coalesce(max(receipt_no), 0) + 1 FROM offline_payments), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+          `INSERT INTO offline_payments (id, receipt_no, enrollment_id, amount_minor, paid_on, method, reference, note, recorded_by, nonce, allocation_key, allocation_label, posted_account_id, posted_project_id)
+           SELECT ?1, (SELECT coalesce(max(receipt_no), 0) + 1 FROM offline_payments), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?16,
+             (SELECT coalesce(c.project_id, '') FROM offline_enrollments e JOIN offline_courses c ON c.id = e.course_id WHERE e.id = ?2)
            WHERE ?3 <= (SELECT max(0, e.fee_minor + e.admission_fee_minor - e.discount_minor) FROM offline_enrollments e WHERE e.id = ?2)
                      + (SELECT coalesce(sum(x.amount_minor), 0) FROM offline_charges x WHERE x.enrollment_id = ?2 AND x.voided_at IS NULL)
                      - (SELECT coalesce(sum(p.amount_minor), 0) FROM offline_payments p WHERE p.enrollment_id = ?2 AND p.voided_at IS NULL)
+           AND (?10 = '' OR EXISTS (SELECT 1 FROM offline_enrollments e WHERE e.id = ?2
+             AND json_array(e.fee_minor, e.admission_fee_minor, e.discount_minor, e.duration_months, e.plan_months, e.start_date) = ?12
+             AND ${ENROLL_CHARGES} = ?13 AND ${allocationSums()} = ?14
+             AND (SELECT coalesce(sum(p.amount_minor), 0) FROM offline_payments p WHERE p.enrollment_id = e.id AND p.voided_at IS NULL) = ?15))
            RETURNING receipt_no AS receiptNo`,
         )
-        .bind(id, enrollmentId, v.amountTaka * 100, v.paidOn, v.method, v.reference, v.note, actor, v.nonce)
+        .bind(id, enrollmentId, v.amountTaka * 100, v.paidOn, v.method, v.reference, v.note, actor, v.nonce, item?.key ?? '', item?.label ?? '',
+          JSON.stringify([row.feeMinor, row.admissionFeeMinor, row.discountMinor, row.durationMonths, row.planMonths, row.startDate]), row.chargesJson, row.allocationsJson, row.paidMinor, accountId)
         .first<{ receiptNo: number }>();
-      if (!r) return { ok: false, error: 'too_much' };
-      await log(db, actor, 'offline.payment', `offline_student:${row.studentId}`, { paymentId: id, receiptNo: r!.receiptNo, amount: v.amountTaka, method: v.method });
+      if (!r) return { ok: false, error: item ? 'allocation' : 'too_much' };
+      await log(db, actor, 'offline.payment', `offline_student:${row.studentId}`, { paymentId: id, receiptNo: r!.receiptNo, amount: v.amountTaka, method: v.method, allocationKey: item?.key });
       // The digital receipt reaches the student's (and guardian's) portal at once.
       await db
         .prepare(
@@ -435,12 +463,10 @@ export async function getReceipt(db: D1Database, paymentId: string, today: strin
   const enrollment = await db.prepare(`${ENROLL_SELECT} WHERE e.id = ?`).bind(payment.enrollmentId).first<EnrollmentRow>();
   if (!enrollment) return null;
   const student = await db.prepare('SELECT address, guardian_phone AS guardianPhone FROM offline_students WHERE id = ?').bind(enrollment.studentId).first<{ address: string; guardianPhone: string }>();
-  // What was paid up to and including this receipt, so a reprint later shows the same balance.
-  const upTo = await db
-    .prepare('SELECT coalesce(sum(amount_minor), 0) AS paid FROM offline_payments WHERE enrollment_id = ? AND voided_at IS NULL AND receipt_no <= ?')
-    .bind(payment.enrollmentId, payment.receiptNo)
-    .first<{ paid: number }>();
-  return { payment, enrollment, address: student?.address ?? '', ledger: ledgerOf(enrollment, upTo?.paid ?? 0, today) };
+  const upTo = await db.prepare(`SELECT (SELECT coalesce(sum(amount_minor), 0) FROM offline_payments WHERE enrollment_id = e.id AND voided_at IS NULL AND receipt_no <= ?1) AS paid,
+    ${allocationSums('AND p.receipt_no <= ?1')} AS allocationsJson FROM offline_enrollments e WHERE e.id = ?2`)
+    .bind(payment.receiptNo, payment.enrollmentId).first<{ paid: number; allocationsJson: string }>();
+  return { payment, enrollment, address: student?.address ?? '', ledger: ledgerOf({ ...enrollment, allocationsJson: upTo?.allocationsJson ?? '[]' }, upTo?.paid ?? 0, today) };
 }
 
 // ---- Lists and reports ------------------------------------------------------
@@ -562,6 +588,7 @@ export async function monthReport(db: D1Database, month: string) {
     totalMinor: valid.reduce((a, r) => a + r.amountMinor, 0),
     byCourse: group((r) => r.courseTitle),
     byMethod: group((r) => r.method),
+    byHead: group((r) => r.allocationLabel || 'স্বয়ংক্রিয় বরাদ্দ'),
   };
 }
 
@@ -578,7 +605,7 @@ export async function activeEnrollmentsFor(db: D1Database, today: string, target
         ? `AND coalesce((SELECT p.to_batch_id FROM academic_promotions p JOIN academic_sessions ss ON ss.id = p.to_session_id AND ss.status = 'active' WHERE p.enrollment_id = e.id LIMIT 1), e.batch_id) = ?`
         : '';
   const { results } = await db
-    .prepare(`${ENROLL_SELECT} WHERE e.status = 'active' AND s.status = 'active' ${filter} ORDER BY s.student_no, s.name, e.start_date LIMIT ?`)
+    .prepare(`${ENROLL_SELECT} WHERE e.status = 'active' AND s.status = 'active' ${filter} ORDER BY s.student_no, s.name, e.start_date, e.id LIMIT ?`)
     .bind(...(filter ? [target.id] : []), limit)
     .all<EnrollmentRow>();
   return withLedger(results, today);

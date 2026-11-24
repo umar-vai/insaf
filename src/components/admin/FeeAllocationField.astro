@@ -1,0 +1,29 @@
+---
+import { dayBn, type Ledger } from '../../lib/offline';
+import { taka } from '../../lib/format';
+
+interface Props { ledger: Ledger }
+const { ledger } = Astro.props;
+---
+<label class="field">
+  <span>কোন ফি জমা হচ্ছে</span>
+  <select name="allocationKey" data-fee-allocation>
+    <option value="">আগের বাকি থেকে পরিশোধ</option>
+    {ledger.installments.filter((i) => i.paidMinor < i.amountMinor).map((i) => (
+      <option value={i.key} data-amount={(i.amountMinor - i.paidMinor) / 100}>
+        {i.label} · {dayBn(i.dueDate)} · বাকি {taka(i.amountMinor - i.paidMinor)}
+      </option>
+    ))}
+  </select>
+</label>
+<script>
+  document.querySelectorAll('[data-fee-allocation]').forEach((element) => {
+    const select = element as unknown as HTMLSelectElement;
+    const amount = select.form?.querySelector('[name="amount"]') as unknown as HTMLInputElement | null;
+    if (!amount) return;
+    const defaultAmount = amount.value;
+    select.addEventListener('change', () => {
+      amount.value = select.selectedOptions[0]?.dataset.amount ?? defaultAmount;
+    });
+  });
+</script>

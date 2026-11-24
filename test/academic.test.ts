@@ -5,6 +5,7 @@ import { createNotice, listBatches, noticeFile, parseBatchForm, saveBatch, saveT
 import { addBatchTeacher, cancelExam, createExam, listExams, mayReadRoutine, removeBatchTeacher, teacherExams } from '../src/server/academic';
 import { batchForTeacher, landingFor, materialFile, offlineIdsForEmail, officeNotices, teacherBatchIds } from '../src/server/panels';
 import { closeTicket, getTicket, listTickets, openTicket, ownsTicket, replyTicket } from '../src/server/tickets';
+import { addExamCandidate, configureAssessment } from '../src/server/assessment';
 import { teacherWeekdays, workDays } from '../src/server/hr';
 
 const db = env.DB;
@@ -18,7 +19,13 @@ beforeEach(async () => {
       'tickets',
       'notices',
       'offline_charges',
+      'assessment_marks',
+      'assessment_examinees',
+      'assessment_policies',
       'offline_exams',
+      'academic_promotions',
+      'academic_batch_sessions',
+      'academic_sessions',
       'batch_teachers',
       'batch_materials',
       'offline_attendance',
@@ -94,6 +101,27 @@ describe('exams', () => {
     expect(a!.enrollments[0]!.ledger.byKind.exam.totalMinor).toBe(20_000);
     const b = await getOfflineStudent(db, sid2, today);
     expect(b!.enrollments[0]!.ledger.byKind.exam.totalMinor).toBe(0);
+  });
+
+  it('uses the same effective roster for fees and the gradebook after a promotion', async () => {
+    const { batchId, courseId, sid, eid, sid2 } = await school();
+    await db.batch([
+      db.prepare("INSERT INTO offline_batches (id, course_id, name) VALUES ('new-class', ?, 'Next class')").bind(courseId),
+      db.prepare("INSERT INTO academic_sessions (id,name,starts_on,ends_on,status,created_by) VALUES ('y', 'Year', '2026-11-01', '2027-05-31', 'active', 'owner')"),
+      db.prepare("INSERT INTO academic_promotions (id,enrollment_id,student_id,from_batch_id,to_batch_id,to_session_id,created_by) VALUES ('p',?,?,?,'new-class','y','owner')").bind(eid,sid,batchId),
+    ]);
+    const exam = (await createExam(db, ACTOR, { batchId: 'new-class', title: 'Final', subject: '', examDate: '2026-12-01', startTime: '', feeTaka: 300, note: '' }))!;
+    expect(exam).toMatchObject({ charged: 1, examinees: 1 });
+    await enrollOffline(db, ACTOR, sid2, { courseId, batchId: 'new-class', roll: '2', startDate: '2026-11-15', discountTaka: 0, planMonths: 1, note: '' });
+    expect(await configureAssessment(db, ACTOR, exam.id, '100', '40', true)).toEqual({ ok: true, value: 1 });
+    const ids = (await db.prepare('SELECT enrollment_id FROM assessment_examinees WHERE exam_id = ?').bind(exam.id).all()).results;
+    const fees = (await db.prepare('SELECT enrollment_id FROM offline_charges WHERE source_key = ?').bind(`exam:${exam.id}`).all()).results;
+    expect(ids).toEqual([{ enrollment_id: eid }]);
+    expect(fees).toEqual(ids);
+    const candidate = (await db.prepare("SELECT id FROM offline_enrollments WHERE student_id = ? AND status = 'active'").bind(sid2).first<{ id: string }>())!;
+    expect((await addExamCandidate(db, ACTOR, exam.id, candidate.id, today)).ok).toBe(true);
+    expect((await addExamCandidate(db, ACTOR, exam.id, candidate.id, today)).ok).toBe(false);
+    expect((await db.prepare("SELECT count(*) AS n FROM offline_charges WHERE source_key = ?").bind(`exam:${exam.id}`).first<{ n: number }>())?.n).toBe(2);
   });
 
   it('cancelling waives the fee and hides the exam from panels', async () => {

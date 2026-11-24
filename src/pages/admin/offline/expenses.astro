@@ -44,11 +44,20 @@ if (Astro.request.method === 'POST') {
     // A large approved expense needed the owner to pass, so it needs the owner to cancel.
     const limits = await getSettings(env.DB);
     if (target && !isOwner && target.status === 'approved' && limits.expenseOwnerOver > 0 && target.amountMinor > limits.expenseOwnerOver * 100) return Astro.redirect(`/admin/offline/expenses?m=${form.get('m')}&error=void_owner`, 303);
+    if (await env.DB.prepare("SELECT 1 FROM payroll WHERE expense_id = ? AND status = 'paid'").bind(String(form.get('id') ?? '')).first()) return Astro.redirect('/admin/offline/expenses?error=payroll', 303);
     const ok = await voidExpense(env.DB, actor, String(form.get('id') ?? ''), String(form.get('reason') ?? ''));
     return Astro.redirect(`/admin/offline/expenses?m=${form.get('m')}&${ok ? 'saved=1' : 'error=reason'}`, 303);
   }
   const v = parseExpenseForm(form, today);
   if (!v.ok) return Astro.redirect(`/admin/offline/expenses?new=1&error=${v.error}`, 303);
+  const studentNo = String(form.get('studentNo') ?? '').trim();
+  if (studentNo) {
+    const { parseStudentNo } = await import('../../../server/offline');
+    const no = parseStudentNo(studentNo);
+    const student = no ? await env.DB.prepare("SELECT id FROM offline_students WHERE student_no = ?").bind(no).first<{ id: string }>() : null;
+    if (!student) return Astro.redirect('/admin/offline/expenses?new=1&error=student', 303);
+    v.value.studentId = student.id;
+  }
   if (await dayIsClosed(env.DB, v.value.spentOn)) return Astro.redirect('/admin/offline/expenses?new=1&error=closed', 303);
   const fundShort = await restrictedFundShort(env.DB, v.value.fundId, v.value.amountTaka * 100, today);
   if (fundShort && !(isOwner && form.get('overrideFund') === 'on')) return Astro.redirect(`/admin/offline/expenses?new=1&error=${isOwner ? 'fund_short_owner' : 'fund_short'}`, 303);
@@ -74,7 +83,7 @@ const [r, used, pending, s, projects, funds, closedDay] = await Promise.all([exp
 const nextDay = (d: string) => addDays(d, 1);
 const needsOwner = (minor: number) => s.expenseOwnerOver > 0 && minor > s.expenseOwnerOver * 100;
 const done = Astro.url.searchParams.get('done');
-const ERR: Record<string, string> = { owner: 'অনুমোদন বা বাতিল করতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।', self: 'নিজের লেখা খরচ নিজে অনুমোদন করা যায় না, অন্য কেউ অনুমোদন দেবেন।', expense: 'খরচটি আর অপেক্ষায় নেই।', reason: 'বাতিলের কারণ লিখুন।', amount: 'টাকার অঙ্ক সঠিক নয়।', spentOn: 'তারিখ সঠিক নয়।', category: 'খাত লিখুন।', closed: 'এই তারিখের হিসাব বন্ধ করা আছে। মালিক আবার খুললে তবেই বদলানো যাবে।', fund_short: 'এই নির্দিষ্ট তহবিলে এত টাকা নেই। আগে তহবিলে আয় লিখুন, অথবা মালিককে জানান।', fund_short_owner: 'এই নির্দিষ্ট তহবিলে এত টাকা নেই। তবুও খরচ করতে চাইলে ফরমের নিচের টিক দিয়ে আবার সংরক্ষণ করুন।', void_owner: 'এত বড় খরচ শুধু মালিক বাতিল করতে পারেন।' };
+const ERR: Record<string, string> = { payroll: 'বেতনের ভাউচার সংশোধন করতে বেতন শিটের পরিশোধের এন্ট্রি থেকে কাজটি করুন।', student: 'ছাত্র আইডি খুঁজে পাওয়া যায়নি।', owner: 'অনুমোদন বা বাতিল করতে হিসাবে সম্পূর্ণ ক্ষমতা লাগবে।', self: 'নিজের লেখা খরচ নিজে অনুমোদন করা যায় না, অন্য কেউ অনুমোদন দেবেন।', expense: 'খরচটি আর অপেক্ষায় নেই।', reason: 'বাতিলের কারণ লিখুন।', amount: 'টাকার অঙ্ক সঠিক নয়।', spentOn: 'তারিখ সঠিক নয়।', category: 'খাত লিখুন।', closed: 'এই তারিখের হিসাব বন্ধ করা আছে। মালিক আবার খুললে তবেই বদলানো যাবে।', fund_short: 'এই নির্দিষ্ট তহবিলে এত টাকা নেই। আগে তহবিলে আয় লিখুন, অথবা মালিককে জানান।', fund_short_owner: 'এই নির্দিষ্ট তহবিলে এত টাকা নেই। তবুও খরচ করতে চাইলে ফরমের নিচের টিক দিয়ে আবার সংরক্ষণ করুন।', void_owner: 'এত বড় খরচ শুধু মালিক বাতিল করতে পারেন।' };
 const err = Astro.url.searchParams.get('error');
 const categories = [...new Set([...used, ...EXPENSE_CATEGORIES])];
 const top = r.byCategory[0]?.totalMinor ?? 1;
@@ -129,6 +138,7 @@ const top = r.byCategory[0]?.totalMinor ?? 1;
     <summary><strong>নতুন খরচ</strong></summary>
     <form method="post" class="form-grid" enctype="multipart/form-data">
       <input type="hidden" name="nonce" value={crypto.randomUUID()} />
+      <label class="field"><span>ছাত্র আইডি (ব্যক্তিগত খরচ হলে)</span><input name="studentNo" maxlength="25" value={Astro.url.searchParams.get('student') ?? ''} placeholder="যেমন MI-0012" /></label>
       <label class="field"><span>খাত</span><input name="category" required list="exp-cats" maxlength="60" placeholder="যেমন বাড়ি ভাড়া" /></label>
       <datalist id="exp-cats">{categories.map((c) => <option value={c} />)}</datalist>
       <label class="field"><span>টাকা</span><input name="amount" required inputmode="numeric" /></label>

@@ -4,6 +4,7 @@ import Base from '../../layouts/Base.astro';
 import PageHero from '../../components/PageHero.astro';
 import '../../styles/panel.css';
 import { applicationCode, APPLICATION_STATUS_BN, statusFor } from '../../server/admission';
+import { sameOrigin } from '../../server/session';
 import { dateBn } from '../../lib/format';
 
 // A family checks their application with the number they were given and the
@@ -12,8 +13,10 @@ import { dateBn } from '../../lib/format';
 Astro.response.headers.set('Cache-Control', 'no-store');
 Astro.response.headers.set('X-Robots-Tag', 'noindex');
 const q = Astro.url.searchParams;
-const no = q.get('no') ?? '';
-const phone = q.get('phone') ?? '';
+if (Astro.request.method === 'POST' && !sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
+const form = Astro.request.method === 'POST' ? await Astro.request.formData() : null;
+const no = String(form?.get('no') ?? q.get('no') ?? '').slice(0, 12);
+const phone = String(form?.get('phone') ?? '').slice(0, 25);
 let limited = false;
 let found = null;
 if (no && phone) {
@@ -26,9 +29,9 @@ if (no && phone) {
 <Base title="আবেদনের অবস্থা" description="ভর্তির আবেদন নম্বর ও মোবাইল নম্বর দিয়ে আবেদনের অবস্থা দেখুন।">
   <PageHero crumbs={[{ href: '/admission', label: 'ভর্তি' }, { href: '/admission/status', label: 'আবেদনের অবস্থা' }]} eyebrow="ভর্তি" title="আবেদনের অবস্থা" lead="আবেদন নম্বর (যেমন AP-0001) ও আবেদনে দেওয়া অভিভাবকের মোবাইল নম্বর লিখুন।" />
   <section class="container st ui">
-    <form method="get" class="card form-grid">
+    <form method="post" class="card form-grid">
       <label class="field"><span>আবেদন নম্বর</span><input name="no" value={no} required maxlength="12" placeholder="AP-0001" autocomplete="off" /></label>
-      <label class="field"><span>মোবাইল নম্বর</span><input name="phone" type="tel" value={phone} required maxlength="25" inputmode="tel" /></label>
+      <label class="field"><span>মোবাইল নম্বর</span><input name="phone" type="tel" required maxlength="25" inputmode="tel" /></label>
       <button class="button">দেখুন</button>
     </form>
     {limited && <p class="note note--bad" role="alert">অল্প সময়ে অনেকবার চেষ্টা হয়েছে। এক মিনিট পরে আবার চেষ্টা করুন।</p>}

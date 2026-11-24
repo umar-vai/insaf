@@ -1,4 +1,5 @@
-import { dayIsClosed } from './acc-period';
+import { postedAccount } from './accounts';
+import { CLOSED_THROUGH_SQL, dayIsClosed } from './acc-period';
 import { log } from './admin';
 import { teaches } from './office';
 import { notifyTeachers } from './notifications';
@@ -314,14 +315,36 @@ export async function payPayroll(db: D1Database, actor: string, id: string, paid
       .bind(paidOn, m, expenseId, token, id),
     db
       .prepare(
-        `INSERT INTO expenses (id, spent_on, category, amount_minor, description, method, recorded_by, status, decided_by, voucher_no, party)
-         SELECT ?, ?, 'শিক্ষক বেতন', net_minor, ?, ?, ?, 'approved', ?, (SELECT coalesce(max(voucher_no), 0) + 1 FROM expenses),
-                (SELECT name FROM teachers WHERE id = payroll.teacher_id) FROM payroll WHERE id = ? AND status = 'paid' AND updated_at = ? AND net_minor > 0`,
+        `INSERT INTO expenses (id, spent_on, category, amount_minor, description, method, recorded_by, status, decided_by, voucher_no, party, posted_account_id)
+         SELECT ?1, ?2, 'শিক্ষক বেতন', net_minor, ?3, ?4, ?5, 'approved', ?6, (SELECT coalesce(max(voucher_no), 0) + 1 FROM expenses),
+                (SELECT name FROM teachers WHERE id = payroll.teacher_id), ${postedAccount('?4')} FROM payroll WHERE id = ?7 AND status = 'paid' AND updated_at = ?8 AND net_minor > 0`,
       )
       .bind(expenseId ?? newId('exp'), paidOn, `${row.teacherName}, ${row.month} মাসের বেতন`, m, actor, actor, id, token),
   ]);
   if (!moved?.meta.changes) return false;
   await log(db, actor, 'payroll.paid', `teacher:${row.teacherId}`, { payrollId: id, month: row.month, net: row.netMinor / 100, expenseId });
   await notifyTeachers(db, actor, [row.teacherId], { title: `${row.month} মাসের বেতন দেওয়া হয়েছে`, link: '/teacher/salary', sourceKey: `salary:${id}` });
+  return true;
+}
+
+/** Undo an incorrect paid entry and its linked voucher without removing the audit history. */
+export async function reversePayrollPayment(db: D1Database, actor: string, id: string, reason: string): Promise<boolean> {
+  const why = reason.trim().slice(0, 300);
+  if (why.length < 3) return false;
+  const row = await getPayroll(db, id);
+  if (!row || row.status !== 'paid' || !row.expenseId || !row.paidOn) return false;
+  const stamp = new Date().toISOString();
+  const [, updated] = await db.batch([
+    db.prepare(`UPDATE expenses SET voided_at = ?1, voided_by = ?2, void_reason = ?3
+      WHERE id = ?4 AND voided_at IS NULL AND spent_on > ${CLOSED_THROUGH_SQL}
+      AND EXISTS (SELECT 1 FROM payroll WHERE id = ?5 AND status = 'paid' AND expense_id = expenses.id)`)
+      .bind(stamp, actor, why, row.expenseId, id),
+    db.prepare(`UPDATE payroll SET status = 'approved', paid_on = NULL, paid_method = NULL, expense_id = NULL, updated_at = ?1
+      WHERE id = ?5 AND status = 'paid' AND expense_id = ?4 AND EXISTS
+      (SELECT 1 FROM expenses WHERE id = ?4 AND voided_at = ?1 AND voided_by = ?2 AND void_reason = ?3)`)
+      .bind(stamp, actor, why, row.expenseId, id),
+  ]);
+  if (!updated?.meta.changes) return false;
+  await log(db, actor, 'payroll.payment.reverse', `teacher:${row.teacherId}`, { payrollId: id, expenseId: row.expenseId, reason: why });
   return true;
 }
