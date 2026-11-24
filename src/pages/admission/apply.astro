@@ -211,8 +211,8 @@ const doneNo = done && /^\d{1,6}$/.test(done) ? Number(done) : 0;
             const field = form.elements.namedItem(node.dataset.review ?? '');
             node.textContent = field instanceof HTMLInputElement ? field.value : '';
           }
-          const course = form.elements.namedItem('courseId') as HTMLSelectElement;
-          const desired = form.elements.namedItem('desiredClass') as HTMLInputElement;
+          const course = form.querySelector<HTMLSelectElement>('select[name=courseId]')!;
+          const desired = form.querySelector<HTMLInputElement>('input[name=desiredClass]')!;
           form.querySelector<HTMLElement>('[data-review="department"]')!.textContent = `${course.selectedOptions[0]?.textContent ?? ''} · ${desired.value}`;
         }
         show(next);
