@@ -4,26 +4,61 @@ import { taka } from '../../lib/format';
 
 interface Props { ledger: Ledger }
 const { ledger } = Astro.props;
+const open = ledger.installments.filter((i) => i.paidMinor < i.amountMinor);
 ---
-<label class="field">
-  <span>কোন ফি জমা হচ্ছে</span>
-  <select name="allocationKey" data-fee-allocation>
-    <option value="">আগের বাকি থেকে পরিশোধ</option>
-    {ledger.installments.filter((i) => i.paidMinor < i.amountMinor).map((i) => (
-      <option value={i.key} data-amount={(i.amountMinor - i.paidMinor) / 100}>
-        {i.label} · {dayBn(i.dueDate)} · বাকি {taka(i.amountMinor - i.paidMinor)}
-      </option>
-    ))}
-  </select>
-</label>
+<div class="allocations" data-fee-allocation>
+  <label class="field">
+    <span>কোন ফি জমা হচ্ছে</span>
+    <select name="allocationKey">
+      <option value="">আগের বাকি থেকে পরিশোধ</option>
+      {open.length > 1 && <option value="split">এক রসিদে একাধিক খাত</option>}
+      {open.map((i) => (
+        <option value={i.key} data-amount={(i.amountMinor - i.paidMinor) / 100}>
+          {i.label} · {dayBn(i.dueDate)} · বাকি {taka(i.amountMinor - i.paidMinor)}
+        </option>
+      ))}
+    </select>
+  </label>
+  {open.length > 1 && (
+    <fieldset class="split" hidden>
+      <legend>যে খাতে যত টাকা জমা হচ্ছে</legend>
+      {open.map((i) => (
+        <label class="field">
+          <span>{i.label} · {dayBn(i.dueDate)} · বাকি {taka(i.amountMinor - i.paidMinor)}</span>
+          <input name={`split:${i.key}`} type="number" inputmode="numeric" min="1" step="1" max={Math.floor((i.amountMinor - i.paidMinor) / 100)} placeholder="৳" />
+        </label>
+      ))}
+    </fieldset>
+  )}
+</div>
 <script>
-  document.querySelectorAll('[data-fee-allocation]').forEach((element) => {
-    const select = element as unknown as HTMLSelectElement;
-    const amount = select.form?.querySelector('[name="amount"]') as unknown as HTMLInputElement | null;
+  document.querySelectorAll<HTMLElement>('[data-fee-allocation]').forEach((field) => {
+    const select = field.querySelector('select')!;
+    const amount = select.form?.querySelector<HTMLInputElement>('[name="amount"]');
     if (!amount) return;
+    const split = field.querySelector('fieldset');
+    const parts = [...field.querySelectorAll<HTMLInputElement>('.split input')];
     const defaultAmount = amount.value;
-    select.addEventListener('change', () => {
-      amount.value = select.selectedOptions[0]?.dataset.amount ?? defaultAmount;
-    });
+    const updateTotal = () => {
+      const total = parts.reduce((sum, input) => sum + (Number.isFinite(input.valueAsNumber) ? input.valueAsNumber : 0), 0);
+      amount.value = total ? String(total) : '';
+    };
+    const sync = () => {
+      const isSplit = select.value === 'split';
+      if (split) {
+        split.hidden = !isSplit;
+        split.disabled = !isSplit;
+      }
+      amount.readOnly = isSplit;
+      if (isSplit) updateTotal();
+      else amount.value = select.selectedOptions[0]?.dataset.amount ?? defaultAmount;
+    };
+    select.addEventListener('change', sync);
+    split?.addEventListener('input', updateTotal);
+    sync();
   });
 </script>
+<style>
+  .split { margin-block: var(--space-2); padding: var(--space-2); max-height: 20rem; overflow-y: auto; }
+  .split .field { margin-bottom: var(--space-2); }
+</style>

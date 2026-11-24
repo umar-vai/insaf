@@ -357,6 +357,7 @@ export type Txn = {
   day: string;
   source: 'fee' | 'income' | 'expense' | 'transfer';
   ref: string;
+  statementReference?: string;
   link: string;
   accountId: string;
   projectId: string;
@@ -380,7 +381,7 @@ export async function transactions(db: D1Database, from: string, to: string, lim
   const [fees, spent, entries] = await db.batch([
     db
       .prepare(
-        `SELECT p.id, p.paid_on AS day, p.receipt_no AS no, p.amount_minor AS amount, p.method, p.posted_account_id AS accountId, coalesce(p.posted_project_id, c.project_id, '') AS projectId, coalesce(nullif(p.allocation_label, ''), c.title) AS head, s.name AS party, s.id AS studentId
+        `SELECT p.id, p.paid_on AS day, p.receipt_no AS no, p.amount_minor AS amount, p.method, p.reference AS statementReference, p.posted_account_id AS accountId, coalesce(p.posted_project_id, c.project_id, '') AS projectId, coalesce(nullif(p.allocation_label, ''), c.title) AS head, s.name AS party, s.id AS studentId
          FROM offline_payments p JOIN offline_enrollments e ON e.id = p.enrollment_id JOIN offline_courses c ON c.id = e.course_id JOIN offline_students s ON s.id = e.student_id
          WHERE p.voided_at IS NULL AND p.paid_on BETWEEN ? AND ? ORDER BY p.paid_on, p.receipt_no LIMIT ?`,
       )
@@ -395,23 +396,23 @@ export async function transactions(db: D1Database, from: string, to: string, lim
     db
       .prepare(
         `SELECT id, kind, voucher_no AS no, day, amount_minor AS amount, account_id AS accountId, from_account_id AS fromAccountId, coalesce(project_id, '') AS projectId,
-         coalesce(fund_id, '${GENERAL_FUND}') AS fundId, category AS head, party FROM acc_entries WHERE voided_at IS NULL AND day BETWEEN ? AND ? ORDER BY day, created_at LIMIT ?`,
+         coalesce(fund_id, '${GENERAL_FUND}') AS fundId, category AS head, party, reference AS statementReference FROM acc_entries WHERE voided_at IS NULL AND day BETWEEN ? AND ? ORDER BY day, created_at LIMIT ?`,
       )
       .bind(from, to, limit),
   ]);
-  type Row = { id: string; day: string; no: number | null; amount: number; method?: string; projectId: string; fundId?: string; head: string; party: string; studentId?: string; kind?: string; accountId?: string; fromAccountId?: string | null };
+  type Row = { id: string; day: string; no: number | null; amount: number; method?: string; statementReference?: string; projectId: string; fundId?: string; head: string; party: string; studentId?: string; kind?: string; accountId?: string; fromAccountId?: string | null };
   const out: Txn[] = [];
   const push = (t: Txn) => {
     if (t.day >= (opening.get(t.accountId) ?? '')) out.push(t);
   };
   for (const r of fees!.results as Row[]) {
-    push({ id: r.id, day: r.day, source: 'fee', ref: `রসিদ ${r.no}`, link: `/admin/offline/receipt/${r.id}`, accountId: r.accountId ?? byMethod.get(r.method!) ?? UNASSIGNED, projectId: r.projectId, fundId: GENERAL_FUND, head: r.head, party: r.party, inMinor: r.amount, outMinor: 0 });
+    push({ id: r.id, day: r.day, source: 'fee', statementReference: r.statementReference, ref: `রসিদ ${r.no}`, link: `/admin/offline/receipt/${r.id}`, accountId: r.accountId ?? byMethod.get(r.method!) ?? UNASSIGNED, projectId: r.projectId, fundId: GENERAL_FUND, head: r.head, party: r.party, inMinor: r.amount, outMinor: 0 });
   }
   for (const r of spent!.results as Row[]) {
     push({ id: r.id, day: r.day, source: 'expense', ref: voucherCode('expense', r.no) || 'বেতন', link: `/admin/offline/accounts/voucher/${r.id}`, accountId: r.accountId ?? byMethod.get(r.method!) ?? UNASSIGNED, projectId: r.projectId, fundId: r.fundId!, head: r.head, party: r.party, inMinor: 0, outMinor: r.amount });
   }
   for (const r of entries!.results as Row[]) {
-    const base = { id: r.id, day: r.day, link: `/admin/offline/accounts/voucher/${r.id}`, projectId: r.projectId, fundId: r.fundId!, head: r.head, party: r.party };
+    const base = { id: r.id, day: r.day, statementReference: r.statementReference, link: `/admin/offline/accounts/voucher/${r.id}`, projectId: r.projectId, fundId: r.fundId!, head: r.head, party: r.party };
     if (r.kind === 'income') push({ ...base, source: 'income', ref: voucherCode('income', r.no), accountId: r.accountId!, inMinor: r.amount, outMinor: 0 });
     else {
       push({ ...base, source: 'transfer', ref: voucherCode('transfer', r.no), accountId: r.fromAccountId!, inMinor: 0, outMinor: r.amount });

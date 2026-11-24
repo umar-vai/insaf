@@ -236,7 +236,7 @@ const rows = [
           <form method="post"><input type="hidden" name="action" value="reopen" /><button class="button button--ghost">আবার অপেক্ষায় রাখুন</button></form>
         </section>
       )}
-      {a.status === 'accepted' && <p class="muted">গৃহীত: {a.decidedBy}, {dateBn(a.decidedAt, true)}</p>}
+      {a.status === 'accepted' && <p class="muted">গৃহীত · {a.decidedBy}, {dateBn(a.decidedAt, true)}{a.studentId && <> · <a href={`/admin/offline/students/${a.studentId}#assistance`}>প্রযোজ্য ছাড় ও স্কলারশিপ যাচাই করুন</a></>}</p>}
     </>
   )}
 </Admin>

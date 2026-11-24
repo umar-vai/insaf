@@ -69,6 +69,7 @@ const errors:Record<string,string>={
       <h1>শিক্ষাবর্ষ, ব্যাচ ও প্রমোশন</h1>
       <p>পরবর্তী সেশন আগে পরিকল্পনা করুন, ব্যাচ যুক্ত করুন, ছাত্রদের তালিকা দেখে প্রমোশন অনুমোদন করুন। কোনো পুরোনো ফি, রসিদ বা ভর্তি পরিবর্তন হয় না।</p>
     </div>
+    <a class="button" href={`/admin/offline/sessions/promote${selected ? `?session=${encodeURIComponent(selected.id)}` : ''}`}>ফল থেকে প্রমোশন</a>
   </header>
   {Astro.url.searchParams.has('error') && <p class="note note--bad" role="alert">{errors[Astro.url.searchParams.get('error')??'']??'কাজটি করা যায়নি।'}</p>}
   {sessions.length===0 && <p class="note">এখন কোনো একাডেমিক সেশন নেই। নিচে প্রথম সেশন তৈরি করুন। পুরোনো ক্লাস, ভর্তি ও ফি ঠিক যেমন ছিল তেমনই থাকবে।</p>}
@@ -163,7 +164,7 @@ const errors:Record<string,string>={
       <h3>এই সেশনের প্রমোশন তালিকা</h3>
       {promotions.length?(
         <div class="table-wrap"><table><thead><tr><th>শিক্ষার্থী</th><th>কোর্স</th><th>আগের ব্যাচ</th><th>নতুন ব্যাচ</th></tr></thead>
-        <tbody>{promotions.map(p=><tr><td><a href={`/admin/offline/students/${p.studentId}`}>{p.studentName} (MI-{p.studentNo??'?'})</a></td><td>{p.courseTitle}</td><td>{p.fromBatchName}</td><td>{p.toBatchName}</td></tr>)}</tbody></table></div>
+        <tbody>{promotions.map(p=><tr><td><a href={`/admin/offline/students/${p.studentId}`}>{p.studentName} (MI-{p.studentNo??'?'})</a></td><td>{p.courseTitle}</td><td>{p.fromBatchName}</td><td>{p.toBatchName}{p.qualifyingExamId && <small class="muted"><br /><a href={`/admin/offline/gradebook/${p.qualifyingExamId}`}>{p.qualifyingExamTitle}</a></small>}</td></tr>)}</tbody></table></div>
       ):<p class="muted">এখনো কাউকে প্রমোট করা হয়নি।</p>}
     </section>
   </>}

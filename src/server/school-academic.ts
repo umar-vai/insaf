@@ -4,7 +4,7 @@ import { isYmd } from '../lib/offline';
 const newId = (p: string) => `${p}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
 export type AcademicSession = { id: string; name: string; startsOn: string; endsOn: string; status: 'planned'|'active'|'archived'; createdAt: string };
-export type AcademicPlacement = { id: string; studentId: string; studentName: string; studentNo: number|null; courseTitle: string; fromBatchName: string; toBatchName: string; sessionName: string; nextRoll: string; createdAt: string };
+export type AcademicPlacement = { id: string; studentId: string; studentName: string; studentNo: number|null; courseTitle: string; fromBatchName: string; toBatchName: string; sessionName: string; nextRoll: string; qualifyingExamId: string | null; qualifyingExamTitle: string | null; createdAt: string };
 export type GuardianLink = { id: string; studentId: string; guardianEmail: string; guardianName: string; relation: 'father'|'mother'|'guardian'|'other'; status: 'active'|'revoked'; createdAt: string };
 const safeEmail = (x: string) => x.trim().toLowerCase();
 export const relationBn: Record<GuardianLink['relation'], string> = { father: 'বাবা', mother: 'মা', guardian: 'অভিভাবক', other: 'অন্যান্য' };
@@ -81,11 +81,11 @@ export async function promotionCandidates(db:D1Database,toSessionId:string,limit
 export async function listPromotions(db:D1Database,sessionId:string):Promise<AcademicPlacement[]> {
  const {results}=await db.prepare(`SELECT p.id,p.student_id AS studentId,s.name AS studentName,s.student_no AS studentNo,
  c.title AS courseTitle,coalesce(bf.name,'ব্যাচ নেই') AS fromBatchName,bt.name AS toBatchName,
- se.name AS sessionName,p.next_roll AS nextRoll,p.created_at AS createdAt
+ se.name AS sessionName,p.next_roll AS nextRoll,p.qualifying_exam_id AS qualifyingExamId,x.title AS qualifyingExamTitle,p.created_at AS createdAt
  FROM academic_promotions p JOIN offline_students s ON s.id=p.student_id
  JOIN offline_enrollments e ON e.id=p.enrollment_id JOIN offline_courses c ON c.id=e.course_id
  LEFT JOIN offline_batches bf ON bf.id=p.from_batch_id JOIN offline_batches bt ON bt.id=p.to_batch_id
- JOIN academic_sessions se ON se.id=p.to_session_id WHERE p.to_session_id=? ORDER BY p.created_at DESC LIMIT 300`)
+ JOIN academic_sessions se ON se.id=p.to_session_id LEFT JOIN offline_exams x ON x.id=p.qualifying_exam_id WHERE p.to_session_id=? ORDER BY p.created_at DESC LIMIT 300`)
  .bind(sessionId).all<AcademicPlacement>();return results;
 }
 /** Promotion writes only an academic placement. The original enrollment, fees, payments,

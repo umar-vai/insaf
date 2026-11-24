@@ -183,6 +183,7 @@ export async function addExamCandidate(db: D1Database, actor: string, examId: st
       SELECT ?1, ee.enrollment_id, 'exam', 'পরীক্ষার ফি: ' || x.title, x.fee_minor, x.exam_date, 'exam:' || x.id, ?2
       FROM assessment_examinees ee JOIN offline_exams x ON x.id = ee.exam_id
       WHERE x.id = ?3 AND ee.enrollment_id = ?4 AND x.status = 'scheduled' AND x.fee_minor > 0 AND x.exam_date >= ?5
+        AND NOT EXISTS (SELECT 1 FROM enrollment_assistance a WHERE a.enrollment_id = ee.enrollment_id AND a.kind = 'zakat' AND a.revoked_at IS NULL)
         AND NOT EXISTS (SELECT 1 FROM assessment_policies WHERE exam_id = ?3 AND status = 'published')
         AND changes() = 1
       ON CONFLICT (enrollment_id, source_key) DO NOTHING`).bind(newId('chg'), actor, examId, enrollmentId, today),
