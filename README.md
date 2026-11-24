@@ -97,11 +97,11 @@ Three layers:
 
 One time setup (needs the owner): create the bucket (`npx wrangler r2 bucket create insaf-backups`), make an API token with only D1 read and export for this database, then `npx wrangler secret put CF_BACKUP_TOKEN --env production` and `npx wrangler secret put CF_ACCOUNT_ID --env production`. Until then each night is recorded as failed and the warning shows. The same scheduled Worker copies media from `private/` and `uploads/` into the separate private backup bucket. It records SHA-256 checksums and an object manifest at `media/manifests/YYYY-MM-DD.json`, reusing unchanged archived versions. The owner's System Settings page can run the file backup and shows its last result. A snapshot supports up to 1,500 files of up to 30 MiB each and reports failure if a limit is exceeded. Keep the archived object keys referenced by manifests when managing retention.
 
-Check a copy restores (touches nothing online): download a file from the bucket, then `node scripts/restore-check.mjs <file.sql>`. It loads the file into a throwaway local database and compares every table with the file.
+Check a copy restores (touches nothing online): download a file from the bucket, then `node scripts/restore-check.mjs <file.sql>`. It loads the complete SQL into isolated local SQLite and checks row counts, foreign keys, and database integrity.
 
 Restore after a mistake or loss (always ask the owner first, it replaces data):
 - Deleted or changed something recently: Time Travel as above.
-- Database lost or damaged beyond 30 days: create a new D1 database, apply the migrations (`wrangler d1 migrations apply`), load the newest good `daily/` file in two parts as `restore-check.mjs` does (all `CREATE` lines first, then the `INSERT` lines after `PRAGMA defer_foreign_keys=TRUE;`) with `wrangler d1 execute --remote --file`, run `restore-check.mjs` on the same file first, point `database_id` in `wrangler.jsonc` at the new database and deploy. The old WordPress site is not involved.
+- Database lost or damaged beyond the Time Travel window: run the local restore check on the newest good `daily/` file, then follow the Cloudflare D1 import workflow in a new empty database. A full dump includes its schema. Verify row counts, media references and a staging deployment before any production cutover.
 
 ### Bank statement feed
 
