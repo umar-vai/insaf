@@ -25,7 +25,7 @@ if (Astro.request.method === 'POST') {
   let ok = true;
   if (action === 'generate') await generatePayroll(env.DB, actor, month, await getSettings(env.DB));
   else if (action === 'edit') ok = await editPayroll(env.DB, actor, id, form);
-  else if (action === 'approve' && owner) ok = (await approvePayroll(env.DB, actor, month, id ? [id] : undefined)) > 0;
+  else if (action === 'approve' && owner && form.get('reviewed') === 'yes') ok = (await approvePayroll(env.DB, actor, month, id ? [id] : undefined, true)) > 0;
   else if (action === 'reopen' && owner) ok = await reopenPayroll(env.DB, actor, id);
   else if (action === 'pay' && owner) ok = await payPayroll(env.DB, actor, id, String(form.get('paidOn') ?? today), String(form.get('method') ?? 'cash'), today);
   else if (action === 'reverse' && owner) ok = await reversePayrollPayment(env.DB, actor, id, String(form.get('reason') ?? ''));
@@ -37,7 +37,10 @@ const [rows, s, attendance] = await Promise.all([listPayroll(env.DB, month), get
 const attendanceByTeacher = new Map(attendance.map((r) => [r.teacherId, r]));
 const total = rows.reduce((a, r) => a + r.netMinor, 0);
 const paid = rows.filter((r) => r.status === 'paid').reduce((a, r) => a + r.netMinor, 0);
-const drafts = rows.filter((r) => r.status === 'draft').length;
+const drafts = rows.filter((r) => r.status === 'draft');
+const reasonMissing = (r: (typeof rows)[number]) => Boolean((r.bonusMinor || r.otherDeductionMinor) && r.note.trim().length < 3);
+const missingReasons = drafts.filter(reasonMissing).length;
+const totals = drafts.reduce((a, r) => ({ bonus: a.bonus + r.bonusMinor, leave: a.leave + r.deductionMinor, other: a.other + r.otherDeductionMinor }), { bonus: 0, leave: 0, other: 0 });
 const STATUS = { draft: 'খসড়া', approved: 'অনুমোদিত', paid: 'পরিশোধিত' } as const;
 const PILL = { draft: 'draft', approved: 'info', paid: 'paid' } as const;
 ---
@@ -72,9 +75,20 @@ const PILL = { draft: 'draft', approved: 'info', paid: 'paid' } as const;
       </div>
       <div class="actions">
         <form method="post"><input type="hidden" name="action" value="generate" /><button class="button button--sm"><Icon name="swap" /> {rows.length ? 'আবার হিসাব করুন' : 'শিট তৈরি করুন'}</button></form>
-        {owner && drafts > 0 && <form method="post" data-confirm="খসড়া সব বেতন অনুমোদন দেবেন?"><input type="hidden" name="action" value="approve" /><button class="button button--sm button--leaf"><Icon name="check" /> সব অনুমোদন ({bnDigits(drafts)})</button></form>}
+
       </div>
     </div>
+    {drafts.length > 0 && <section class="card review-block">
+      <h3>মাসশেষের পর্যালোচনা</h3>
+      <p>খসড়ায় ভাতা {taka(totals.bonus)} · ছুটির কর্তন {taka(totals.leave)} · অন্যান্য কর্তন {taka(totals.other)}</p>
+      <p>হাজিরায় অনুপস্থিতি ও দেরি দেখানো হয়েছে। প্রযোজ্য কর্তনের অঙ্ক ও কারণ সংশ্লিষ্ট সারিতে লিখুন।</p>
+      {missingReasons > 0 && <p class="note note--warn">ভাতা বা কর্তনের কারণ বাকি {bnDigits(missingReasons)}টি খসড়ায়।</p>}
+      {owner && <form method="post" class="form-grid">
+        <input type="hidden" name="action" value="approve" />
+        <label class="check wide"><input name="reviewed" type="checkbox" value="yes" required /> হাজিরা, ছুটি, ভাতা ও কর্তন মিলিয়েছি</label>
+        <button class="button button--leaf" disabled={missingReasons > 0}>সব খসড়া অনুমোদন করুন</button>
+      </form>}
+    </section>}
     {
       rows.length === 0 ? (
         <div class="empty"><Icon name="wallet" size={28} /><p>এই মাসের শিট এখনো তৈরি হয়নি।</p></div>
@@ -96,7 +110,7 @@ const PILL = { draft: 'draft', approved: 'info', paid: 'paid' } as const;
                         <input type="hidden" name="id" value={r.id} />
                         <input name="bonus" inputmode="numeric" value={r.bonusMinor ? r.bonusMinor / 100 : ''} placeholder="বোনাস" aria-label="বোনাস" />
                         <input name="other" inputmode="numeric" value={r.otherDeductionMinor ? r.otherDeductionMinor / 100 : ''} placeholder="অন্য কাটা" aria-label="অন্য কাটা" />
-                        <input name="note" value={r.note} placeholder="নোট" aria-label="নোট" />
+                        <input name="note" value={r.note} placeholder="ভাতা বা কর্তনের কারণ" aria-label="ভাতা বা কর্তনের কারণ" maxlength="300" />
                         <button class="button button--sm button--ghost">রাখুন</button>
                       </form>
                     ) : (
@@ -108,7 +122,9 @@ const PILL = { draft: 'draft', approved: 'info', paid: 'paid' } as const;
                     <span class={`pill pill--${PILL[r.status]}`}>{STATUS[r.status]}</span>
                     {r.status === 'paid' && <small class="muted"><br />{dayBn(r.paidOn)} · {METHOD_BN[(r.paidMethod ?? 'cash') as PayMethod]}</small>}
                     {owner && r.status === 'draft' && (
-                      <form method="post"><input type="hidden" name="action" value="approve" /><input type="hidden" name="id" value={r.id} /><button class="button button--sm button--ghost">অনুমোদন</button></form>
+                      <details><summary>পর্যালোচনা ও অনুমোদন</summary><form method="post"><input type="hidden" name="action" value="approve" /><input type="hidden" name="id" value={r.id} />
+                        <label class="check"><input name="reviewed" type="checkbox" value="yes" required /> হিসাব মিলিয়েছি</label>
+                        <button class="button button--sm button--ghost" disabled={reasonMissing(r)}>অনুমোদন</button></form></details>
                     )}
                     {owner && r.status === 'paid' && r.expenseId && <details><summary>ভুল এন্ট্রি সংশোধন</summary><form method="post" class="pay" data-confirm="বেতন পরিশোধের এন্ট্রি ও ভাউচার বাতিল করে অনুমোদিত অবস্থায় ফেরাবেন?">
                       <input type="hidden" name="action" value="reverse" /><input type="hidden" name="id" value={r.id} />

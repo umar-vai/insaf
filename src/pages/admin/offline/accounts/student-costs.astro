@@ -1,0 +1,63 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import AccountsNav from '../../../../components/admin/AccountsNav.astro';
+import { listBatches } from '../../../../server/office';
+import { allocateStudentCosts, costPreview } from '../../../../server/student-costs';
+import { localsMayDo } from '../../../../server/staff';
+import { studentCode, dayBn } from '../../../../lib/offline';
+import { bnDigits, takaExact as taka } from '../../../../lib/format';
+
+const here = '/admin/offline/accounts/student-costs';
+const full = localsMayDo(Astro.locals, 'accounts', 'full');
+const q = Astro.url.searchParams;
+let expenseId = (q.get('expense') ?? '').slice(0, 40);
+let batchId = (q.get('batch') ?? '').slice(0, 40);
+let error = false;
+if (Astro.request.method === 'POST') {
+  if (!full) return new Response('Accounts full access required', { status: 403 });
+  const form = await Astro.request.formData();
+  expenseId = String(form.get('expense') ?? '').slice(0, 40);
+  batchId = String(form.get('batch') ?? '').slice(0, 40);
+  if (form.get('confirm') === 'yes') {
+    const saved = await allocateStudentCosts(env.DB, Astro.locals.staff!, expenseId, batchId, String(form.get('key') ?? ''), String(form.get('reason') ?? '').slice(0, 300));
+    if (saved.ok) return Astro.redirect(`${here}?${new URLSearchParams({ expense: expenseId, batch: batchId, saved: String(saved.value) })}`, 303);
+  }
+  error = true;
+}
+const [batches, preview] = await Promise.all([listBatches(env.DB), expenseId && batchId ? costPreview(env.DB, expenseId, batchId) : null]);
+const allocated = expenseId ? await env.DB.prepare(`SELECT c.batch_id AS batch, c.reason, b.name FROM shared_expense_allocations c
+  JOIN offline_batches b ON b.id = c.batch_id WHERE c.expense_id = ?`).bind(expenseId).first<{ batch: string; reason: string; name: string }>() : null;
+const saved = q.get('saved');
+---
+<Admin title="ছাত্রভিত্তিক যৌথ খরচ">
+  <header class="page-head"><div><p class="eyebrow">হিসাব খাতা</p><h1>ছাত্রভিত্তিক যৌথ খরচ</h1>
+    <p>অনুমোদিত একটি খরচ ক্লাসের ছাত্রদের মধ্যে সমান ভাগে দেখান। মূল ভাউচার ও ক্যাশবুক একই খরচ একবারই ধরবে।</p></div></header>
+  <AccountsNav />
+  {saved && /^\d{1,3}$/.test(saved) && <p class="note note--good" role="status">{bnDigits(saved)} জনের খরচ ভাগ সংরক্ষিত হয়েছে।</p>}
+  {error && <p class="note note--bad" role="alert">ভাউচার, ক্লাস, কারণ ও টিক যাচাই করে আবার চেষ্টা করুন।</p>}
+  {allocated ? <div class="card"><h2>সংরক্ষিত বণ্টন</h2><p>{allocated.name} · {allocated.reason}</p>
+    <a href={`/admin/offline/accounts/voucher/${expenseId}`}>মূল ভাউচার দেখুন</a></div> : (
+    <section class="card">
+      {expenseId ? <form method="get" class="form-grid">
+        <input type="hidden" name="expense" value={expenseId} />
+        <label class="field wide"><span>যে ক্লাসে খরচ ভাগ হবে</span><select name="batch" required><option value="">ক্লাস বাছুন</option>
+          {batches.map((b) => <option value={b.id} selected={batchId === b.id}>{b.courseTitle} · {b.name}</option>)}</select></label>
+        <button class="button button--ghost">বণ্টন দেখুন</button>
+      </form> : <p>যৌথ খরচের <a href="/admin/offline/expenses">অনুমোদিত ভাউচার</a> খুলে ‘ক্লাসে খরচ ভাগ করুন’ বাছুন।</p>}
+    </section>
+  )}
+  {!allocated && expenseId && batchId && (!preview || !preview.shares.length || preview.shares.length > 300) && <p class="note">ভাউচার অনুমোদিত ও ছাত্রে আগে থেকে নির্ধারিত কি না দেখুন। ক্লাসে ১ থেকে ৩০০ জন প্রযোজ্য ছাত্র থাকতে হবে।</p>}
+  {!allocated && preview && preview.shares.length > 0 && preview.shares.length <= 300 && <section class="card cost-preview">
+    <div class="card__head"><h2>{preview.expense.category} · {taka(preview.expense.amountMinor)}</h2><a href={`/admin/offline/accounts/voucher/${expenseId}`}>ভাউচার</a></div>
+    <p>{dayBn(preview.expense.spentOn)} · {bnDigits(preview.shares.length)} জনের বিশ্লেষণমূলক ভাগ</p>
+    <ul class="list">{preview.shares.map((s) => <li><span>{s.name} · {studentCode(s.no)}</span><strong>{taka(s.amount)}</strong></li>)}</ul>
+    {full && <form method="post" class="form-grid">
+      <input type="hidden" name="expense" value={expenseId} /><input type="hidden" name="batch" value={batchId} /><input type="hidden" name="key" value={preview.key} />
+      <label class="field wide"><span>বণ্টনের কারণ</span><input name="reason" minlength="3" maxlength="300" required /></label>
+      <label class="check wide"><input name="confirm" type="checkbox" value="yes" required /> ক্লাস, ছাত্রতালিকা ও টাকার ভাগ যাচাই করেছি</label>
+      <button class="button">বণ্টন সংরক্ষণ করুন</button>
+    </form>}
+  </section>}
+</Admin>
+<style>.cost-preview { margin-top: var(--space-4); }</style>

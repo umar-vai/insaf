@@ -1,0 +1,58 @@
+---
+import { env } from 'cloudflare:workers';
+import AccountShell from '../../../../components/AccountShell.astro';
+import { currentStudent } from '../../../../server/students';
+import { offlineIdsForEmail } from '../../../../server/panels';
+import { publishedResultsForEmail, resultLabel, type PublishedResult } from '../../../../server/assessment';
+import { bnDigits } from '../../../../lib/format';
+import { dayBn, isYmd, studentCode, todayDhaka } from '../../../../lib/offline';
+
+Astro.response.headers.set('Cache-Control', 'no-store');
+const me = await currentStudent(env.DB, env, Astro.request.headers.get('Cookie'));
+if (!me) return Astro.redirect('/account?return=%2Faccount%2Foffline%2Fresults%2Fterm', 303);
+const children = await offlineIdsForEmail(env.DB, me.email);
+if (!children.length) return Astro.redirect('/account/offline/results', 303);
+const today = todayDhaka();
+const q = Astro.url.searchParams;
+const from = q.get('from') ?? `${today.slice(0, 4)}-01-01`;
+const to = q.get('to') ?? today;
+const valid = isYmd(from) && isYmd(to) && from <= to && to <= today;
+const results = valid ? await publishedResultsForEmail(env.DB, me.email, { from, to }) : [];
+const grouped = new Map<string, PublishedResult[]>();
+for (const row of results.slice(0, 500)) {
+  const group = grouped.get(row.studentId) ?? [];
+  group.push(row);
+  grouped.set(row.studentId, group);
+}
+---
+<AccountShell me={me} active="offline-results" title="টার্ম রিপোর্ট কার্ড">
+  <div class="ui">
+    <header class="page-head">
+      <div><p class="eyebrow"><a href="/account/offline/results">পরীক্ষার ফল</a></p><h1>টার্ম রিপোর্ট কার্ড</h1>
+      <p>যে সময়ের প্রকাশিত ফল একসঙ্গে চান, সেই সময় বাছুন। প্রতিটি শিক্ষার্থীর ফল আলাদা কার্ডে থাকবে।</p></div>
+      {results.length > 0 && results.length <= 500 && <button class="button no-print" type="button" onclick="window.print()">প্রিন্ট বা PDF</button>}
+    </header>
+    <form class="card form-grid no-print" method="get">
+      <label class="field"><span>শুরুর তারিখ</span><input name="from" type="date" value={from} max={today} required /></label>
+      <label class="field"><span>শেষ তারিখ</span><input name="to" type="date" value={to} max={today} required /></label>
+      <button class="button button--ghost">রিপোর্ট দেখুন</button>
+    </form>
+    {!valid && <p class="note note--bad">শুরু ও শেষের তারিখ সঠিকভাবে বাছুন।</p>}
+    {valid && !results.length && <p class="note">এই সময়ের কোনো প্রকাশিত ফল পাওয়া যায়নি।</p>}
+    {results.length > 500 && <p class="note note--warn">এই সময়সীমায় ফলের সংখ্যা বেশি। প্রিন্ট করার জন্য ছোট সময়সীমা বাছুন।</p>}
+    {[...grouped.values()].map((rows) => <article class="card report-card">
+      <div class="card__head"><div><p>মাদরাসাতুল ইনসাফ</p><h2>{rows[0]!.studentName} · {studentCode(rows[0]!.studentNo)}</h2>
+        <p>{dayBn(from)} থেকে {dayBn(to)}</p></div></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>পরীক্ষা ও বিষয়</th><th>তারিখ</th><th>নম্বর</th><th>ফল</th></tr></thead>
+        <tbody>{rows.map((r) => <tr><td>{r.title}{r.subject && ` · ${r.subject}`}<br/><small>{r.batchName}</small></td>
+          <td>{dayBn(r.examDate)}</td><td>{r.obtained === null ? 'অনুপস্থিত' : `${bnDigits(r.obtained)} / ${bnDigits(r.maxMarks)}`}</td>
+          <td>{resultLabel(r.obtained, r.passMarks, r.attendance)}</td></tr>)}</tbody>
+      </table></div>
+    </article>)}
+  </div>
+</AccountShell>
+<style>
+  .report-card { margin-top: var(--space-4); }
+  @media print { .no-print { display: none; } .report-card + .report-card { break-before: page; } }
+</style>

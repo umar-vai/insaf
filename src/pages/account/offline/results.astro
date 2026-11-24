@@ -28,7 +28,8 @@ const results = ids.length ? await publishedResultsForEmail(env.DB, me.email) : 
             <h1>পরীক্ষার ফল</h1>
             <p>মাদরাসা যে পরীক্ষার ফল প্রকাশ করেছে, শুধু সেগুলোই এখানে দেখা যায়।</p>
           </div>
-          {results.length > 0 && <button class="button button--ghost no-print" type="button" onclick="window.print()"><Icon name="printer" /> প্রিন্ট বা PDF</button>}
+          <div class="actions no-print"><a class="button" href="/account/offline/results/term">টার্ম রিপোর্ট কার্ড</a>
+          {results.length > 0 && <button class="button button--ghost no-print" type="button" onclick="window.print()"><Icon name="printer" /> প্রিন্ট বা PDF</button>}</div>
         </header>
         {results.length === 0 ? (
           <p class="card muted">এখনো কোনো পরীক্ষার ফল প্রকাশিত হয়নি।</p>

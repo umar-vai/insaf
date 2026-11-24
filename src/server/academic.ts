@@ -1,6 +1,6 @@
 import { log } from './admin';
 import { DOC_TYPES, IMAGE_TYPES, storeUpload } from './files';
-import { teaches } from './office';
+import { conflictingBatch, getBatch, teaches } from './office';
 import { bnDigits } from '../lib/format';
 import { isTime, isYmd, parseTaka } from '../lib/offline';
 
@@ -35,6 +35,9 @@ export async function addBatchTeacher(db: D1Database, actor: string, batchId: st
     .bind(batchId, teacherId)
     .first<{ b: number | null; t: number | null }>();
   if (!ok?.b || !ok.t) return false;
+  const already = await db.prepare('SELECT 1 FROM batch_teachers WHERE batch_id = ? AND teacher_id = ?').bind(batchId, teacherId).first();
+  const batch = already ? null : await getBatch(db, batchId);
+  if (batch && batch.teacherId !== teacherId && await conflictingBatch(db, batchId, { ...batch, teacherId }, true)) return false;
   const subj = subject.trim().slice(0, 80);
   await db
     .prepare(

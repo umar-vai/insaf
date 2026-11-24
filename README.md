@@ -95,13 +95,19 @@ Three layers:
 2. **Nightly copy** (`src/server/backup.ts`, cron 18:15 UTC, 00:15 in Dhaka). Cloudflare's D1 export API makes a full SQL dump; the Worker checks it and stores it in R2 bucket `insaf-backups` as `daily/YYYY-MM-DD.sql`, plus `monthly/YYYY-MM.sql` on the 1st. Daily copies are kept 30 days, monthly 12 months. Every run is in the audit log as `backup.ok` or `backup.failed` (that is the history). If there is no good copy for 26 hours the owner sees a red warning at the top of every admin page. The export briefly holds the database, so it runs at night.
 3. **A copy on the owner's computer**: `node scripts/backup-d1.mjs --env production --out ../backup` exports, restores into a throwaway local database and compares counts.
 
-One time setup (needs the owner): create the bucket (`npx wrangler r2 bucket create insaf-backups`), make an API token with only D1 read and export for this database, then `npx wrangler secret put CF_BACKUP_TOKEN --env production` and `npx wrangler secret put CF_ACCOUNT_ID --env production`. Until then each night is recorded as failed and the warning shows. Not covered yet: the R2 media files (vouchers, pictures) are not copied, and a Google Sheet of daily totals is not built.
+One time setup (needs the owner): create the bucket (`npx wrangler r2 bucket create insaf-backups`), make an API token with only D1 read and export for this database, then `npx wrangler secret put CF_BACKUP_TOKEN --env production` and `npx wrangler secret put CF_ACCOUNT_ID --env production`. Until then each night is recorded as failed and the warning shows. The same scheduled Worker copies media from `private/` and `uploads/` into the separate private backup bucket. It records SHA-256 checksums and an object manifest at `media/manifests/YYYY-MM-DD.json`, reusing unchanged archived versions. The owner's System Settings page can run the file backup and shows its last result. A snapshot supports up to 1,500 files of up to 30 MiB each and reports failure if a limit is exceeded. Keep the archived object keys referenced by manifests when managing retention.
 
 Check a copy restores (touches nothing online): download a file from the bucket, then `node scripts/restore-check.mjs <file.sql>`. It loads the file into a throwaway local database and compares every table with the file.
 
 Restore after a mistake or loss (always ask the owner first, it replaces data):
 - Deleted or changed something recently: Time Travel as above.
 - Database lost or damaged beyond 30 days: create a new D1 database, apply the migrations (`wrangler d1 migrations apply`), load the newest good `daily/` file in two parts as `restore-check.mjs` does (all `CREATE` lines first, then the `INSERT` lines after `PRAGMA defer_foreign_keys=TRUE;`) with `wrangler d1 execute --remote --file`, run `restore-check.mjs` on the same file first, point `database_id` in `wrangler.jsonc` at the new database and deploy. The old WordPress site is not involved.
+
+### Bank statement feed
+
+The CSV review screen accepts files from staff today. An approved external bank or mobile statement provider can also send the same CSV to `POST /integrations/bank-statement`. The endpoint stays off until the Worker has both a secret `BANK_FEED_SECRET` (at least 32 characters) and `BANK_FEED_ACCOUNTS` (comma-separated accounting account IDs). Keep these in Cloudflare secret configuration, never in source control.
+
+Send an `application/json` body with `accountId` and `csv`. Sign the exact UTF-8 text `timestamp.eventId.body` with HMAC SHA-256. Send the Unix seconds, stable event ID and lowercase hexadecimal signature in `X-Statement-Timestamp`, `X-Statement-Id` and `X-Statement-Signature`. First delivery returns 202. The identical retry returns 200. Changed content for a prior ID returns 409. The feed only creates review items. Staff must confirm matches in Accounts.
 
 ## Layout
 

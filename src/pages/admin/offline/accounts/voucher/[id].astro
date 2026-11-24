@@ -47,6 +47,7 @@ if (!v) return new Response('Not found', { status: 404 });
 <Admin title={`ভাউচার ${v.code}`}>
   <div class="actions" data-noprint>
     <button type="button" class="button" data-print><Icon name="printer" /> প্রিন্ট বা PDF</button>
+    {v.kindBn.startsWith('ডেবিট') && v.status === 'অনুমোদিত' && !v.voided && <a class="button button--ghost" href={`/admin/offline/accounts/student-costs?expense=${encodeURIComponent(id)}`}>ক্লাসে খরচ ভাগ করুন</a>}
     {v.photo && <a class="button button--ghost" href={`/admin/offline/voucher/${id}`} target="_blank">মূল ভাউচারের ছবি</a>}
   </div>
   <article class="card voucher">

@@ -59,7 +59,7 @@ export async function studentFacts(db: D1Database, studentId: string): Promise<S
   return { name: r.name, code: studentCode(r.no), course: r.course ?? '', batch: r.batch ?? '', since: r.since ? dayBn(r.since) : '' };
 }
 
-export type CertInput = { studentId: string; kind: CertKind; title: string; body: string; issuedOn: string };
+export type CertInput = { studentId: string; kind: CertKind; title: string; body: string; issuedOn: string; clearanceJson?: string };
 
 export function parseCertificateForm(form: FormData, today: string): Result<CertInput> {
   const studentId = text(form, 'studentId', 40);
@@ -92,10 +92,10 @@ export async function issueCertificate(db: D1Database, actor: string, v: CertInp
     try {
       await db
         .prepare(
-          `INSERT INTO certificates (id, serial_no, code, student_id, kind, title, body, issued_on, issued_by)
-           VALUES (?, (SELECT coalesce(max(serial_no), 0) + 1 FROM certificates), ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO certificates (id, serial_no, code, student_id, kind, title, body, issued_on, issued_by, clearance_json)
+           VALUES (?, (SELECT coalesce(max(serial_no), 0) + 1 FROM certificates), ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .bind(id, code, v.studentId, v.kind, v.title, v.body, v.issuedOn, actor)
+        .bind(id, code, v.studentId, v.kind, v.title, v.body, v.issuedOn, actor, v.clearanceJson ?? null)
         .run();
       await log(db, actor, 'certificate.issue', `offline_student:${v.studentId}`, { certificateId: id, kind: v.kind });
       await notifyStudents(db, actor, [v.studentId], { title: `${CERT_KIND_BN[v.kind]} তৈরি হয়েছে`, body: 'মূল কপি অফিস থেকে সংগ্রহ করুন।', sourceKey: `certificate:${id}` });

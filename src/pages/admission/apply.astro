@@ -5,8 +5,9 @@ import PageHero from '../../components/PageHero.astro';
 import Icon from '../../components/Icon.astro';
 import AdmissionFields from '../../components/AdmissionFields.astro';
 import '../../styles/panel.css';
-import { applicationCode, createApplication, parseApplicationDetails, parseSignatures, type ApplicationDetails } from '../../server/admission';
+import { applicationBySubmission, applicationCode, createApplication, parseApplicationDetails, parseSignatures, type ApplicationDetails } from '../../server/admission';
 import { IMAGE_TYPES, storeUpload } from '../../server/files';
+import { clearAdmissionDraft, readAdmissionDraft } from '../../server/admission-draft';
 import { sameOrigin } from '../../server/session';
 import { GUARDIAN_PLEDGE, STUDENT_PLEDGE } from '../../lib/pledges';
 import { todayDhaka } from '../../lib/offline';
@@ -40,8 +41,14 @@ const ERR: Record<string, string> = {
 };
 const departments = await publicDepartments(env.DB);
 let error = '';
-let values: Partial<ApplicationDetails> = {};
+const savedDraft = Astro.request.method === 'GET' && !Astro.url.searchParams.has('done')
+  ? await readAdmissionDraft(env.DB, env.SESSION_SECRET, Astro.request) : null;
+let values: Partial<ApplicationDetails> = savedDraft ?? {};
+if (savedDraft?.curSame === 'on') values = { ...values, curVillage: values.permVillage, curPost: values.permPost,
+  curThana: values.permThana, curDistrict: values.permDistrict };
+let submitKey: string = crypto.randomUUID();
 let signNames = { student: '', guardian: '' };
+let agrees = { student: false, guardian: false };
 
 if (Astro.request.method === 'POST') {
   if (!sameOrigin(Astro.request)) return new Response('Bad origin', { status: 403 });
@@ -52,8 +59,13 @@ if (Astro.request.method === 'POST') {
     const form = await Astro.request.formData();
     // A bot filling the hidden field is shown the same thanks, and nothing is kept.
     if (String(form.get('website') ?? '') !== '') return Astro.redirect(`${here}?done=0`, 303);
+    const key = String(form.get('submissionKey') ?? '');
+    if (/^[0-9a-f-]{36}$/.test(key)) submitKey = key;
+    const already = await applicationBySubmission(env.DB, submitKey);
+    if (already) return Astro.redirect(`${here}?done=${already.appNo}`, 303);
     values = Object.fromEntries([...form.entries()].filter(([, v]) => typeof v === 'string')) as Partial<ApplicationDetails>;
     signNames = { student: String(form.get('studentSignName') ?? ''), guardian: String(form.get('guardianSignName') ?? '') };
+    agrees = { student: form.get('studentAgree') === 'on', guardian: form.get('guardianAgree') === 'on' };
     const d = parseApplicationDetails(form, todayDhaka(), departments);
     const s = parseSignatures(form);
     if (!d.ok) error = d.error;
@@ -62,8 +74,9 @@ if (Astro.request.method === 'POST') {
       const stored = await storeUpload(env.MEDIA, form.get('photo'), 'private/admission', IMAGE_TYPES, 4 * 1024 * 1024);
       if (!stored.ok) error = stored.reason === 'size' ? 'photoSize' : 'photo';
       else {
-        const made = await createApplication(env.DB, d.value, s.value, stored.file.key);
-        return Astro.redirect(`${here}?done=${made.appNo}`, 303);
+        const made = await createApplication(env.DB, d.value, s.value, stored.file.key, submitKey);
+        const draftCookie = await clearAdmissionDraft(env.DB, env.SESSION_SECRET, Astro.request);
+        return new Response(null, { status: 303, headers: { Location: `${here}?done=${made.appNo}`, 'Set-Cookie': draftCookie, 'Cache-Control': 'no-store' } });
       }
     }
   }
@@ -73,7 +86,7 @@ const done = q.get('done');
 const doneNo = done && /^\d{1,6}$/.test(done) ? Number(done) : 0;
 ---
 
-<Base title="ভর্তির আবেদন" description="মাদরাসাতুল ইনসাফে ভর্তির আবেদন ফরম, শিক্ষার্থী ও অভিভাবকের অঙ্গীকারনামাসহ অনলাইনে জমা দিন।">
+<Base analytics={false} title="ভর্তির আবেদন" description="মাদরাসাতুল ইনসাফে ভর্তির আবেদন ফরম, শিক্ষার্থী ও অভিভাবকের অঙ্গীকারনামাসহ অনলাইনে জমা দিন।">
   <PageHero crumbs={[{ href: '/admission', label: 'ভর্তি' }, { href: here, label: 'আবেদন' }]} eyebrow="ভর্তি" title="ভর্তির আবেদনপত্র" lead="শিক্ষার্থীর তথ্য ও ছবি দিন, তারপর শিক্ষার্থী ও অভিভাবকের অঙ্গীকারনামা পড়ে স্বাক্ষর করুন। আবেদন গৃহীত হলে অফিস আপনাকে জানাবে।" />
   <section class="container apply ui">
     {done !== null ? (
@@ -86,40 +99,64 @@ const doneNo = done && /^\d{1,6}$/.test(done) ? Number(done) : 0;
     ) : (
       <p class="muted">আগে আবেদন করেছেন? <a href="/admission/status">আবেদনের অবস্থা দেখুন</a>।</p>
       <form method="post" enctype="multipart/form-data" class="card" id="apply" data-error={error}>
-        {error && <p class="note note--bad" role="alert">{ERR[error] ?? ERR.failed}</p>}
-        <div class="steps" aria-hidden="true"><span data-dot="1" class="on">১. শিক্ষার্থীর তথ্য</span><span data-dot="2">২. অঙ্গীকারনামা ও স্বাক্ষর</span></div>
+        <input type="hidden" name="submissionKey" value={submitKey} />
+        {error && <p class="note note--bad" role="alert">{ERR[error] ?? ERR.failed} ছবি আগে বেছে থাকলে আবার দিন।</p>}
+        {savedDraft && <p class="note note--good">এই ব্রাউজারে সংরক্ষিত খসড়া থেকে তথ্য ফিরেছে। ছবি, পরিচয়পত্র ও স্বাক্ষর আবার দিন।</p>}
+        <div class="draft-actions" hidden data-draft-actions>
+          <button type="button" class="button button--ghost" data-draft-save>পরে শেষ করতে রাখুন</button>
+          {savedDraft && <button type="button" class="button button--ghost" data-draft-clear>খসড়া সরান</button>}
+          <p class="muted">খসড়া এই ব্রাউজারে দুই দিন খোলা যাবে। ছবি, জাতীয় পরিচয়পত্র ও স্বাক্ষর খসড়ায় থাকে না। শেয়ার করা ডিভাইসে খসড়া রাখা এড়িয়ে চলুন।</p>
+          <p role="status" data-draft-status></p>
+        </div>
+        <div class="steps" aria-hidden="true"><span data-dot="1" class="on">১. শিক্ষার্থীর তথ্য</span><span data-dot="2">২. ছবি ও স্বাক্ষর</span><span data-dot="3">৩. দেখে জমা দিন</span></div>
 
         <div data-step="1" class="form-grid">
+          <AdmissionFields departments={departments} v={values} pickedDept={q.get('dept') ?? ''} />
+          <label class="hp" aria-hidden="true">ওয়েবসাইট <input name="website" tabindex="-1" autocomplete="off" /></label>
+          <p class="wide muted"><small>ভর্তি ও ফরমের টাকা অফেরতযোগ্য। এই তথ্য শুধু ভর্তির কাজে মাদরাসার অফিস দেখবে।</small></p>
+          <button type="button" class="button" data-next="2">ছবি ও স্বাক্ষরে যান <Icon name="arrow" /></button>
+        </div>
+
+        <div data-step="2" class="pledges">
           <h3>ছবি</h3>
           <div class="wide photo">
             <img data-preview alt="" width="96" height="120" hidden />
             <label class="field"><span>শিক্ষার্থীর পাসপোর্ট সাইজ ছবি (JPG, PNG বা WebP, সর্বোচ্চ ৪ MB)</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required data-photo /></label>
           </div>
-          <AdmissionFields departments={departments} v={values} pickedDept={q.get('dept') ?? ''} />
-          <label class="hp" aria-hidden="true">ওয়েবসাইট <input name="website" tabindex="-1" autocomplete="off" /></label>
-          <p class="wide muted"><small>ভর্তি ও ফরমের টাকা অফেরতযোগ্য। এই তথ্য শুধু ভর্তির কাজে মাদরাসার অফিস দেখবে।</small></p>
-          <button type="button" class="button" data-next>পরের ধাপ: অঙ্গীকারনামা <Icon name="arrow" /></button>
-        </div>
 
-        <div data-step="2" class="pledges">
           <p class="muted">দুটি অঙ্গীকারনামাই মনোযোগ দিয়ে পড়ুন। সম্মতি দিলে নিচে নাম লিখে স্বাক্ষর করুন। শুধু এরপরই আবেদন জমা দেওয়া যাবে।</p>
           {[
-            { p: STUDENT_PLEDGE, key: 'student', who: 'শিক্ষার্থীর', name: signNames.student },
-            { p: GUARDIAN_PLEDGE, key: 'guardian', who: 'অভিভাবকের', name: signNames.guardian },
-          ].map(({ p, key, who, name }) => (
+            { p: STUDENT_PLEDGE, key: 'student', agrees: agrees.student, who: 'শিক্ষার্থীর', name: signNames.student },
+            { p: GUARDIAN_PLEDGE, key: 'guardian', agrees: agrees.guardian, who: 'অভিভাবকের', name: signNames.guardian },
+          ].map(({ p, key, who, name, agrees: agreed }) => (
             <article class="pledge" aria-labelledby={`h-${key}`}>
               <h2 id={`h-${key}`}>{p.title}</h2>
               <p>{p.intro}</p>
               <ol class="points">{p.points.map((t) => <li>{t}</li>)}</ol>
               <p class="pnote">{p.note}</p>
               <div class="sign">
-                <label class="check"><input type="checkbox" name={`${key}Agree`} required checked={Boolean(name)} /> আমি উপরের সব কথা পড়েছি এবং মেনে নিলাম।</label>
+                <label class="check"><input type="checkbox" name={`${key}Agree`} required checked={agreed} /> আমি উপরের সব কথা পড়েছি এবং মেনে নিলাম।</label>
                 <label class="field"><span>{who} স্বাক্ষর (পুরো নাম লিখুন)</span><input name={`${key}SignName`} required minlength="2" maxlength="120" value={name} autocomplete="off" /></label>
               </div>
             </article>
           ))}
           <div class="row">
-            <button type="button" class="button button--ghost" data-back>ফিরে যান</button>
+            <button type="button" class="button button--ghost" data-back="1">ফিরে যান</button>
+            <button type="button" class="button" data-next="3">আবেদনটি দেখে নিন</button>
+          </div>
+        </div>
+        <div data-step="3" class="pledges">
+          <h3>জমা দেওয়ার আগে মিলিয়ে নিন</h3>
+          <dl class="review" data-summary>
+            <div><dt>শিক্ষার্থী</dt><dd data-review="studentName"></dd></div>
+            <div><dt>বিভাগ ও শ্রেণি</dt><dd data-review="department"></dd></div>
+            <div><dt>অভিভাবক</dt><dd data-review="guardianName"></dd></div>
+            <div><dt>যোগাযোগ</dt><dd data-review="phone"></dd></div>
+          </dl>
+          <p>ভুল দেখলে আগের ধাপে ফিরে ঠিক করুন। তথ্য মিললে আবেদন জমা দিন।</p>
+          <div class="row">
+            <button type="button" class="button button--ghost" data-back="1">তথ্য বদলান</button>
+            <button type="button" class="button button--ghost" data-back="2">ছবি ও স্বাক্ষর দেখুন</button>
             <button class="button" type="submit"><Icon name="check" /> আবেদন জমা দিন</button>
           </div>
         </div>
@@ -132,25 +169,55 @@ const doneNo = done && /^\d{1,6}$/.test(done) ? Number(done) : 0;
   import { toWebp } from '../../lib/to-webp';
   const form = document.getElementById('apply') as HTMLFormElement | null;
   if (form) {
-    const s1 = form.querySelector<HTMLElement>('[data-step="1"]')!;
-    const s2 = form.querySelector<HTMLElement>('[data-step="2"]')!;
-    const dots = form.querySelectorAll<HTMLElement>('[data-dot]');
-    const show = (n: 1 | 2) => {
-      s1.hidden = n !== 1;
-      s2.hidden = n !== 2;
-      dots.forEach((d) => d.classList.toggle('on', d.dataset.dot === String(n)));
-      form.scrollIntoView({ block: 'start' });
-    };
-    // Without this script both parts simply show one after the other.
-    form.classList.add('js');
-    // If the server sent the form back with a mistake in the second part, stay there.
-    show(/Sign$/.test(form.dataset.error ?? '') ? 2 : 1);
-    form.querySelector('[data-next]')!.addEventListener('click', () => {
-      const fields = [...s1.querySelectorAll<HTMLInputElement>('input,select,textarea')];
-      for (const f of fields) if (!f.checkValidity()) { f.reportValidity(); return; }
-      show(2);
+    const draftActions = form.querySelector<HTMLElement>('[data-draft-actions]')!;
+    const draftStatus = form.querySelector<HTMLElement>('[data-draft-status]')!;
+    draftActions.hidden = false;
+    draftActions.addEventListener('click', async (event) => {
+      const button = (event.target as Element).closest<HTMLButtonElement>('button');
+      if (!button) return;
+      const clear = button.hasAttribute('data-draft-clear');
+      const payload = new URLSearchParams({ action: clear ? 'clear' : 'save' });
+      if (!clear) for (const [key, value] of new FormData(form)) {
+        if (typeof value === 'string' && !/^(?:guardianNid|bloodGroup|website|submissionKey|.*SignName|.*Agree)$/.test(key)) payload.set(key, value);
+      }
+      button.disabled = true;
+      try {
+        const response = await fetch('/admission/draft', { method: 'POST', body: payload });
+        if (!response.ok) throw new Error('draft');
+        if (clear) location.assign('/admission/apply');
+        else draftStatus.textContent = 'খসড়া রাখা হয়েছে। পরে এই ব্রাউজার থেকে ভর্তি ফরম খুলুন।';
+      } catch { draftStatus.textContent = 'খসড়ার কাজটি হয়নি। আবার চেষ্টা করুন।'; }
+      finally { button.disabled = false; }
     });
-    form.querySelector('[data-back]')!.addEventListener('click', () => show(1));
+    const steps = [...form.querySelectorAll<HTMLElement>('[data-step]')];
+    const dots = [...form.querySelectorAll<HTMLElement>('[data-dot]')];
+    const show = (n: number, scroll = true) => {
+      steps.forEach((step) => { step.hidden = step.dataset.step !== String(n); });
+      dots.forEach((d) => d.classList.toggle('on', d.dataset.dot === String(n)));
+      if (scroll) form.scrollIntoView({ block: 'start' });
+    };
+    form.classList.add('js');
+    show(/Sign$|^photo/.test(form.dataset.error ?? '') ? 2 : 1, Boolean(form.dataset.error));
+    form.querySelectorAll<HTMLButtonElement>('[data-next], [data-back]').forEach((button) => {
+      button.addEventListener('click', () => {
+        if (button.dataset.back) { show(Number(button.dataset.back)); return; }
+        const active = button.closest<HTMLElement>('[data-step]')!;
+        for (const f of active.querySelectorAll<HTMLInputElement>('input,select,textarea')) {
+          if (!f.checkValidity()) { f.reportValidity(); return; }
+        }
+        const next = Number(button.dataset.next);
+        if (next === 3) {
+          for (const node of form.querySelectorAll<HTMLElement>('[data-review]')) {
+            const field = form.elements.namedItem(node.dataset.review ?? '');
+            node.textContent = field instanceof HTMLInputElement ? field.value : '';
+          }
+          const course = form.elements.namedItem('courseId') as HTMLSelectElement;
+          const desired = form.elements.namedItem('desiredClass') as HTMLInputElement;
+          form.querySelector<HTMLElement>('[data-review="department"]')!.textContent = `${course.selectedOptions[0]?.textContent ?? ''} · ${desired.value}`;
+        }
+        show(next);
+      });
+    });
 
     // Photo: shown at once, and turned into a small WebP before it is sent.
     const input = form.querySelector<HTMLInputElement>('[data-photo]')!;
@@ -181,7 +248,10 @@ const doneNo = done && /^\d{1,6}$/.test(done) ? Number(done) : 0;
   .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
   .code { font-family: ui-monospace, monospace; font-size: var(--text-lg); }
   .row { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
-  .steps { display: none; gap: var(--space-4); margin-bottom: var(--space-5); font: 600 var(--text-sm) / 1.4 var(--font-display); color: var(--color-text-muted); }
+  .steps { display: none; flex-wrap: wrap; gap: var(--space-4); margin-bottom: var(--space-5); font: 600 var(--text-sm) / 1.4 var(--font-display); color: var(--color-text-muted); }
+  .review { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: var(--space-3); }
+  .review dd { margin-left: 0; font-weight: 700; overflow-wrap: anywhere; }
+  form:not(.js) [data-summary] { display: none; }
   .js .steps { display: flex; }
   .steps .on { color: var(--green-800); border-bottom: 2px solid var(--gold-500); }
   [data-step][hidden] { display: none; }

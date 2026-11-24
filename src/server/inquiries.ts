@@ -61,3 +61,8 @@ export async function updateInquiry(db: D1Database, actor: string, id: string, s
 export async function newInquiryCount(db: D1Database): Promise<number> {
   return (await db.prepare("SELECT count(*) AS n FROM admission_inquiries WHERE status = 'new'").first<{ n: number }>())?.n ?? 0;
 }
+
+export async function getInquiry(db: D1Database, id: string) {
+  return db.prepare(`SELECT id, student_name AS studentName, phone, status, staff_note AS staffNote
+    FROM admission_inquiries WHERE id = ?`).bind(id).first<Pick<Inquiry, 'id' | 'studentName' | 'phone' | 'status' | 'staffNote'>>();
+}

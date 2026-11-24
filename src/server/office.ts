@@ -171,21 +171,22 @@ export async function listBatches(db: D1Database, opts: { activeOnly?: boolean; 
 export const getBatch = (db: D1Database, id: string) => db.prepare(`${BATCH_SELECT} WHERE b.id = ?`).bind(id).first<Batch>();
 
 /** A teacher or room cannot cover overlapping weekly classes. */
-export async function conflictingBatch(db: D1Database, id: string | null, v: BatchInput): Promise<string | null> {
+export async function conflictingBatch(db: D1Database, id: string | null, v: BatchInput, onlyTeacher = false): Promise<string | null> {
   const days = parseDays(v.days);
   if (v.status !== 'active' || !days.length || !v.startTime || !v.endTime) return null;
   const { results } = await db.prepare(`SELECT b.name, b.days FROM offline_batches b
     WHERE b.id <> ?1 AND b.status = 'active' AND b.start_time <> '' AND b.end_time <> ''
     AND b.start_time < ?3 AND b.end_time > ?2 AND (
-      (?4 <> '' AND (b.teacher_id = ?4 OR EXISTS(SELECT 1 FROM batch_teachers bt WHERE bt.batch_id = b.id AND bt.teacher_id = ?4)))
-      OR (?5 <> '' AND lower(trim(b.room)) = lower(trim(?5))))`)
-    .bind(id ?? '', v.startTime, v.endTime, v.teacherId ?? '', v.room).all<{ name: string; days: string }>();
+      EXISTS (SELECT 1 FROM teachers t WHERE (t.id = ?4 OR (?6 = 0 AND EXISTS
+        (SELECT 1 FROM batch_teachers mine WHERE mine.batch_id = ?1 AND mine.teacher_id = t.id))) AND ${teaches('t.id')})
+      OR (?6 = 0 AND ?5 <> '' AND lower(trim(b.room)) = lower(trim(?5))))`)
+    .bind(id ?? '', v.startTime, v.endTime, v.teacherId ?? '', v.room, Number(onlyTeacher)).all<{ name: string; days: string }>();
   return results.find((b) => parseDays(b.days).some((d) => days.includes(d)))?.name ?? null;
 }
 
 export async function saveBatch(db: D1Database, actor: string, id: string | null, v: BatchInput): Promise<string | null> {
   const ok = await db.prepare('SELECT 1 AS ok FROM offline_courses WHERE id = ?').bind(v.courseId).first();
-  if (!ok) return null;
+  if (!ok || await conflictingBatch(db, id, v)) return null;
   if (v.teacherId && !(await db.prepare('SELECT 1 AS ok FROM teachers WHERE id = ?').bind(v.teacherId).first())) return null;
   if (id) {
     // A batch with students cannot move to another course; their fees belong to this one.
@@ -327,6 +328,7 @@ export async function studentAttendance(db: D1Database, studentId: string, limit
 
 export type Expense = {
   id: string;
+  studentId: string | null;
   spentOn: string;
   category: string;
   amountMinor: number;
@@ -431,7 +433,7 @@ export async function voidExpense(db: D1Database, actor: string, id: string, rea
   return true;
 }
 
-const EXPENSE_SELECT = `SELECT x.id, x.spent_on AS spentOn, x.category, x.amount_minor AS amountMinor, x.description, x.method, x.voucher_key AS voucherKey,
+const EXPENSE_SELECT = `SELECT x.id, x.student_id AS studentId, x.spent_on AS spentOn, x.category, x.amount_minor AS amountMinor, x.description, x.method, x.voucher_key AS voucherKey,
   x.recorded_by AS recordedBy, x.voided_at AS voidedAt, x.voided_by AS voidedBy, x.void_reason AS voidReason, x.status, x.decided_by AS decidedBy,
   x.voucher_no AS voucherNo, x.project_id AS projectId, p.name AS projectName, x.fund_id AS fundId, f.name AS fundName, x.party, x.checked_by AS checkedBy,
   x.created_at AS createdAt FROM expenses x LEFT JOIN acc_projects p ON p.id = x.project_id LEFT JOIN acc_funds f ON f.id = x.fund_id`;

@@ -4,7 +4,7 @@ import Admin from '../../../../layouts/Admin.astro';
 import Icon from '../../../../components/Icon.astro';
 import MarkSheet from '../../../../components/MarkSheet.astro';
 import { localsMayDo } from '../../../../server/staff';
-import { addExamCandidate, configureAssessment, correctPublishedMark, examAssessment, examMarks, examRosterCandidates, markInputsFromForm, publishAssessment, saveExamMarks } from '../../../../server/assessment';
+import { addExamCandidate, assignExamAssessor, configureAssessment, correctPublishedMark, examAssessment, examAssessorChoices, examMarks, examRosterCandidates, markInputsFromForm, publishAssessment, reviewAssessment, saveExamMarks, submitAssessment } from '../../../../server/assessment';
 import { bnDigits } from '../../../../lib/format';
 import { dayBn, todayDhaka } from '../../../../lib/offline';
 
@@ -28,8 +28,14 @@ if (Astro.request.method === 'POST') {
     result = await correctPublishedMark(env.DB, actor, id, { enrollmentId: String(form.get('enrollmentId') ?? ''), obtained: form.get('obtained'), absent: form.get('absent') === 'on', comment: form.get('comment') }, String(form.get('reason') ?? ''));
   } else if (action === 'marks' && edit) {
     result = await saveExamMarks(env.DB, actor, id, markInputsFromForm(form));
+  } else if (action === 'assessor' && full) {
+    result = await assignExamAssessor(env.DB, actor, id, String(form.get('teacherId') ?? ''));
+  } else if (action === 'submit' && edit) {
+    result = await submitAssessment(env.DB, actor, id);
+  } else if ((action === 'review' || action === 'return') && full) {
+    result = await reviewAssessment(env.DB, actor, id, action === 'review', form.get('reviewNote'));
   } else if (action === 'publish' && full) {
-    result = form.get('confirm') === 'yes' ? await publishAssessment(env.DB, actor, id) : { ok: false, error: 'confirm' };
+    result = form.get('confirm') === 'yes' ? await publishAssessment(env.DB, actor, id, true) : { ok: false, error: 'confirm' };
   }
   return Astro.redirect(`${here}?${result.ok ? 'saved=1' : `error=${encodeURIComponent(result.error ?? 'invalid')}`}`, 303);
 }
@@ -37,10 +43,12 @@ if (Astro.request.method === 'POST') {
 const exam = await examAssessment(env.DB, id);
 if (!exam) return new Response('পরীক্ষাটি পাওয়া যায়নি।', { status: 404 });
 const rows = exam.status || exam.rosterFrozen ? await examMarks(env.DB, id) : [];
-const candidates = full && exam.rosterFrozen && exam.examStatus === 'scheduled' && exam.status !== 'published' && exam.examDate >= todayDhaka()
+const candidates = full && exam.rosterFrozen && exam.examStatus === 'scheduled' && exam.status !== 'published' && !exam.submittedAt && exam.examDate >= todayDhaka()
   ? await examRosterCandidates(env.DB, exam) : [];
+const choices = full && !exam.submittedAt && exam.status !== 'published' ? await examAssessorChoices(env.DB, id) : [];
 const ready = exam.status === 'draft' && exam.examStatus === 'scheduled' && exam.examinees > 0 && exam.completed === exam.examinees;
 const ERRORS: Record<string, string> = {
+  assessor: 'এই পরীক্ষার জন্য চালু ব্যাচের একজন শিক্ষক বাছুন।',
   reason: 'সংশোধনের কারণ লিখুন।', no_change: 'আগের ফলের সাথে কোনো পরিবর্তন নেই।', not_eligible: 'ছাত্রটি এই পরীক্ষার জন্য যোগ করা যাচ্ছে না।',
   marks: 'নম্বর পূর্ণমানের মধ্যে লিখুন। কিছুই সংরক্ষণ হয়নি, ঠিক করে আবার সংরক্ষণ করুন।',
   confirm: 'নিশ্চিত করার ঘরে টিক দিন।',
@@ -80,6 +88,17 @@ const err = Astro.url.searchParams.get('error');
       <button class="button">পরীক্ষার্থী যোগ করুন</button>
     </form>
   </details>}
+  {choices.length > 0 && exam.examStatus === 'scheduled' && <section class="card block">
+    <div class="card__head"><h2>নম্বর দেওয়ার দায়িত্ব</h2></div>
+    <form method="post" class="form-grid">
+      <input type="hidden" name="action" value="assessor" />
+      <label class="field"><span>দায়িত্বপ্রাপ্ত শিক্ষক</span><select name="teacherId">
+        <option value="">বিষয় মিলে এমন শিক্ষক</option>
+        {choices.map((t) => <option value={t.id} selected={t.id === exam.assessorId}>{t.name}{t.subject && ` · ${t.subject}`}</option>)}
+      </select></label>
+      <button class="button button--ghost">দায়িত্ব সংরক্ষণ</button>
+    </form>
+  </section>}
   {!exam.status && exam.examStatus === 'scheduled' && (
     <section class="card block">
       <h2>গ্রেডবুক তৈরি করুন</h2>
@@ -101,11 +120,23 @@ const err = Astro.url.searchParams.get('error');
 
   {exam.status && (
     <>
-      <MarkSheet exam={exam} rows={rows} editable={edit && exam.status === 'draft' && exam.examStatus === 'scheduled'} />
+      <MarkSheet exam={exam} rows={rows} editable={edit && exam.status === 'draft' && exam.examStatus === 'scheduled' && !exam.submittedAt} />
       {exam.status === 'draft' && !ready && exam.examStatus === 'scheduled' && (
         <p class="note">সব {bnDigits(exam.examinees)} জনের নম্বর বা অনুপস্থিতি দেওয়া হলে ফল প্রকাশ করা যাবে। বাকি {bnDigits(exam.examinees - exam.completed)} জন।</p>
       )}
-      {ready && full && (
+      {ready && edit && !exam.submittedAt && <form method="post" class="card block">
+        <input type="hidden" name="action" value="submit" />
+        <button class="button">পর্যালোচনার জন্য পাঠান</button>
+      </form>}
+      {ready && exam.submittedAt && <p class="note">{exam.reviewedAt ? `নম্বর যাচাই করেছেন ${exam.reviewedBy}` : `পর্যালোচনায় পাঠিয়েছেন ${exam.submittedBy}`}{exam.reviewNote && ` · ${exam.reviewNote}`}</p>}
+      {ready && full && exam.submittedAt && <form method="post" class="card block form-grid">
+        <label class="field wide"><span>পর্যালোচনার নোট</span><input name="reviewNote" maxlength="300" /></label>
+        <div class="actions">
+          {!exam.reviewedAt && <button class="button" name="action" value="review">নম্বর যাচাই সম্পন্ন</button>}
+          <button class="button button--ghost" name="action" value="return">সংশোধনের জন্য ফেরত দিন</button>
+        </div>
+      </form>}
+      {ready && full && exam.reviewedAt && (
         <form method="post" class="card block publish" data-confirm="যাচাই করা ফল প্রকাশ করবেন? প্রকাশিত ফল সংশোধনে কারণ লিখতে হবে।">
           <input type="hidden" name="action" value="publish" />
           <h2>ফল প্রকাশ</h2>

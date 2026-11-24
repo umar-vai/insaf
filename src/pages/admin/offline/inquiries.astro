@@ -36,7 +36,7 @@ const PILL: Record<InquiryStatus, string> = { new: 'pending', contacted: 'info',
       {list.map((q) => {
         const wa = waNumber(q.phone);
         return (
-          <article class="card">
+          <article class="card" id={q.id}>
             <div class="card__head"><h2>{q.studentName}</h2><span class={`pill pill--${PILL[q.status]}`}>{INQUIRY_STATUS_BN[q.status]}</span></div>
             <p>
               {q.guardianName && <>অভিভাবক: {q.guardianName}<br /></>}
@@ -52,7 +52,7 @@ const PILL: Record<InquiryStatus, string> = { new: 'pending', contacted: 'info',
               </label>
               <label class="field wide"><span>অফিসের নোট</span><textarea name="note" rows="2" maxlength="1000">{q.staffNote}</textarea></label>
               <button class="button button--sm">সংরক্ষণ</button>
-              {q.status !== 'admitted' && <a class="button button--sm button--ghost" href="/admin/offline/students?new=1">নতুন ছাত্র যোগ করুন</a>}
+              {['new', 'contacted'].includes(q.status) && <a class="button button--sm button--ghost" href={`/admin/offline/students?new=1&inquiry=${encodeURIComponent(q.id)}#new`}>এই আবেদন থেকে ভর্তি করুন</a>}
             </form>
             {q.handledBy && <small class="muted">শেষ বদল: {q.handledBy}</small>}
           </article>
