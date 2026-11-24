@@ -143,7 +143,8 @@ export async function createExam(db: D1Database, actor: string, v: ExamInput): P
       .bind(v.batchId, v.examDate, id, actor),
     db.prepare(`INSERT INTO offline_charges (id, enrollment_id, kind, label, amount_minor, due_date, source_key, created_by)
       SELECT 'chg_' || lower(hex(randomblob(8))), e.enrollment_id, 'exam', ?, ?, ?, ?, ?
-      FROM assessment_examinees e WHERE e.exam_id = ? AND ? > 0`)
+      FROM assessment_examinees e WHERE e.exam_id = ? AND ? > 0
+      AND NOT EXISTS (SELECT 1 FROM enrollment_assistance a WHERE a.enrollment_id = e.enrollment_id AND a.kind = 'zakat' AND a.revoked_at IS NULL)`)
       .bind(`পরীক্ষার ফি: ${v.title}`, v.feeTaka * 100, v.examDate, `exam:${id}`, actor, id, v.feeTaka),
   ];
   const [, roster, fees] = await db.batch(statements);

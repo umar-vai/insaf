@@ -1,0 +1,89 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import AccountsNav from '../../../../components/admin/AccountsNav.astro';
+import { taka, bnDigits } from '../../../../lib/format';
+import { dayBn, todayDhaka } from '../../../../lib/offline';
+import { listAccounts } from '../../../../server/accounts';
+import { matchBankStatement, parseBankStatement, saveBankStatement, statementLineKey } from '../../../../server/bank-statement';
+import { localsMayDo } from '../../../../server/staff';
+
+const here = '/admin/offline/accounts/bank-import';
+const accountOptions = (await listAccounts(env.DB)).filter((a) => a.kind === 'bank' || a.kind === 'mobile');
+const canEdit = localsMayDo(Astro.locals, 'accounts', 'edit');
+let account = Astro.url.searchParams.get('account') ?? '';
+let raw = '';
+let error = '';
+let preview: Extract<Awaited<ReturnType<typeof matchBankStatement>>, { ok: true }>['value'] = [];
+if (Astro.request.method === 'POST') {
+  if (!canEdit) return new Response('Accounts edit access required', { status: 403 });
+  const form = await Astro.request.formData();
+  account = String(form.get('accountId') ?? '').slice(0, 40);
+  raw = String(form.get('csv') ?? '').slice(0, 16_001);
+  const upload = form.get('file');
+  if (upload instanceof File && upload.size) {
+    if (upload.size > 32_000) error = 'size';
+    else raw = await upload.text();
+  }
+  const parsed = parseBankStatement(raw, todayDhaka());
+  if (!error && !parsed.ok) error = parsed.error;
+  if (!error && parsed.ok) {
+    if (form.get('action') === 'save') {
+      const result = await saveBankStatement(env.DB, Astro.locals.staff!, account, parsed.value, form.getAll('line').map(String));
+      if (result.ok) return Astro.redirect(`${here}?${new URLSearchParams({ account, saved: String(result.value) })}`, 303);
+      error = result.error;
+    }
+    const match = await matchBankStatement(env.DB, account, parsed.value);
+    if (match.ok) preview = match.value;
+    else error ||= match.error;
+  }
+}
+const errors: Record<string, string> = {
+  account: 'ব্যাংক বা মোবাইল ব্যাংকিং হিসাব বাছুন।',
+  header: 'CSV এর প্রথম লাইনে date,reference,credit,debit ঠিক এই ক্রমে দিন।',
+  row: 'তারিখ, রেফারেন্স এবং জমা বা উত্তোলনের অঙ্ক যাচাই করুন। একটি লাইনে যেকোনো একটি অঙ্ক দিন।',
+  size: 'একবারে ১ থেকে ১০০টি লাইন দিন।',
+  range: 'একবারে সর্বোচ্চ ৯৩ দিনের স্টেটমেন্ট দিন।',
+  changed: 'বাছাই করা লাইনগুলোর মিল বদলেছে। নিচে বর্তমান মিল দেখে আবার বাছুন।',
+};
+const stateBn = { match: 'মিলেছে', duplicate: 'একই ভাউচার একাধিক লাইনে', missing: 'মেলেনি', ambiguous: 'একাধিক সম্ভাব্য ভাউচার', cleared: 'আগেই মেলানো' };
+const saved = Astro.url.searchParams.get('saved');
+---
+<Admin title="ব্যাংক স্টেটমেন্ট মিলান">
+  <header class="page-head"><div>
+    <p class="eyebrow"><a href="/admin/offline/accounts/reconcile">ব্যাংক ও ক্যাশ মেলানো</a></p>
+    <h1>ব্যাংক স্টেটমেন্ট মিলান</h1>
+    <p>CSV দিন, খাতার সঙ্গে মিল দেখুন, তারপর মিলেছে এমন লাইনগুলো অনুমোদন করুন।</p>
+  </div></header>
+  <AccountsNav />
+  {saved !== null && /^\d{1,3}$/.test(saved) && <p class="note note--good" role="status">{bnDigits(saved)}টি লাইন মেলানো হিসেবে সংরক্ষণ হয়েছে। <a href={`/admin/offline/accounts/reconcile?account=${encodeURIComponent(account)}#lines`}>হিসাব দেখুন</a></p>}
+  {error && <p class="note note--bad" role="alert">{errors[error] ?? 'কাজটি সম্পন্ন করা যায়নি।'}</p>}
+  {canEdit && <section class="card">
+    <form method="post" enctype="multipart/form-data" class="form-grid">
+      <label class="field"><span>ব্যাংক বা মোবাইল ব্যাংকিং হিসাব</span><select name="accountId" required><option value="">বাছুন</option>
+        {accountOptions.map((a) => <option value={a.id} selected={a.id === account}>{a.name}</option>)}
+      </select></label>
+      <label class="field"><span>CSV ফাইল</span><input name="file" type="file" accept=".csv,text/csv" /></label>
+      <label class="field wide"><span>অথবা CSV লেখা পেস্ট করুন</span><textarea name="csv" rows="5" maxlength="16000" placeholder={'date,reference,credit,debit\n2026-11-24,REF123,1200.00,'}>{raw.length <= 16_000 ? raw : ''}</textarea></label>
+      <p class="wide muted">তারিখের ফরম্যাট YYYY-MM-DD। টাকার অঙ্কে কমা বাদ দিন। হিসাব, রেফারেন্স, অঙ্ক ও দিক হুবহু মিললে এবং খাতায় তারিখ সর্বোচ্চ ১৫ দিন আগের হলে প্রস্তাব দেখা যাবে।</p>
+      <button class="button">মিলের প্রিভিউ দেখুন</button>
+    </form>
+  </section>}
+  {preview.length > 0 && <section class="card bank-preview" id="preview">
+    <div class="card__head"><h2>স্টেটমেন্টের প্রিভিউ</h2></div>
+    <form method="post">
+      <input type="hidden" name="action" value="save" /><input type="hidden" name="accountId" value={account} /><input type="hidden" name="csv" value={raw} />
+      <ul class="list">
+        {preview.map((line) => <li>
+          <div><strong>{line.reference}</strong> · {dayBn(line.day)}<small>{line.amountMinor > 0 ? 'জমা' : 'উত্তোলন'} {taka(Math.abs(line.amountMinor))}</small></div>
+          <div>{line.txn && <a href={line.txn.link}>{line.txn.ref}</a>}<small>{stateBn[line.state]}</small></div>
+          {line.state === 'match' && <label class="check"><input name="line" type="checkbox" value={statementLineKey(line)} /> অনুমোদন</label>}
+        </li>)}
+      </ul>
+      {preview.some((line) => line.state === 'match') && <button class="button">বাছাই করা মিল সংরক্ষণ করুন</button>}
+    </form>
+  </section>}
+</Admin>
+<style>
+  .bank-preview { margin-top: var(--space-5); }
+</style>

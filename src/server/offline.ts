@@ -218,9 +218,13 @@ export type EnrollmentWithLedger = EnrollmentRow & { ledger: Ledger };
 
 const ENROLL_CHARGES = `(SELECT json_group_array(json_object('id', x.id, 'kind', x.kind, 'label', x.label, 'amountMinor', x.amount_minor, 'dueDate', x.due_date))
   FROM (SELECT * FROM offline_charges WHERE enrollment_id = e.id AND voided_at IS NULL ORDER BY id) x)`;
+const paymentAllocations = (alias: string) => `(SELECT json_group_array(json_object('key', a.allocation_key, 'label', a.label, 'amountMinor', a.amount_minor))
+  FROM offline_payment_allocations a WHERE a.payment_id = ${alias}.id)`;
 const allocationSums = (receiptLimit = '') => `(SELECT json_group_array(json_object('key', allocation_key, 'amountMinor', amount)) FROM
-  (SELECT p.allocation_key, sum(p.amount_minor) AS amount FROM offline_payments p
-   WHERE p.enrollment_id = e.id AND p.voided_at IS NULL AND p.allocation_key <> '' ${receiptLimit} GROUP BY p.allocation_key ORDER BY p.allocation_key))`;
+  (SELECT coalesce(a.allocation_key, p.allocation_key) AS allocation_key, sum(coalesce(a.amount_minor, p.amount_minor)) AS amount
+   FROM offline_payments p LEFT JOIN offline_payment_allocations a ON a.payment_id = p.id
+   WHERE p.enrollment_id = e.id AND p.voided_at IS NULL AND (a.payment_id IS NOT NULL OR p.allocation_key <> '') ${receiptLimit}
+   GROUP BY 1 ORDER BY 1))`;
 
 const ENROLL_SELECT = `SELECT e.id, e.student_id AS studentId, s.name AS studentName, s.phone AS studentPhone, s.student_no AS studentNo, e.course_id AS courseId,
   c.title AS courseTitle, coalesce(b.name, e.batch) AS batch, e.batch_id AS batchId, e.roll, e.start_date AS startDate, e.fee_minor AS feeMinor, e.admission_fee_minor AS admissionFeeMinor,
@@ -318,7 +322,8 @@ export async function updateEnrollment(db: D1Database, actor: string, id: string
   const discount = Math.min(v.discountTaka * 100, before.fee + before.admission);
   const financialChange = before.plan !== v.planMonths || before.discount !== discount || before.startDate !== v.startDate;
   const changed = await db.prepare(`UPDATE offline_enrollments SET status = ?1, plan_months = ?2, discount_minor = ?3, batch_id = ?4, roll = ?5, start_date = ?6, note = ?7
-    WHERE id = ?8 AND (?9 = 0 OR NOT EXISTS(SELECT 1 FROM offline_payments WHERE enrollment_id = ?8 AND voided_at IS NULL AND (allocation_key = 'admission' OR allocation_key LIKE 'fee:%')))`)
+    WHERE id = ?8 AND (?3 = discount_minor OR NOT EXISTS (SELECT 1 FROM enrollment_assistance a WHERE a.enrollment_id = ?8 AND a.revoked_at IS NULL))
+      AND (?9 = 0 OR NOT EXISTS(SELECT 1 FROM offline_payments WHERE enrollment_id = ?8 AND voided_at IS NULL AND (allocation_key = 'admission' OR allocation_key LIKE 'fee:%' OR EXISTS (SELECT 1 FROM offline_payment_allocations a WHERE a.payment_id = offline_payments.id AND (a.allocation_key = 'admission' OR a.allocation_key LIKE 'fee:%')))))`)
     .bind(v.status, v.planMonths, discount, v.batchId, v.roll, v.startDate, v.note, id, Number(financialChange)).run();
   if (!changed.meta.changes) return false;
   await log(db, actor, 'offline.enrollment.update', `offline_student:${before.studentId}`, {
@@ -335,6 +340,7 @@ export type OfflinePayment = {
   id: string;
   receiptNo: number;
   allocationLabel: string;
+  allocationsJson: string;
   enrollmentId: string;
   amountMinor: number;
   paidOn: string;
@@ -350,9 +356,12 @@ export type OfflinePayment = {
 
 const PAYMENT_SELECT = `SELECT p.id, p.receipt_no AS receiptNo, p.enrollment_id AS enrollmentId, p.amount_minor AS amountMinor, p.paid_on AS paidOn,
   p.method, p.reference, p.note, p.allocation_label AS allocationLabel, p.recorded_by AS recordedBy, p.voided_at AS voidedAt, p.voided_by AS voidedBy, p.void_reason AS voidReason,
-  p.created_at AS createdAt FROM offline_payments p`;
+  p.created_at AS createdAt, ${paymentAllocations('p')} AS allocationsJson FROM offline_payments p`;
 
-type PaymentInput = { amountTaka: number; paidOn: string; method: PayMethod; reference: string; note: string; nonce: string | null; allocationKey?: string };
+type PaymentInput = { amountTaka: number; paidOn: string; method: PayMethod; reference: string; note: string; nonce: string | null; allocationKey?: string; allocations?: PaymentAllocation[] };
+type ReceiptAllocation = PaymentAllocation & { label: string };
+const validAllocationKey = (key: string) => /^(admission|fee:[1-9][0-9]{0,2}|charge:[a-zA-Z0-9_-]{1,48})$/.test(key);
+export const receiptAllocations = (p: OfflinePayment): ReceiptAllocation[] => JSON.parse(p.allocationsJson ?? '[]');
 
 export function parsePaymentForm(form: FormData, today: string): Result<PaymentInput> {
   const amount = parseTaka(form.get('amount'));
@@ -362,11 +371,25 @@ export function parsePaymentForm(form: FormData, today: string): Result<PaymentI
   const method = text(form, 'method') as PayMethod;
   if (!(PAY_METHODS as readonly string[]).includes(method)) return { ok: false, error: 'method' };
   const nonce = text(form, 'nonce', 40);
-  const allocationKey = text(form, 'allocationKey', 64);
-  if (allocationKey && !/^(admission|fee:[1-9][0-9]{0,2}|charge:[a-zA-Z0-9_-]{1,48})$/.test(allocationKey)) return { ok: false, error: 'allocation' };
+  const mode = text(form, 'allocationKey', 64);
+  const allocationKey = mode === 'split' ? '' : mode;
+  if (allocationKey && !validAllocationKey(allocationKey)) return { ok: false, error: 'allocation' };
+  const allocations: PaymentAllocation[] = [];
+  if (mode === 'split') {
+    for (const [name, raw] of form) {
+      if (!name.startsWith('split:') || String(raw).trim() === '') continue;
+      const key = name.slice(6);
+      const part = parseTaka(raw);
+      if (!validAllocationKey(key) || part === null || part < 1 || allocations.some((a) => a.key === key)) return { ok: false, error: 'allocation' };
+      allocations.push({ key, amountMinor: part * 100 });
+    }
+    if (allocations.length < 2 || allocations.length > 30 || allocations.reduce((sum, a) => sum + a.amountMinor, 0) !== amount * 100) {
+      return { ok: false, error: 'allocation' };
+    }
+  }
   return {
     ok: true,
-    value: { amountTaka: amount, paidOn, method, allocationKey, reference: text(form, 'reference', 80), note: longText(form, 'note', 500), nonce: /^[0-9a-f-]{36}$/.test(nonce) ? nonce : null },
+    value: { amountTaka: amount, paidOn, method, allocationKey, allocations, reference: text(form, 'reference', 80), note: longText(form, 'note', 500), nonce: /^[0-9a-f-]{36}$/.test(nonce) ? nonce : null },
   };
 }
 
@@ -392,6 +415,17 @@ export async function recordPayment(
   if (v.amountTaka * 100 > ledger.dueMinor) return { ok: false, error: 'too_much' };
   const item = v.allocationKey ? ledger.installments.find((i) => i.key === v.allocationKey) : undefined;
   if (v.allocationKey && (!item || v.amountTaka * 100 > item.amountMinor - item.paidMinor)) return { ok: false, error: 'allocation' };
+  const allocations = v.allocations ?? [];
+  const split: ReceiptAllocation[] = [];
+  if (allocations.length) {
+    if (v.allocationKey || allocations.length < 2 || allocations.length > 30 || new Set(allocations.map((a) => a.key)).size !== allocations.length ||
+        allocations.reduce((sum, a) => sum + a.amountMinor, 0) !== v.amountTaka * 100) return { ok: false, error: 'allocation' };
+    for (const part of allocations) {
+      const target = ledger.installments.find((i) => i.key === part.key);
+      if (!target || !Number.isSafeInteger(part.amountMinor) || part.amountMinor <= 0 || part.amountMinor > target.amountMinor - target.paidMinor) return { ok: false, error: 'allocation' };
+      split.push({ ...part, label: target.label });
+    }
+  }
   const accountId = methodMap(await listAccounts(db, false)).get(v.method) ?? UNASSIGNED;
   const id = newId('ofp');
   // Two people saving at the same moment could pick the same number; the
@@ -401,7 +435,7 @@ export async function recordPayment(
       // One statement, so the "not more than is due" check and the insert
       // happen together: two people saving at the same moment cannot both
       // pass the check with the same old balance.
-      const r = await db
+      const insert = db
         .prepare(
           `INSERT INTO offline_payments (id, receipt_no, enrollment_id, amount_minor, paid_on, method, reference, note, recorded_by, nonce, allocation_key, allocation_label, posted_account_id, posted_project_id)
            SELECT ?1, (SELECT coalesce(max(receipt_no), 0) + 1 FROM offline_payments), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?16,
@@ -409,17 +443,20 @@ export async function recordPayment(
            WHERE ?3 <= (SELECT max(0, e.fee_minor + e.admission_fee_minor - e.discount_minor) FROM offline_enrollments e WHERE e.id = ?2)
                      + (SELECT coalesce(sum(x.amount_minor), 0) FROM offline_charges x WHERE x.enrollment_id = ?2 AND x.voided_at IS NULL)
                      - (SELECT coalesce(sum(p.amount_minor), 0) FROM offline_payments p WHERE p.enrollment_id = ?2 AND p.voided_at IS NULL)
-           AND (?10 = '' OR EXISTS (SELECT 1 FROM offline_enrollments e WHERE e.id = ?2
+           AND (?17 = 0 OR EXISTS (SELECT 1 FROM offline_enrollments e WHERE e.id = ?2
              AND json_array(e.fee_minor, e.admission_fee_minor, e.discount_minor, e.duration_months, e.plan_months, e.start_date) = ?12
              AND ${ENROLL_CHARGES} = ?13 AND ${allocationSums()} = ?14
              AND (SELECT coalesce(sum(p.amount_minor), 0) FROM offline_payments p WHERE p.enrollment_id = e.id AND p.voided_at IS NULL) = ?15))
            RETURNING receipt_no AS receiptNo`,
         )
         .bind(id, enrollmentId, v.amountTaka * 100, v.paidOn, v.method, v.reference, v.note, actor, v.nonce, item?.key ?? '', item?.label ?? '',
-          JSON.stringify([row.feeMinor, row.admissionFeeMinor, row.discountMinor, row.durationMonths, row.planMonths, row.startDate]), row.chargesJson, row.allocationsJson, row.paidMinor, accountId)
-        .first<{ receiptNo: number }>();
-      if (!r) return { ok: false, error: item ? 'allocation' : 'too_much' };
-      await log(db, actor, 'offline.payment', `offline_student:${row.studentId}`, { paymentId: id, receiptNo: r!.receiptNo, amount: v.amountTaka, method: v.method, allocationKey: item?.key });
+          JSON.stringify([row.feeMinor, row.admissionFeeMinor, row.discountMinor, row.durationMonths, row.planMonths, row.startDate]), row.chargesJson, row.allocationsJson, row.paidMinor, accountId, Number(Boolean(item || split.length)));
+      const parts = db.prepare(`INSERT INTO offline_payment_allocations (payment_id, allocation_key, label, amount_minor)
+        SELECT p.id, json_extract(j.value, '$.key'), json_extract(j.value, '$.label'), json_extract(j.value, '$.amountMinor')
+        FROM offline_payments p CROSS JOIN json_each(?) j WHERE p.id = ?`).bind(JSON.stringify(split), id);
+      const r = split.length ? (await db.batch<{ receiptNo: number }>([insert, parts]))[0]?.results[0] : await insert.first<{ receiptNo: number }>();
+      if (!r) return { ok: false, error: item || split.length ? 'allocation' : 'too_much' };
+      await log(db, actor, 'offline.payment', `offline_student:${row.studentId}`, { paymentId: id, receiptNo: r!.receiptNo, amount: v.amountTaka, method: v.method, allocationKey: item?.key, allocations: split });
       // The digital receipt reaches the student's (and guardian's) portal at once.
       await db
         .prepare(
@@ -583,12 +620,25 @@ export async function monthReport(db: D1Database, month: string) {
     }
     return [...m.values()].sort((a, b) => b.totalMinor - a.totalMinor);
   };
+  const byHead = new Map<string, { label: string; totalMinor: number; count: number }>();
+  for (const payment of valid) {
+    const allocated = receiptAllocations(payment);
+    const portions = allocated.length ? allocated : [{ label: payment.allocationLabel || 'স্বয়ংক্রিয় বরাদ্দ', amountMinor: payment.amountMinor }];
+    const seen = new Set<string>();
+    for (const part of portions) {
+      const head = byHead.get(part.label) ?? { label: part.label, totalMinor: 0, count: 0 };
+      head.totalMinor += part.amountMinor;
+      head.count += seen.has(part.label) ? 0 : 1;
+      byHead.set(part.label, head);
+      seen.add(part.label);
+    }
+  }
   return {
     payments: results,
     totalMinor: valid.reduce((a, r) => a + r.amountMinor, 0),
     byCourse: group((r) => r.courseTitle),
     byMethod: group((r) => r.method),
-    byHead: group((r) => r.allocationLabel || 'স্বয়ংক্রিয় বরাদ্দ'),
+    byHead: [...byHead.values()].sort((a, b) => b.totalMinor - a.totalMinor),
   };
 }
 

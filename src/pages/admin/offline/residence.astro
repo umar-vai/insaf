@@ -1,0 +1,109 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../layouts/Admin.astro';
+import { bnDigits } from '../../../lib/format';
+import { dayBn, studentCode, todayDhaka } from '../../../lib/offline';
+import { getOfflineStudent } from '../../../server/offline';
+import { billResidence, placeResident, releaseResident, residenceView, saveRoom } from '../../../server/residence';
+import { localsMayDo } from '../../../server/staff';
+
+const here = '/admin/offline/residence';
+const today = todayDhaka();
+const actor = Astro.locals.staff!;
+const canEdit = localsMayDo(Astro.locals, 'office', 'edit');
+const canManage = localsMayDo(Astro.locals, 'office', 'full');
+if (Astro.request.method === 'POST') {
+  if (!canEdit) return new Response('Office edit access required', { status: 403 });
+  const form = await Astro.request.formData();
+  const action = form.get('action');
+  if ((action === 'room' || action === 'bill') && !canManage) return new Response('Office full access required', { status: 403 });
+  const result = action === 'room' ? await saveRoom(env.DB, actor, form)
+    : action === 'place' ? await placeResident(env.DB, actor, form, today)
+    : action === 'release' ? await releaseResident(env.DB, actor, String(form.get('stayId') ?? '').slice(0, 40), today)
+    : action === 'bill' ? await billResidence(env.DB, actor, form, today)
+    : { ok: false as const, error: 'action' };
+  const stay = action === 'bill' ? String(form.get('stayId') ?? '').slice(0, 40) : '';
+  const query = new URLSearchParams(result.ok ? { saved: String(action) } : { error: result.error });
+  if (stay) query.set('stay', stay);
+  return Astro.redirect(`${here}?${query}${stay ? '#residence-fee' : ''}`, 303);
+}
+const { rooms, stays } = await residenceView(env.DB);
+const q = Astro.url.searchParams;
+const selected = stays.find((s) => s.id === q.get('stay'));
+const resident = selected && canManage ? await getOfflineStudent(env.DB, selected.studentId, today) : null;
+const enrollments = resident?.enrollments.filter((e) => e.status === 'active') ?? [];
+const errors: Record<string, string> = {
+  room: 'কক্ষের নাম ও ধারণক্ষমতা যাচাই করুন। নাম একবার ব্যবহার করা যায়। ধারণক্ষমতা বর্তমান ছাত্রসংখ্যার চেয়ে কম হতে পারবে না।',
+  stay: 'চালু ভর্তি, ছাত্রের বর্তমান আসন ও কক্ষের খালি আসন যাচাই করুন।',
+  bill: 'মাস, টাকার অঙ্ক, জমার শেষ দিন ও ভর্তি যাচাই করুন। এই মাসে বিল দেওয়া হয়ে থাকলে বা যাকাত স্কলারশিপ চালু থাকলে নতুন বিল হবে না।',
+};
+---
+<Admin title="আবাসিক ছাত্রাবাস">
+  <header class="page-head"><div>
+    <p class="eyebrow">ছাত্র ও ফি</p><h1>আবাসিক ছাত্রাবাস</h1>
+    <p>কক্ষ ও খালি আসন দেখুন, ছাত্রকে কক্ষে তুলুন, কক্ষ ছাড়ার তারিখ রাখুন এবং প্রযোজ্য মাসের ফি দিন।</p>
+  </div></header>
+  {q.has('saved') && <p class="note note--good" role="status">সংরক্ষণ হয়েছে। {q.get('saved') === 'bill' && selected && <a href={`/admin/offline/students/${selected.studentId}#fees`}>ছাত্রের ফি দেখুন</a>}</p>}
+  {q.has('error') && <p class="note note--bad" role="alert">{errors[q.get('error')!] ?? 'কাজটি সম্পন্ন করা যায়নি।'}</p>}
+  <div class="cols">
+    <section class="card">
+      <div class="card__head"><h2>কক্ষ ও আসন</h2></div>
+      {rooms.length === 0 && <p class="muted">এখনো কক্ষ যোগ করা হয়নি।</p>}
+      <ul class="list">{rooms.map((r) => <li>
+        <span><strong>{r.name}</strong><small>{bnDigits(r.capacity - r.occupied)} আসন খালি · মোট {bnDigits(r.capacity)}</small></span>
+        {canManage && <details><summary>সম্পাদনা</summary><form method="post" class="form-grid">
+          <input type="hidden" name="action" value="room" /><input type="hidden" name="roomId" value={r.id} />
+          <label class="field"><span>নাম</span><input name="name" value={r.name} maxlength="80" required /></label>
+          <label class="field"><span>আসন</span><input name="capacity" type="number" min={Math.max(1, r.occupied)} max="200" value={r.capacity} required /></label>
+          <button class="button button--sm">সংরক্ষণ</button>
+        </form></details>}
+      </li>)}</ul>
+      {canManage && <details><summary>নতুন কক্ষ যোগ করুন</summary><form method="post" class="form-grid">
+        <input type="hidden" name="action" value="room" />
+        <label class="field"><span>কক্ষের নাম</span><input name="name" minlength="2" maxlength="80" required /></label>
+        <label class="field"><span>আসন সংখ্যা</span><input name="capacity" type="number" min="1" max="200" required /></label>
+        <button class="button">কক্ষ যোগ করুন</button>
+      </form></details>}
+    </section>
+    <section class="card">
+      <div class="card__head"><h2>ছাত্রের আসন বরাদ্দ</h2></div>
+      {canEdit && rooms.some((r) => r.capacity > r.occupied) ? (
+        <form method="post" class="form-grid">
+          <input type="hidden" name="action" value="place" />
+          <label class="field"><span>ছাত্র আইডি</span><input name="studentNo" value={q.get('student') ?? ''} placeholder="MI-0012" maxlength="24" required /></label>
+          <label class="field"><span>কক্ষ</span><select name="roomId" required><option value="">বাছুন</option>
+            {rooms.filter((r) => r.capacity > r.occupied).map((r) => <option value={r.id}>{r.name} · {bnDigits(r.capacity - r.occupied)} খালি</option>)}
+          </select></label>
+          <button class="button">আসন দিন</button>
+        </form>
+      ) : <p class="muted">{canEdit ? 'আসন দিতে খালি কক্ষ প্রয়োজন।' : 'আসন দিতে অফিস সম্পাদনার অনুমতি প্রয়োজন।'}</p>}
+    </section>
+  </div>
+  {selected && resident && <section class="card gap" id="residence-fee">
+    <div class="card__head"><h2>{selected.name} · আবাসিক ফি</h2></div>
+    {enrollments.length ? <form method="post" class="form-grid">
+      <input type="hidden" name="action" value="bill" /><input type="hidden" name="stayId" value={selected.id} />
+      <label class="field"><span>যে ভর্তির খাতায় বিল যাবে</span><select name="enrollmentId" required>{enrollments.map((e) => <option value={e.id}>{e.courseTitle} · {e.batch}</option>)}</select></label>
+      <label class="field"><span>আবাসনের মাস</span><input type="month" name="period" value={today.slice(0, 7)} required /></label>
+      <label class="field"><span>টাকা</span><input name="amount" inputmode="numeric" required /></label>
+      <label class="field"><span>জমার শেষ দিন</span><input type="date" name="dueDate" min={today} value={today} required /></label>
+      <label class="check wide"><input type="checkbox" name="confirm" value="yes" required /> মাস ও অঙ্ক মিলিয়েছি। ছাত্রের ফি খাতায় যোগ করুন।</label>
+      <button class="button">আবাসিক বিল দিন</button>
+    </form> : <p class="muted">বিল দিতে চালু ভর্তি প্রয়োজন।</p>}
+  </section>}
+  <section class="card gap">
+    <div class="card__head"><h2>বর্তমান ছাত্র ও সাম্প্রতিক ইতিহাস</h2></div>
+    {!stays.length && <p class="muted">এখনো কোনো আসন বরাদ্দ নেই।</p>}
+    <ul class="list">{stays.map((s) => <li>
+      <div><a href={`/admin/offline/students/${s.studentId}`}>{s.name}</a> · {studentCode(s.studentNo)}<small>{s.roomName} · {dayBn(s.startsOn)}{s.endsOn ? ` থেকে ${dayBn(s.endsOn)}` : ' থেকে আছেন'}</small></div>
+      <div class="actions">
+        {canManage && <a class="button button--sm button--ghost" href={`?stay=${s.id}#residence-fee`}>ফি দিন</a>}
+        {canEdit && !s.endsOn && <form method="post" data-confirm="আজকের তারিখে এই ছাত্রের আসন খালি করবেন?">
+          <input type="hidden" name="action" value="release" /><input type="hidden" name="stayId" value={s.id} />
+          <button class="button button--sm button--ghost">আসন ছাড়ুন</button>
+        </form>}
+      </div>
+    </li>)}</ul>
+  </section>
+</Admin>
+<style>.gap { margin-top: var(--space-5); }</style>

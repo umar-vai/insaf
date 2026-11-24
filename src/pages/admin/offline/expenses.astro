@@ -145,7 +145,7 @@ const top = r.byCategory[0]?.totalMinor ?? 1;
       <label class="field"><span>তারিখ</span><input name="spentOn" type="date" required value={today} min={closedDay ? nextDay(closedDay) : undefined} max={today} /></label>
       <label class="field"><span>কীভাবে দেওয়া হয়েছে</span><select name="method">{PAY_METHODS.map((m) => <option value={m}>{METHOD_BN[m]}</option>)}</select></label>
       <label class="field"><span>যাঁকে দেওয়া হয়েছে</span><input name="party" maxlength="120" placeholder="দোকান, ব্যক্তি বা প্রতিষ্ঠান" /></label>
-      <label class="field"><span>তহবিল</span><select name="fundId">{funds.map((f) => <option value={f.id} selected={f.id === GENERAL_FUND}>{f.name}</option>)}</select></label>
+      <label class="field"><span>তহবিল</span><select name="fundId">{funds.map((f) => <option value={f.id} selected={f.id === (funds.some((x) => x.id === Astro.url.searchParams.get('fund')) ? Astro.url.searchParams.get('fund') : GENERAL_FUND)}>{f.name}</option>)}</select></label>
       <label class="field"><span>প্রকল্প (ঐচ্ছিক)</span><select name="projectId"><option value="">কোনোটি নয়</option>{projects.map((p) => <option value={p.id}>{p.name}</option>)}</select></label>
       <label class="field wide"><span>বিবরণ (ঐচ্ছিক)</span><input name="description" maxlength="500" placeholder="কী বাবদ" /></label>
       {!isOwner && (s.expenseApprovalOver > 0 || s.expenseOwnerOver > 0) && <p class="wide muted"><small>{!owner && s.expenseApprovalOver > 0 && `${taka(s.expenseApprovalOver * 100)} এর বেশি খরচ হিসাবরক্ষক অনুমোদন দিলে তবেই হিসাবে ধরা হবে। `}{s.expenseOwnerOver > 0 && `${taka(s.expenseOwnerOver * 100)} এর বেশি হলে মালিকের চূড়ান্ত অনুমোদনও লাগবে।`}</small></p>}

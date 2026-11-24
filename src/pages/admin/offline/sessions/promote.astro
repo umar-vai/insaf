@@ -1,0 +1,86 @@
+---
+import { env } from 'cloudflare:workers';
+import Admin from '../../../../layouts/Admin.astro';
+import { listAssessments, resultLabel } from '../../../../server/assessment';
+import { listBatches } from '../../../../server/office';
+import { listAcademicSessions, listSessionBatches } from '../../../../server/school-academic';
+import { approveResultPromotions, eligibleForResultPromotion, resultPromotionPreview } from '../../../../server/result-promotions';
+import { localsMayDo } from '../../../../server/staff';
+import { bnDigits } from '../../../../lib/format';
+import { dayBn, studentCode } from '../../../../lib/offline';
+
+const here = '/admin/offline/sessions/promote';
+const canEdit = localsMayDo(Astro.locals, 'academic', 'full');
+const q = Astro.url.searchParams;
+let criteria = { examId: (q.get('exam') ?? '').slice(0, 40), batchId: (q.get('target') ?? '').slice(0, 40), sessionId: (q.get('session') ?? '').slice(0, 40) };
+let error = '';
+if (Astro.request.method === 'POST') {
+  if (!canEdit) return new Response('Academic full access required', { status: 403 });
+  const form = await Astro.request.formData();
+  criteria = { examId: String(form.get('exam') ?? '').slice(0, 40), batchId: String(form.get('target') ?? '').slice(0, 40), sessionId: String(form.get('session') ?? '').slice(0, 40) };
+  if (form.get('confirm') !== 'yes') error = 'confirm';
+  else {
+    const result = await approveResultPromotions(env.DB, Astro.locals.staff!, criteria, form.getAll('enrollment').map(String));
+    if (result.ok) return Astro.redirect(`${here}?${new URLSearchParams({ exam: criteria.examId, target: criteria.batchId, session: criteria.sessionId, saved: String(result.value) })}`, 303);
+    error = result.error;
+  }
+}
+const [exams, batches, sessions, linked] = await Promise.all([listAssessments(env.DB, { limit: 500 }), listBatches(env.DB), listAcademicSessions(env.DB), listSessionBatches(env.DB)]);
+const source = exams.find((exam) => exam.examId === criteria.examId);
+const sourceBatch = batches.find((b) => b.id === source?.batchId);
+const next = sessions.filter((s) => s.status === 'planned' && (!source || s.startsOn > source.examDate));
+const targets = batches.filter((b) => b.status === 'active' && b.id !== source?.batchId && (!sourceBatch || b.courseId === sourceBatch.courseId) &&
+  linked.some((l) => l.batchId === b.id && next.some((s) => s.id === l.sessionId) && (!criteria.sessionId || l.sessionId === criteria.sessionId)));
+const preview = criteria.examId && criteria.batchId && criteria.sessionId ? await resultPromotionPreview(env.DB, criteria) : null;
+const rows = preview?.ok ? preview.value : [];
+const errors: Record<string, string> = {
+  confirm: 'অভিভাবকের আবেদন ও নতুন সেশনের ফি যাচাই করে টিক দিন।',
+  choose: 'একবারে ১ থেকে ১০০ জন যোগ্য ছাত্র বাছুন।',
+  changed: 'ফল, ক্লাস বা সেশনের তথ্য বদলেছে। বর্তমান তালিকা দেখে আবার বাছুন।',
+  target: 'প্রকাশিত পরীক্ষা ও একই বিভাগের পরবর্তী পরিকল্পিত সেশনের চালু ব্যাচ বাছুন।',
+};
+const saved = q.get('saved') ?? '';
+---
+<Admin title="ফল থেকে প্রমোশন">
+  <header class="page-head"><div>
+    <p class="eyebrow"><a href="/admin/offline/sessions">সেশন ও প্রমোশন</a></p>
+    <h1>ফল থেকে প্রমোশন</h1>
+    <p>যে প্রকাশিত পরীক্ষার ফল প্রমোশনে ব্যবহার করবেন, সেটি বাছুন। তারপর পরের সেশন ও ব্যাচ মিলিয়ে তালিকা দেখুন।</p>
+  </div></header>
+  {/^\d{1,3}$/.test(saved) && <p class="note note--good" role="status">{bnDigits(saved)} জনের প্রমোশন সংরক্ষিত হয়েছে। <a href={`/admin/offline/sessions?session=${encodeURIComponent(criteria.sessionId)}#promotions`}>সেশনের রেকর্ড দেখুন</a></p>}
+  <section class="card">
+    <form method="get" class="form-grid">
+      <label class="field wide"><span>প্রকাশিত পরীক্ষা</span><select name="exam" required><option value="">বাছুন</option>
+        {exams.filter((e) => e.status === 'published' && e.examStatus === 'scheduled').map((e) => <option value={e.examId} selected={e.examId === criteria.examId}>{e.batchName} · {e.title} · {dayBn(e.examDate)}</option>)}
+      </select></label>
+      <label class="field"><span>পরবর্তী সেশন</span><select name="session"><option value="">বাছুন</option>
+        {next.map((s) => <option value={s.id} selected={s.id === criteria.sessionId}>{s.name}</option>)}
+      </select></label>
+      <label class="field"><span>পরবর্তী ব্যাচ</span><select name="target"><option value="">বাছুন</option>
+        {targets.map((b) => <option value={b.id} selected={b.id === criteria.batchId}>{b.courseTitle} · {b.name}</option>)}
+      </select></label>
+      <button class="button button--ghost">{criteria.examId && criteria.sessionId ? 'যোগ্যতার তালিকা দেখুন' : 'পরের ধাপ দেখুন'}</button>
+    </form>
+  </section>
+  {(error || preview?.ok === false) && <p class="note note--bad" role="alert">{errors[error || 'target']}</p>}
+  {preview?.ok && <section class="card results">
+    <div class="card__head"><h2>যোগ্যতার তালিকা</h2><strong>{bnDigits(rows.filter(eligibleForResultPromotion).length)} জন যোগ্য</strong></div>
+    <form method="post">
+      <input type="hidden" name="exam" value={criteria.examId} /><input type="hidden" name="target" value={criteria.batchId} /><input type="hidden" name="session" value={criteria.sessionId} />
+      {rows.length === 0 && <p class="muted">এই পরীক্ষার ফল থেকে বর্তমান ক্লাসের কোনো ছাত্র পাওয়া যায়নি।</p>}
+      <ul class="list">
+        {rows.map((row) => <li>
+          <span>{row.studentName} · {studentCode(row.studentNo)}<small>{row.already ? 'প্রমোশন আগেই হয়েছে' : resultLabel(row.obtained, row.passMarks, row.attendance)}</small></span>
+          {canEdit && eligibleForResultPromotion(row) && <label class="check"><input name="enrollment" value={row.enrollmentId} type="checkbox" /> প্রমোশন দিন</label>}
+        </li>)}
+      </ul>
+      {canEdit && rows.some(eligibleForResultPromotion) && (
+        <div class="form-grid">
+          <label class="check wide"><input type="checkbox" name="confirm" value="yes" required /> বাছাই করা ছাত্রদের অভিভাবকের আবেদন ও পরবর্তী সেশনের প্রযোজ্য ফি অফিসে যাচাই করেছি।</label>
+          <button class="button">বাছাই করা ছাত্রদের প্রমোশন দিন</button>
+        </div>
+      )}
+    </form>
+  </section>}
+</Admin>
+<style>.results { margin-top: var(--space-5); }</style>

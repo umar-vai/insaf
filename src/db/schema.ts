@@ -385,6 +385,16 @@ export const offlinePayments = sqliteTable(
   ],
 );
 
+export const offlinePaymentAllocations = sqliteTable('offline_payment_allocations', {
+  paymentId: text('payment_id').notNull().references(() => offlinePayments.id, { onDelete: 'cascade' }),
+  allocationKey: text('allocation_key').notNull(),
+  label: text('label').notNull(),
+  amountMinor: integer('amount_minor').notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.paymentId, t.allocationKey] }),
+  check('offline_payment_allocations_positive', sql`${t.amountMinor} > 0`),
+]);
+
 /** One student's attendance in one batch on one day. Saving again replaces it. */
 export const offlineAttendance = sqliteTable(
   'offline_attendance',
@@ -784,6 +794,8 @@ export const academicPromotions = sqliteTable('academic_promotions', {
   fromBatchId: text('from_batch_id').references(() => offlineBatches.id),
   toBatchId: text('to_batch_id').notNull().references(() => offlineBatches.id),
   toSessionId: text('to_session_id').notNull().references(() => academicSessions.id),
+  qualifyingExamId: text('qualifying_exam_id').references(() => offlineExams.id),
+  reviewedApplication: integer('reviewed_application').notNull().default(0),
   nextRoll: text('next_roll').notNull().default(''),
   createdBy: text('created_by').notNull(),
   createdAt: timestamp('created_at'),
@@ -1171,9 +1183,14 @@ export const accClearedItems = sqliteTable('acc_cleared_items', {
   source: text('source', { enum: ['fee', 'income', 'expense', 'transfer'] }).notNull(),
   txnId: text('txn_id').notNull(),
   clearedOn: text('cleared_on').notNull(),
+  statementReference: text('statement_reference').notNull().default(''),
+  statementAmountMinor: integer('statement_amount_minor'),
   createdBy: text('created_by').notNull(),
   createdAt: timestamp('created_at'),
-}, (t) => [primaryKey({ columns: [t.accountId, t.source, t.txnId] })]);
+}, (t) => [
+  primaryKey({ columns: [t.accountId, t.source, t.txnId] }),
+  uniqueIndex('acc_cleared_statement_idx').on(t.accountId, t.clearedOn, t.statementReference, t.statementAmountMinor).where(sql`${t.statementReference} <> ''`),
+]);
 
 // ---- Accounts and student CRM (0004) ----
 
@@ -1297,3 +1314,41 @@ export const crmTemplates = sqliteTable('crm_templates', {
   createdBy: text('created_by').notNull(),
   updatedAt: timestamp('updated_at'),
 });
+
+export const enrollmentAssistance = sqliteTable('enrollment_assistance', {
+  id: text('id').primaryKey(),
+  enrollmentId: text('enrollment_id').notNull().references(() => offlineEnrollments.id),
+  kind: text('kind', { enum: ['sibling', 'zakat'] }).notNull(),
+  siblingId: text('sibling_id').references(() => offlineStudents.id),
+  fundId: text('fund_id').references(() => accFunds.id),
+  originalAdmissionMinor: integer('original_admission_minor').notNull(),
+  originalDiscountMinor: integer('original_discount_minor').notNull(),
+  admissionWaiverMinor: integer('admission_waiver_minor').notNull(),
+  tuitionWaiverMinor: integer('tuition_waiver_minor').notNull(),
+  reason: text('reason').notNull(),
+  approvedBy: text('approved_by').notNull(),
+  approvedAt: timestamp('approved_at'),
+  revokedAt: text('revoked_at'),
+  revokedBy: text('revoked_by'),
+  revokeReason: text('revoke_reason').notNull().default(''),
+}, (t) => [uniqueIndex('enrollment_assistance_enrollment_idx').on(t.enrollmentId).where(sql`${t.revokedAt} IS NULL`)]);
+
+export const residentialRooms = sqliteTable('residential_rooms', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  capacity: integer('capacity').notNull(),
+  createdBy: text('created_by').notNull(),
+});
+
+export const residentialStays = sqliteTable('residential_stays', {
+  id: text('id').primaryKey(),
+  studentId: text('student_id').notNull().references(() => offlineStudents.id),
+  roomId: text('room_id').notNull().references(() => residentialRooms.id),
+  startsOn: text('starts_on').notNull(),
+  endsOn: text('ends_on'),
+  placedBy: text('placed_by').notNull(),
+  releasedBy: text('released_by'),
+}, (t) => [
+  uniqueIndex('residential_stays_current_student_idx').on(t.studentId).where(sql`${t.endsOn} IS NULL`),
+  index('residential_stays_room_idx').on(t.roomId, t.endsOn),
+]);

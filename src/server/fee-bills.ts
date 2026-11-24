@@ -74,17 +74,20 @@ async function activeConcessions(db: D1Database): Promise<Map<string, number>> {
 
 /** Who would get the bill and how much, without writing anything. */
 export async function billPreview(db: D1Database, v: BillInput, today: string): Promise<BillLine[]> {
-  const [rows, conc, duplicates] = await Promise.all([
+  const [rows, conc, grants, duplicates] = await Promise.all([
     activeEnrollmentsFor(db, today, v.target, 3001),
     v.useConcessions ? activeConcessions(db) : Promise.resolve(new Map<string, number>()),
+    db.prepare("SELECT enrollment_id AS id, kind FROM enrollment_assistance WHERE revoked_at IS NULL").all<{ id: string; kind: string }>(),
     db.prepare(`SELECT DISTINCT x.enrollment_id AS id FROM offline_charges x
       JOIN fee_bill_runs r ON x.source_key = 'bill:' || r.id
       WHERE x.voided_at IS NULL AND r.status = 'posted' AND ${sameBill}`)
       .bind(...duplicateArgs(v)).all<{ id: string }>(),
   ]);
   const billed = new Set(duplicates.results.map((r) => r.id));
+  const byEnrollment = new Map(grants.results.map((r) => [r.id, r.kind]));
   return rows.map((e) => {
-    const percent = conc.get(e.studentId) ?? 0;
+    const grant = byEnrollment.get(e.id);
+    const percent = Math.max(conc.get(e.studentId) ?? 0, grant === 'zakat' ? 100 : grant === 'sibling' && billHeadOf(v) === 'tuition' ? 50 : 0);
     const amountMinor = afterConcession(v.amountMinor, percent);
     const tuition = billHeadOf(v) === 'tuition' && e.feeMinor > e.discountMinor && schedule(e).some((item, i) => {
       const start = item.dueDate.slice(0, 7);
@@ -143,6 +146,7 @@ export async function postBillRun(db: D1Database, actor: string, v: BillInput, r
       JOIN offline_students s ON s.id = e.student_id
       WHERE e.status = 'active' AND s.status = 'active'
       AND EXISTS (SELECT 1 FROM fee_bill_runs WHERE id = ?9 AND status = 'posted')
+      AND NOT EXISTS (SELECT 1 FROM enrollment_assistance a WHERE a.enrollment_id = e.id AND a.kind = 'zakat' AND a.revoked_at IS NULL)
       AND NOT EXISTS (SELECT 1 FROM offline_charges x JOIN fee_bill_runs r ON x.source_key = 'bill:' || r.id
         WHERE x.enrollment_id = e.id AND x.voided_at IS NULL AND r.status = 'posted' AND ${sameBill})
       ON CONFLICT (enrollment_id, source_key) DO NOTHING`)

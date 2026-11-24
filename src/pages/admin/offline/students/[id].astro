@@ -24,6 +24,8 @@ import {
   updateOfflineStudent,
   voidPayment,
 } from '../../../../server/offline';
+import { assistanceForStudent, approveAssistance, revokeAssistance } from '../../../../server/enrollment-assistance';
+import { listFunds } from '../../../../server/accounts';
 import { localsMayDo } from '../../../../server/staff';
 import { guardianLinks, linkGuardian, parseGuardianForm, relationBn, revokeGuardian } from '../../../../server/school-academic';
 import { listBatches, studentAttendance } from '../../../../server/office';
@@ -50,6 +52,11 @@ if (Astro.request.method === 'POST') {
   const mine = current.enrollments.some((e) => e.id === enrollmentId);
   const fail = (e: string) => Astro.redirect(`${here}?error=${e}`, 303);
 
+  if (action === 'assistance' || action === 'assistance-revoke') {
+    if (!owner) return new Response('Office full access required', { status: 403 });
+    const grant = action === 'assistance' ? await approveAssistance(env.DB, actor, id, form) : await revokeAssistance(env.DB, actor, id, form);
+    return Astro.redirect(`${here}?${grant.ok ? 'saved=1' : `error=${grant.error}`}#assistance`, 303);
+  }
   if (action === 'crm-tags') {
     await setTags(env.DB, actor, id, parseTags(form));
     return Astro.redirect(`${here}?saved=1#crm`, 303);
@@ -152,6 +159,23 @@ const costs = accounts ? (await env.DB.prepare(
   "SELECT id, category, spent_on AS day, amount_minor AS amount FROM expenses WHERE student_id = ? AND voided_at IS NULL AND status = 'approved' ORDER BY spent_on DESC, id DESC",
 ).bind(id).all<{ id: string; category: string; day: string; amount: number }>()).results : [];
 const active = enrollments.filter((e) => e.status === 'active');
+const [assistance, fundList, stay] = await Promise.all([
+  assistanceForStudent(env.DB, id),
+  owner ? listFunds(env.DB) : Promise.resolve([]),
+  env.DB.prepare(`SELECT t.id, r.name FROM residential_stays t JOIN residential_rooms r ON r.id = t.room_id
+    WHERE t.student_id = ? AND t.ends_on IS NULL`).bind(id).first<{ id: string; name: string }>(),
+]);
+const zakat = fundList.filter((f) => f.kind === 'zakat' && f.restricted);
+const grantable = active.filter((e) => e.paidMinor === 0 && !payments.some((p) => p.enrollmentId === e.id) && !assistance.some((g) => g.enrollmentId === e.id && !g.revokedAt));
+const assistanceErrors: Record<string, string> = {
+  assistance_input: 'ধরন, কারণ ও যাচাইয়ের টিক দিন।',
+  assistance_sibling: 'আগে ভর্তি হওয়া ভাই বা বোনের ছাত্র আইডি দিন।',
+  assistance_fund: 'যাকাত তহবিল ও অভিভাবকের সম্মতি বাছুন।',
+  assistance_sibling_or_locked: 'আগে ভর্তি হওয়া ভাই বা বোনের চালু ভর্তি এবং এই ভর্তিতে রসিদ বা আগের ছাড় আছে কি না যাচাই করুন।',
+  assistance_revoke: 'রসিদ হয়ে থাকলে ফি আগের অবস্থায় ফেরানো যাবে না। ফি খাতা যাচাই করুন।',
+  assistance_grant_locked: 'যাকাত তহবিল চালু আছে কি না এবং এই ভর্তিতে রসিদ বা আগের ছাড় আছে কি না যাচাই করুন।',
+};
+const assistanceError = assistanceErrors[Astro.url.searchParams.get('error') ?? ''];
 const wa = waNumber(student.phone);
 const totals = enrollments.reduce(
   (a, e) => ({ total: a.total + e.ledger.totalMinor, paid: a.paid + e.ledger.paidMinor, due: a.due + e.ledger.dueMinor, overdue: a.overdue + e.ledger.overdueMinor }),
@@ -186,6 +210,8 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
   <nav class="tabs" aria-label="ছাত্রের কাজ">
     {enrollments.length > 0 && <a href="#fees">ফি</a>}<a href="#payments">রসিদ</a><a href="#student-attendance">হাজিরা</a><a href="#guardian-access">অভিভাবক</a>
     {accounts && <a href="#student-costs">খরচ</a>}
+    <a href="#assistance">ছাড় ও স্কলারশিপ</a>
+    <a href={stay ? `/admin/offline/residence?stay=${stay.id}` : `/admin/offline/residence?student=${encodeURIComponent(studentCode(student.studentNo))}`}>{stay ? `আবাসিক · ${stay.name}` : 'আবাসিক আসন'}</a>
   </nav>
   {active.length === 0 && student.status === 'active' && <p class="note note--warn"><a href="#enroll">ভর্তি সম্পন্ন করতে বিভাগ ও ক্লাস বাছুন</a>।</p>}
 
@@ -204,6 +230,43 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
   }
   {tooMuch && <p class="note note--bad" role="alert">যত টাকা বাকি আছে তার চেয়ে বেশি লেখা হয়েছে। টাকার অঙ্ক আবার দেখুন।</p>}
   {Astro.url.searchParams.get('error') === 'closed' && <p class="note note--bad" role="alert">এই তারিখের হিসাব বন্ধ করা আছে। মালিক আবার খুললে তবেই বদলানো যাবে।</p>}
+
+  <section class="card" id="assistance">
+    <div class="card__head"><h2>ছাড় ও স্কলারশিপ</h2></div>
+    <p class="muted">প্রথম রসিদের আগে অনুমোদন দিন। আগেই তৈরি হওয়া অতিরিক্ত বিলগুলো ফি খাতায় আলাদা করে যাচাই করুন।</p>
+    {assistanceError && <p class="note note--bad" role="alert">{assistanceError}</p>}
+    {assistance.length > 0 && <ul class="list">{assistance.map((g) => <li>
+      <div><strong>{g.kind === 'sibling' ? 'ভাইবোনের ছাড়' : 'যাকাত স্কলারশিপ'}</strong> · {enrollments.find((e) => e.id === g.enrollmentId)?.courseTitle}
+        <small>{g.siblingName ?? g.fundName} · ভর্তি ফি ছাড় {taka(g.admissionWaiverMinor)} · অতিরিক্ত টিউশন ছাড় {taka(g.tuitionWaiverMinor)}</small>
+        <small>{g.reason} · {g.approvedBy}</small>
+        {g.revokedAt && <small>বাতিল · {g.revokeReason}</small>}
+      </div>
+      {owner && !g.revokedAt && !payments.some((p) => p.enrollmentId === g.enrollmentId) && <details><summary>সিদ্ধান্ত সংশোধন</summary>
+        <form method="post" class="form-grid" data-confirm="এই ছাড় বাতিল করে ভর্তি ও টিউশনের আগের অঙ্ক ফেরত আনবেন?">
+          <input type="hidden" name="action" value="assistance-revoke" /><input type="hidden" name="grantId" value={g.id} />
+          <label class="field wide"><span>বাতিলের কারণ</span><input name="reason" minlength="3" maxlength="250" required /></label>
+          <button class="button button--sm button--ghost">ছাড় বাতিল করুন</button>
+        </form>
+      </details>}
+      {writeExpenses && !g.revokedAt && g.fundId && <a href={`/admin/offline/expenses?new=1&student=${encodeURIComponent(studentCode(student.studentNo))}&fund=${encodeURIComponent(g.fundId)}#new`}>যাকাত তহবিল থেকে খরচ লিখুন</a>}
+    </li>)}</ul>}
+    {owner && grantable.length > 0 && <details open={Boolean(assistanceError)}>
+      <summary>নতুন ছাড় বা স্কলারশিপ অনুমোদন করুন</summary>
+      <form method="post" class="form-grid" data-confirm="এই সুবিধা অনুমোদন করে ছাত্রের ফি হিসাব আপডেট করবেন?">
+        <input type="hidden" name="action" value="assistance" />
+        <label class="field"><span>ভর্তি</span><select name="enrollmentId" required>{grantable.map((e) => <option value={e.id}>{e.courseTitle} · {e.batch}</option>)}</select></label>
+        <label class="field"><span>সুবিধার ধরন</span><select name="kind" required><option value="">বাছুন</option><option value="sibling">ভাইবোন · ভর্তি ও টিউশন অর্ধেক</option>{zakat.length > 0 && <option value="zakat">সম্পূর্ণ যাকাত স্কলারশিপ</option>}</select></label>
+        <label class="field"><span>ভাইবোনের ক্ষেত্রে আগে ভর্তি হওয়া ছাত্রের আইডি</span><input name="siblingNo" maxlength="24" placeholder="MI-0012" /></label>
+        <label class="field"><span>স্কলারশিপের ক্ষেত্রে যাকাত তহবিল</span><select name="fundId"><option value="">বাছুন</option>{zakat.map((f) => <option value={f.id}>{f.name}</option>)}</select></label>
+        <label class="field wide"><span>সিদ্ধান্তের কারণ বা অফিস রেফারেন্স</span><input name="reason" minlength="3" maxlength="250" required /></label>
+        <label class="check wide"><input type="checkbox" name="confirm" value="yes" required /> একই পিতা মাতার সন্তান বা স্কলারশিপের প্রযোজ্য যোগ্যতা যাচাই করেছি</label>
+        <label class="check wide"><input type="checkbox" name="guardianConsent" value="yes" /> স্কলারশিপের জন্য অভিভাবকের সম্মতি নিয়েছি</label>
+        <button class="button">অনুমোদন করুন</button>
+      </form>
+    </details>}
+    {owner && !zakat.length && <p class="muted">স্কলারশিপ অনুমোদনের আগে হিসাব বিভাগে সীমাবদ্ধ যাকাত তহবিল চালু করুন।</p>}
+    {!assistance.length && !grantable.length && <p class="muted">ছাড় বা স্কলারশিপ রেকর্ড করা হয়নি। চালু ভর্তি ও প্রথম রসিদের আগেই অনুমোদন দিন।</p>}
+  </section>
 
   <section class="card" id="guardian-access">
     <div class="card__head"><h2>অনুমোদিত অভিভাবক অ্যাকাউন্ট</h2></div>

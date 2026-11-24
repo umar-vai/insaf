@@ -1,7 +1,7 @@
 ---
 // A money receipt to print or save as PDF, as a whole page. Used by the
 // office (admin) and by the student's own panel.
-import type { getReceipt } from '../server/offline';
+import { receiptAllocations, type getReceipt } from '../server/offline';
 import { dayBn, METHOD_BN, planBn } from '../lib/offline';
 import { bnDigits, dateBn, taka } from '../lib/format';
 import { env } from 'cloudflare:workers';
@@ -16,6 +16,7 @@ interface Props {
 const inst = await institute(env.DB);
 const { r, forStaff = false } = Astro.props;
 const { payment: p, enrollment: e, ledger: L } = r;
+const parts = receiptAllocations(p);
 ---
 
 
@@ -159,6 +160,7 @@ const { payment: p, enrollment: e, ledger: L } = r;
         <dt>কোর্স</dt><dd>{e.courseTitle}{e.batch && ` (${e.batch})`}</dd>
         <dt>পেমেন্ট প্ল্যান</dt><dd>{planBn(e.planMonths)}</dd>
         {p.allocationLabel && <><dt>ফির খাত</dt><dd>{p.allocationLabel}</dd></>}
+        {parts.length > 0 && <><dt>ফির খাত</dt><dd>{parts.map((part) => <div>{part.label} · {taka(part.amountMinor)}</div>)}</dd></>}
         <dt>মাধ্যম</dt><dd>{METHOD_BN[p.method]}{p.reference && ` (${p.reference})`}</dd>
         {p.note && <><dt>নোট</dt><dd>{p.note}</dd></>}
       </dl>

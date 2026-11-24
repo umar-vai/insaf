@@ -51,6 +51,7 @@ const hiddenOpen = clearing ? Math.max(0, clearing.lines.filter((l) => !l.cleare
       <h1>ব্যাংক ও ক্যাশ মেলানো</h1>
       <p>ক্যাশ বাক্সের টাকা গুনে, অথবা ব্যাংক বা বিকাশের স্টেটমেন্ট দেখে অঙ্কটি লিখুন। খাতার হিসাবের সাথে কত পার্থক্য তা দেখা যাবে এবং রেকর্ড থেকে যাবে। পার্থক্য থাকলে লেজার খুলে কোন লেখা বাকি আছে খুঁজুন।</p>
     </div>
+    <a class="button button--ghost" href="/admin/offline/accounts/bank-import">CSV দিয়ে মেলান</a>
   </header>
   <AccountsNav />
   {q.get('error') && <p class="note note--bad" role="alert">{ERR[q.get('error')!] ?? 'কাজটি করা যায়নি।'}</p>}
