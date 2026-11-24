@@ -84,6 +84,7 @@ const doneNo = done && /^\d{1,6}$/.test(done) ? Number(done) : 0;
         <p class="row"><a class="button" href={doneNo ? `/admission/status?no=${doneNo}` : '/admission/status'}>আবেদনের অবস্থা দেখুন</a> <a class="button button--ghost" href="/admission">ভর্তি পাতায় ফিরে যান</a></p>
       </div>
     ) : (
+      <p class="muted">আগে আবেদন করেছেন? <a href="/admission/status">আবেদনের অবস্থা দেখুন</a>।</p>
       <form method="post" enctype="multipart/form-data" class="card" id="apply" data-error={error}>
         {error && <p class="note note--bad" role="alert">{ERR[error] ?? ERR.failed}</p>}
         <div class="steps" aria-hidden="true"><span data-dot="1" class="on">১. শিক্ষার্থীর তথ্য</span><span data-dot="2">২. অঙ্গীকারনামা ও স্বাক্ষর</span></div>
@@ -92,7 +93,7 @@ const doneNo = done && /^\d{1,6}$/.test(done) ? Number(done) : 0;
           <h3>ছবি</h3>
           <div class="wide photo">
             <img data-preview alt="" width="96" height="120" hidden />
-            <label class="field"><span>শিক্ষার্থীর পাসপোর্ট সাইজ ছবি (আইডি কার্ডে বসবে)</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required data-photo /></label>
+            <label class="field"><span>শিক্ষার্থীর পাসপোর্ট সাইজ ছবি (JPG, PNG বা WebP, সর্বোচ্চ ৪ MB)</span><input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required data-photo /></label>
           </div>
           <AdmissionFields departments={departments} v={values} pickedDept={q.get('dept') ?? ''} />
           <label class="hp" aria-hidden="true">ওয়েবসাইট <input name="website" tabindex="-1" autocomplete="off" /></label>

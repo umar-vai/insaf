@@ -2,6 +2,7 @@
 import { env } from 'cloudflare:workers';
 import { dayIsClosed } from '../../../../server/acc-period';
 import Admin from '../../../../layouts/Admin.astro';
+import FeeAllocationField from '../../../../components/admin/FeeAllocationField.astro';
 import PortalLogin from '../../../../components/admin/PortalLogin.astro';
 import Icon from '../../../../components/Icon.astro';
 import EnrollFields from '../../../../components/admin/OfflineEnrollFields.astro';
@@ -35,6 +36,8 @@ const id = Astro.params.id!;
 const actor = Astro.locals.staff!;
 // Owners, and team members with full power in this part, approve and void.
 const owner = localsMayDo(Astro.locals, 'office', 'full');
+const accounts = localsMayDo(Astro.locals, 'accounts', 'view');
+const writeExpenses = localsMayDo(Astro.locals, 'accounts', 'edit');
 const today = todayDhaka();
 const here = `/admin/offline/students/${id}`;
 
@@ -90,14 +93,17 @@ if (Astro.request.method === 'POST') {
     await updateOfflineStudent(env.DB, actor, id, v.value);
   } else if (action === 'enroll') {
     const v = parseEnrollForm(form);
-    if (!v.ok || !(await enrollOffline(env.DB, actor, id, v.value))) return fail(v.ok ? 'course' : v.error);
+    if (!v.ok || !v.value.batchId || !(await enrollOffline(env.DB, actor, id, v.value))) return fail(v.ok ? 'course' : v.error);
   } else if (action === 'pay' && mine) {
+    const counter = String(form.get('counterQuery') ?? '').slice(0, 100);
+    const counterUrl = (key: 'paid' | 'error', value: string) => `/admin/offline/collect?${new URLSearchParams({ q: counter, [key]: value })}`;
+    const failPayment = (error: string) => counter ? Astro.redirect(counterUrl('error', error), 303) : fail(error);
     const v = parsePaymentForm(form, today);
-    if (!v.ok) return fail(v.error);
-    if (await dayIsClosed(env.DB, v.value.paidOn)) return fail('closed');
+    if (!v.ok) return failPayment(v.error);
+    if (await dayIsClosed(env.DB, v.value.paidOn)) return failPayment('closed');
     const r = await recordPayment(env.DB, actor, enrollmentId, v.value, today);
-    if (!r.ok) return fail(r.error);
-    return Astro.redirect(`${here}?paid=${r.id}#e-${enrollmentId}`, 303);
+    if (!r.ok) return failPayment(r.error);
+    return Astro.redirect(counter ? counterUrl('paid', r.id) : `${here}?paid=${r.id}#e-${enrollmentId}`, 303);
   } else if (action === 'edit' && mine) {
     const v = parseEnrollmentEdit(form);
     if (!v.ok) return fail(v.error);
@@ -142,6 +148,10 @@ const [courses, batches, attendance, charges, guardians, crmTags, tagChoices, fo
   listTemplates(env.DB),
   studentTimeline(env.DB, id),
 ]);
+const costs = accounts ? (await env.DB.prepare(
+  "SELECT id, category, spent_on AS day, amount_minor AS amount FROM expenses WHERE student_id = ? AND voided_at IS NULL AND status = 'approved' ORDER BY spent_on DESC, id DESC",
+).bind(id).all<{ id: string; category: string; day: string; amount: number }>()).results : [];
+const active = enrollments.filter((e) => e.status === 'active');
 const wa = waNumber(student.phone);
 const totals = enrollments.reduce(
   (a, e) => ({ total: a.total + e.ledger.totalMinor, paid: a.paid + e.ledger.paidMinor, due: a.due + e.ledger.dueMinor, overdue: a.overdue + e.ledger.overdueMinor }),
@@ -151,16 +161,20 @@ const present = attendance.filter((a) => a.status === 'present' || a.status === 
 const paidId = Astro.url.searchParams.get('paid');
 const justPaid = paidId ? payments.find((p) => p.id === paidId) : null;
 const tooMuch = Astro.url.searchParams.get('error') === 'too_much';
-const STATE_BN = { paid: 'পরিশোধিত', partial: 'কিছু দেওয়া হয়েছে', overdue: 'তারিখ পার', upcoming: 'সামনে' } as const;
-const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcoming: 'draft' } as const;
+const STATE_BN = { paid: 'পরিশোধিত', partial: 'কিছু দেওয়া হয়েছে', overdue: 'তারিখ পার', upcoming: 'সামনে', today: 'আজ দিতে হবে' } as const;
+const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcoming: 'draft', today: 'pending' } as const;
 ---
 
 <Admin title={student.name}>
+  {Astro.url.searchParams.get('error') === 'terms' && <p class="note note--bad" role="alert">ক্লাস ও ফির তথ্য যাচাই করুন। নির্দিষ্ট কিস্তিতে রসিদ থাকলে তারিখ, কিস্তি বা ছাড় সরাসরি বদলানো যাবে না।</p>}
+  {Astro.url.searchParams.get('error') === 'allocation' && <p class="note note--bad" role="alert">এই খাতের বাকি বদলেছে। বর্তমান বাকি দেখে আবার জমা দিন।</p>}
+  {Astro.url.searchParams.has('loginPending') && <p class="note note--warn">ভর্তি সম্পন্ন। <a href="#portal-access">পোর্টাল লগইন চালু করুন</a>।</p>}
   <header class="page-head">
     <div>
       <p class="eyebrow"><a href="/admin/offline/students">ছাত্র ও ভর্তি</a></p>
       <h1>{student.name} <span class="id">{studentCode(student.studentNo)}</span></h1>
-      <p>যোগ করা হয়েছে {dateBn(student.createdAt)}</p>
+      <p>{active.length ? active.map((e) => e.batch || `${e.courseTitle} · ক্লাস বাকি`).join(', ') : 'বিভাগ ও ক্লাস বরাদ্দ বাকি'}</p>
+      <p>মোট বাকি {taka(totals.due)} · যোগ করা হয়েছে {dateBn(student.createdAt)}</p>
     </div>
     <div class="actions">
       <a class="button button--ghost" href={`tel:${student.phone}`}><Icon name="phone" /> কল</a>
@@ -169,6 +183,11 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
       <a class="button" href="#enroll"><Icon name="plus" /> নতুন কোর্সে ভর্তি</a>
     </div>
   </header>
+  <nav class="tabs" aria-label="ছাত্রের কাজ">
+    {enrollments.length > 0 && <a href="#fees">ফি</a>}<a href="#payments">রসিদ</a><a href="#student-attendance">হাজিরা</a><a href="#guardian-access">অভিভাবক</a>
+    {accounts && <a href="#student-costs">খরচ</a>}
+  </nav>
+  {active.length === 0 && student.status === 'active' && <p class="note note--warn"><a href="#enroll">ভর্তি সম্পন্ন করতে বিভাগ ও ক্লাস বাছুন</a>।</p>}
 
   {
     justPaid && (
@@ -230,7 +249,7 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
         {student.address && <li><span class="muted">ঠিকানা</span><span>{student.address}</span></li>}
       </ul>
       {student.note && <p class="muted">{student.note}</p>}
-      <PortalLogin kind="student" id={student.id} email={student.email} hasPassword={hasPassword} />
+      <div id="portal-access"><PortalLogin kind="student" id={student.id} email={student.email} hasPassword={hasPassword} /></div>
       <details>
         <summary>তথ্য বদলান</summary>
         <form method="post" class="form-grid edit">
@@ -265,7 +284,7 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
       </details>
     </section>
     <section class="card">
-      <div class="card__head"><h2>সাম্প্রতিক হাজিরা</h2></div>
+      <div class="card__head"><h2 id="student-attendance">সাম্প্রতিক হাজিরা</h2></div>
       {
         attendance.length === 0 ? (
           <div class="empty"><Icon name="clipboard" size={28} /><p>এখনো হাজিরা নেওয়া হয়নি।</p></div>
@@ -283,11 +302,12 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
   {enrollments.length === 0 && <p class="panel muted">এখনো কোনো কোর্সে ভর্তি হননি। নিচে থেকে ভর্তি করুন।</p>}
 
   {
-    enrollments.map((e) => {
+    enrollments.map((e, index) => {
       const L = e.ledger;
       const suggested = L.next ? Math.round(L.next.amountMinor / 100) : '';
       return (
         <section class="enrollment card" id={`e-${e.id}`}>
+          {index === 0 && <span id="fees"></span>}
           <header>
             <div>
               <h2>{e.courseTitle}</h2>
@@ -310,7 +330,7 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
           {
             (L.byKind.exam.totalMinor > 0 || L.byKind.late.totalMinor > 0 || L.byKind.other.totalMinor > 0) && (
               <p class="muted breakdown">
-                {(['fee', 'exam', 'late', 'other'] as const).filter((k) => L.byKind[k].totalMinor > 0).map((k) => (
+                {(['admission', 'fee', 'exam', 'late', 'other'] as const).filter((k) => L.byKind[k].totalMinor > 0).map((k) => (
                   <span>{ITEM_KIND_BN[k]}: {taka(L.byKind[k].totalMinor)} (বাকি {taka(L.byKind[k].dueMinor)})</span>
                 ))}
               </p>
@@ -341,6 +361,7 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
             L.dueMinor > 0 && e.status !== 'dropped' && (
               <form method="post" class="pay">
                 <h3>টাকা জমা নিন</h3>
+                <FeeAllocationField ledger={L} />
                 <input type="hidden" name="action" value="pay" />
                 <input type="hidden" name="enrollmentId" value={e.id} />
                 <input type="hidden" name="nonce" value={crypto.randomUUID()} />
@@ -454,7 +475,7 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
     }}
   />
 
-  <h2>সব পেমেন্ট</h2>
+  <h2 id="payments">সব পেমেন্ট</h2>
   {
     payments.length === 0 ? (
       <p class="panel muted">এখনো কোনো টাকা জমা হয়নি।</p>
@@ -494,6 +515,12 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
   }
   {!owner && <p class="muted"><small>ভুল এন্ট্রি বাতিল করতে পারেন মালিক বা সম্পূর্ণ ক্ষমতার সদস্য। ভুল হলে মালিককে জানান।</small></p>}
 
+  {accounts && <section class="card" id="student-costs">
+    <div class="card__head"><h2>এই ছাত্রের খরচ</h2>{writeExpenses && student.studentNo && <a href={`/admin/offline/expenses?new=1&student=${encodeURIComponent(studentCode(student.studentNo))}#new`}>খরচ লিখুন</a>}</div>
+    {costs.length ? <><p>অনুমোদিত খরচ {taka(costs.reduce((sum, cost) => sum + cost.amount, 0))}</p><ul class="list">
+      {costs.map((cost) => <li><a href={`/admin/offline/accounts/voucher/${cost.id}`}>{cost.category} · {dayBn(cost.day)}</a><strong>{taka(cost.amount)}</strong></li>)}
+    </ul></> : <p class="muted">এই ছাত্রের নামে কোনো অনুমোদিত খরচ নেই।</p>}
+  </section>}
   <h2 id="enroll">নতুন কোর্সে ভর্তি</h2>
   {
     courses.length === 0 ? (
@@ -501,7 +528,7 @@ const STATE_PILL = { paid: 'paid', partial: 'pending', overdue: 'failed', upcomi
     ) : (
       <form method="post" class="card form-grid">
         <input type="hidden" name="action" value="enroll" />
-        <EnrollFields courses={courses} batches={batches} today={today} />
+        <EnrollFields courses={courses} batches={batches} today={today} requireBatch />
         <button class="button">ভর্তি করুন</button>
       </form>
     )

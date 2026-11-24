@@ -6,7 +6,7 @@ import { localsMayDo } from '../../../../server/staff';
 import { listOfflineCourses } from '../../../../server/offline';
 import { listBatches } from '../../../../server/office';
 import {
-  billPreview, endConcession, listBillRuns, listConcessions, parseBillForm, parseConcessionForm, postBillRun, setConcession, type BillInput,
+  BILL_HEAD_BN, billPreview, billPreviewKey, endConcession, listBillRuns, listConcessions, parseBillForm, parseConcessionForm, postBillRun, setConcession, type BillInput,
 } from '../../../../server/fee-bills';
 import { addMonths, dayBn, studentCode, todayDhaka } from '../../../../lib/offline';
 import { bnDigits, dateBn, taka } from '../../../../lib/format';
@@ -26,7 +26,7 @@ if (Astro.request.method === 'POST') {
     const v = parseBillForm(form);
     if (!v.ok) return Astro.redirect(`${here}?error=${v.error}`, 303);
     if (form.get('confirm') !== 'yes') return Astro.redirect(`${here}?error=confirm`, 303);
-    const r = await postBillRun(env.DB, actor, v.value, String(form.get('runKey') ?? ''), today);
+    const r = await postBillRun(env.DB, actor, v.value, String(form.get('runKey') ?? ''), today, true);
     if (!r.ok) return Astro.redirect(`${here}?error=${r.error}`, 303);
     return Astro.redirect(`${here}/${r.value.runId}?saved=1`, 303);
   }
@@ -52,7 +52,10 @@ if (q.get('preview') === '1') {
   const f = new FormData();
   for (const [k, val] of q) f.set(k, val);
   const v = parseBillForm(f);
-  if (v.ok) preview = { input: v.value, lines: await billPreview(env.DB, v.value, today), runKey: crypto.randomUUID().replace(/-/g, '') };
+  if (v.ok) {
+    const lines = await billPreview(env.DB, v.value, today);
+    preview = { input: v.value, lines, runKey: await billPreviewKey(v.value, lines) };
+  }
   else previewError = v.error;
 }
 const [courses, batches, runs, concessions, students] = await Promise.all([
@@ -66,6 +69,9 @@ const billable = preview?.lines.filter((l) => !l.skip) ?? [];
 const previewTotal = billable.reduce((a, l) => a + l.amountMinor, 0);
 const ERR: Record<string, string> = {
   title: 'বিলের নাম লিখুন।', amount: 'সঠিক টাকার পরিমাণ লিখুন।', dueDate: 'শেষ তারিখ সঠিকভাবে দিন।', target: 'কাদের বিল হবে বাছুন।',
+  head: 'ফির খাত বাছুন।', period: 'বিলিং মাস সঠিকভাবে বাছুন।',
+  already: 'এই তালিকায় নতুন কোনো বিল নেই।', changed: 'তালিকা বা টাকার হিসাব বদলেছে। আবার প্রিভিউ দেখুন।',
+  too_many: 'একবারে সর্বোচ্চ ৩,০০০ ভর্তি রেকর্ডে বিল করা যায়। বিভাগ বা ক্লাস বাছুন।',
   confirm: 'যাচাইয়ের টিক দিন।', nobody: 'এই তালিকায় কোনো চালু ছাত্র নেই।', key: 'আবার প্রিভিউ দেখে পোস্ট করুন।',
   student: 'ছাত্র বাছুন।', percent: 'ছাড় ১ থেকে ১০০ শতাংশের মধ্যে দিন।', reason: 'ছাড়ের কারণ লিখুন।', full: 'এই কাজে সম্পূর্ণ অনুমতি লাগবে।', action: 'কাজটি করা যায়নি।',
 };
@@ -80,7 +86,7 @@ const defaultDue = addMonths(today.slice(0, 8) + '10', today.slice(8) > '10' ? 1
     <div>
       <p class="eyebrow">ছাত্র ও ফি</p>
       <h1>একসাথে ফি বিল</h1>
-      <p>মাসিক ফি, বই, পরীক্ষা বা অন্য যেকোনো ফি একবারে সব ছাত্রের, একটি বিভাগের বা একটি ক্লাসের হিসাবে যোগ করুন। আগে তালিকা দেখুন, তারপর পোস্ট করুন। বিলটি বকেয়া, ফি আদায় ও রসিদে সাধারণ চার্জ হিসেবে দেখা যাবে।</p>
+      <p>মাসিক টিউশন, সেশন ফি, বই বা অন্য ফি যোগ করুন। আগে দেখুন কার বিল হবে এবং কার ফি আগেই নির্ধারিত আছে। পরীক্ষার ফি ক্লাসের পরীক্ষা থেকে যোগ করুন।</p>
     </div>
     <div class="actions"><a class="button button--ghost" href={`${here}/print`}><Icon name="printer" /> বকেয়া বিল প্রিন্ট</a></div>
   </header>
@@ -90,6 +96,8 @@ const defaultDue = addMonths(today.slice(0, 8) + '10', today.slice(8) > '10' ? 1
     <div class="card__head"><h2>নতুন বিল</h2></div>
     <form method="get" action={here} class="form-grid">
       <input type="hidden" name="preview" value="1" />
+      <label class="field"><span>ফির খাত</span><select name="feeHead">{Object.entries(BILL_HEAD_BN).map(([key, name]) => <option value={key} selected={key === (q.get('feeHead') ?? 'other')}>{name}</option>)}</select></label>
+      <label class="field"><span>বিলিং মাস</span><input name="billingPeriod" type="month" value={q.get('billingPeriod') ?? defaultDue.slice(0, 7)} required /></label>
       <label class="field wide"><span>বিলের নাম (রসিদে এভাবেই লেখা থাকবে)</span><input name="title" required minlength="2" maxlength="120" value={q.get('title') ?? ''} placeholder="যেমন: ডিসেম্বর মাসের বেতন" /></label>
       <label class="field"><span>প্রতি ছাত্রের টাকা</span><input name="amount" inputmode="numeric" required value={q.get('amount') ?? ''} /></label>
       <label class="field"><span>পরিশোধের শেষ তারিখ</span><input name="dueDate" type="date" required value={q.get('dueDate') ?? defaultDue} /></label>
@@ -121,25 +129,28 @@ const defaultDue = addMonths(today.slice(0, 8) + '10', today.slice(8) > '10' ? 1
       <div class="card__head"><h2>যাচাই করুন: {preview.input.title}</h2><span class="pill pill--info">{targetLabel(preview.input)}</span></div>
       <p>
         {bnDigits(billable.length)} জনের বিল হবে, মোট <strong>{taka(previewTotal)}</strong>, শেষ তারিখ {dayBn(preview.input.dueDate)}।
-        {preview.lines.length - billable.length > 0 && ` ${bnDigits(preview.lines.length - billable.length)} জনের সম্পূর্ণ ছাড় থাকায় বিল হবে না।`}
+        {preview.lines.length - billable.length > 0 && ` ${bnDigits(preview.lines.length - billable.length)}টি রেকর্ডে নতুন বিল হবে না।`}
       </p>
       {preview.lines.length === 0 ? <p class="muted">এই তালিকায় কোনো চালু ছাত্র নেই।</p> : (
         <div class="table-wrap"><table>
           <thead><tr><th>ছাত্র</th><th>বিভাগ ও ক্লাস</th><th>ছাড়</th><th>বিল</th></tr></thead>
           <tbody>{preview.lines.slice(0, 500).map((l) => (
             <tr><td>{l.studentName} <small class="muted">{studentCode(l.studentNo)}</small></td><td>{l.courseTitle}{l.batch && ` · ${l.batch}`}</td>
-              <td>{l.percent ? `${bnDigits(l.percent)}%` : ''}</td><td>{l.skip === 'free' ? 'সম্পূর্ণ ছাড়' : taka(l.amountMinor)}</td></tr>
+              <td>{l.percent ? `${bnDigits(l.percent)}%` : ''}</td><td>{l.skip === 'free' ? 'সম্পূর্ণ ছাড়' : l.skip === 'already' ? 'আগেই বিল হয়েছে' : l.skip === 'tuition' ? 'ভর্তির ফিতে অন্তর্ভুক্ত' : taka(l.amountMinor)}</td></tr>
           ))}</tbody>
         </table></div>
       )}
       {preview.lines.length > 500 && <p class="muted">প্রথম ৫০০ জন দেখানো হলো; পোস্ট করলে সবার বিল হবে।</p>}
-      {billable.length > 0 && (
+      {preview.lines.length > 3000 && <p class="note note--warn">{ERR.too_many}</p>}
+      {billable.length > 0 && preview.lines.length <= 3000 && (
         <form method="post" class="confirm" data-confirm={`${bnDigits(billable.length)} জনের বিল পোস্ট করবেন?`}>
           <input type="hidden" name="action" value="post" />
           <input type="hidden" name="runKey" value={preview.runKey} />
           <input type="hidden" name="title" value={preview.input.title} />
           <input type="hidden" name="amount" value={String(preview.input.amountMinor / 100)} />
           <input type="hidden" name="dueDate" value={preview.input.dueDate} />
+          <input type="hidden" name="feeHead" value={preview.input.feeHead} />
+          <input type="hidden" name="billingPeriod" value={preview.input.billingPeriod} />
           <input type="hidden" name="targetKind" value={preview.input.target.kind} />
           <input type="hidden" name="courseId" value={preview.input.target.kind === 'course' ? preview.input.target.id : ''} />
           <input type="hidden" name="batchId" value={preview.input.target.kind === 'batch' ? preview.input.target.id : ''} />

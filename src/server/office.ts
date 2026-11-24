@@ -1,3 +1,4 @@
+import { postedAccount } from './accounts';
 import { CLOSED_THROUGH_SQL, dayIsClosed, PeriodClosedError } from './acc-period';
 import { log } from './admin';
 import { DOC_TYPES, storeUpload } from './files';
@@ -149,12 +150,13 @@ export function parseBatchForm(form: FormData): Result<BatchInput> {
   };
 }
 
+const currentBatch = `coalesce((SELECT p.to_batch_id FROM academic_promotions p JOIN academic_sessions ses
+  ON ses.id=p.to_session_id AND ses.status='active' WHERE p.enrollment_id=e.id LIMIT 1), e.batch_id)`;
+const batchStudents = `(SELECT count(*) FROM offline_enrollments e JOIN offline_students s ON s.id = e.student_id
+  WHERE e.status='active' AND s.status='active' AND ${currentBatch}=b.id)`;
 const BATCH_SELECT = `SELECT b.id, b.course_id AS courseId, c.title AS courseTitle, b.name, b.kind, b.days, b.start_time AS startTime, b.end_time AS endTime,
   b.teacher_id AS teacherId, t.name AS teacherName, t.phone AS teacherPhone, b.room, b.start_date AS startDate, b.status, b.note,
-  (SELECT count(*) FROM offline_enrollments e WHERE e.status='active' AND
-     coalesce((SELECT p.to_batch_id FROM academic_promotions p JOIN academic_sessions ses
-       ON ses.id=p.to_session_id AND ses.status='active' WHERE p.enrollment_id=e.id LIMIT 1), e.batch_id)=b.id
-   ) AS students
+  ${batchStudents} AS students
   FROM offline_batches b JOIN offline_courses c ON c.id = b.course_id LEFT JOIN teachers t ON t.id = b.teacher_id`;
 
 export async function listBatches(db: D1Database, opts: { activeOnly?: boolean; teacherId?: string } = {}): Promise<Batch[]> {
@@ -167,6 +169,19 @@ export async function listBatches(db: D1Database, opts: { activeOnly?: boolean; 
 }
 
 export const getBatch = (db: D1Database, id: string) => db.prepare(`${BATCH_SELECT} WHERE b.id = ?`).bind(id).first<Batch>();
+
+/** A teacher or room cannot cover overlapping weekly classes. */
+export async function conflictingBatch(db: D1Database, id: string | null, v: BatchInput): Promise<string | null> {
+  const days = parseDays(v.days);
+  if (v.status !== 'active' || !days.length || !v.startTime || !v.endTime) return null;
+  const { results } = await db.prepare(`SELECT b.name, b.days FROM offline_batches b
+    WHERE b.id <> ?1 AND b.status = 'active' AND b.start_time <> '' AND b.end_time <> ''
+    AND b.start_time < ?3 AND b.end_time > ?2 AND (
+      (?4 <> '' AND (b.teacher_id = ?4 OR EXISTS(SELECT 1 FROM batch_teachers bt WHERE bt.batch_id = b.id AND bt.teacher_id = ?4)))
+      OR (?5 <> '' AND lower(trim(b.room)) = lower(trim(?5))))`)
+    .bind(id ?? '', v.startTime, v.endTime, v.teacherId ?? '', v.room).all<{ name: string; days: string }>();
+  return results.find((b) => parseDays(b.days).some((d) => days.includes(d)))?.name ?? null;
+}
 
 export async function saveBatch(db: D1Database, actor: string, id: string | null, v: BatchInput): Promise<string | null> {
   const ok = await db.prepare('SELECT 1 AS ok FROM offline_courses WHERE id = ?').bind(v.courseId).first();
@@ -205,13 +220,12 @@ export async function saveBatch(db: D1Database, actor: string, id: string | null
 /** Active batches that meet on this date, by start time. */
 export async function classesOn(db: D1Database, ymd: string): Promise<(Batch & { marked: number })[]> {
   const day = weekday(ymd);
+  const attended = `EXISTS (SELECT 1 FROM offline_attendance a WHERE a.enrollment_id = e.id AND a.batch_id = b.id AND a.day = ?1)`;
+  const rosterForDay = batchStudents.replace("WHERE e.status", "WHERE e.start_date <= ?1 AND e.status");
   const { results } = await db
-    .prepare(
-      `${BATCH_SELECT.replace(
-        ' FROM offline_batches b',
-        ', (SELECT count(*) FROM offline_attendance a WHERE a.batch_id = b.id AND a.day = ?1) AS marked FROM offline_batches b',
-      )} WHERE b.status = 'active' AND (',' || b.days || ',') LIKE ?2 ORDER BY b.start_time, b.name`,
-    )
+    .prepare(`${BATCH_SELECT.replace(batchStudents, rosterForDay).replace(' FROM offline_batches b',
+      `, ${rosterForDay.slice(0, -1)} AND ${attended}) AS marked FROM offline_batches b`)}
+      WHERE b.status = 'active' AND (b.start_date = '' OR b.start_date <= ?1) AND (',' || b.days || ',') LIKE ?2 ORDER BY b.start_time, b.name`)
     .bind(ymd, `%,${day},%`)
     .all<Batch & { marked: number }>();
   return results;
@@ -231,7 +245,7 @@ export async function roster(db: D1Database, batchId: string, ymd: string): Prom
         LEFT JOIN academic_promotions p ON p.enrollment_id=e.id AND p.to_session_id=
             (SELECT id FROM academic_sessions WHERE status='active' LIMIT 1)
         LEFT JOIN offline_attendance a ON a.enrollment_id=e.id AND a.day=?2 AND a.batch_id=?1
-        WHERE (coalesce(p.to_batch_id,e.batch_id)=?1 AND e.status='active') OR a.id IS NOT NULL
+        WHERE (coalesce(p.to_batch_id,e.batch_id)=?1 AND e.status='active' AND s.status='active' AND e.start_date <= ?2) OR a.id IS NOT NULL
         ORDER BY CASE WHEN coalesce(nullif(p.next_roll,''),e.roll) GLOB '[0-9]*'
           THEN CAST(coalesce(nullif(p.next_roll,''),e.roll) AS INTEGER) ELSE 99999 END,
           coalesce(nullif(p.next_roll,''),e.roll), s.name`,
@@ -338,7 +352,7 @@ export type Expense = {
 };
 /** Counts in the accounts: approved and not voided. */
 export const counts = (e: Pick<Expense, 'voidedAt' | 'status'>) => !e.voidedAt && e.status === 'approved';
-type ExpenseInput = { spentOn: string; category: string; amountTaka: number; description: string; method: string; nonce: string | null; projectId?: string | null; fundId?: string | null; party?: string };
+type ExpenseInput = { spentOn: string; category: string; amountTaka: number; description: string; method: string; nonce: string | null; projectId?: string | null; fundId?: string | null; party?: string; studentId?: string | null };
 
 export function parseExpenseForm(form: FormData, today: string): Result<ExpenseInput> {
   const amount = parseTaka(form.get('amount'));
@@ -361,6 +375,7 @@ export function parseExpenseForm(form: FormData, today: string): Result<ExpenseI
       projectId: text(form, 'projectId', 40) || null,
       fundId: text(form, 'fundId', 40) || null,
       party: text(form, 'party', 120),
+      studentId: text(form, 'studentId', 40) || null,
     },
   };
 }
@@ -383,11 +398,11 @@ export async function recordExpense(db: D1Database, actor: string, v: ExpenseInp
     try {
       await db
         .prepare(
-          `INSERT INTO expenses (id, spent_on, category, amount_minor, description, method, voucher_key, recorded_by, nonce, status, voucher_no, project_id, fund_id, party, checked_by, checked_at)
+          `INSERT INTO expenses (id, spent_on, category, amount_minor, description, method, voucher_key, recorded_by, nonce, status, voucher_no, project_id, fund_id, party, checked_by, checked_at, posted_account_id, student_id)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, (SELECT coalesce(max(voucher_no), 0) + 1 FROM expenses), (SELECT id FROM acc_projects WHERE id = ?11),
-                   (SELECT id FROM acc_funds WHERE id = ?12), ?13, ?14, CASE WHEN ?14 IS NULL THEN NULL ELSE strftime('%Y-%m-%dT%H:%M:%fZ','now') END)`,
+                   (SELECT id FROM acc_funds WHERE id = ?12), ?13, ?14, CASE WHEN ?14 IS NULL THEN NULL ELSE strftime('%Y-%m-%dT%H:%M:%fZ','now') END, ${postedAccount('?6')}, ?15)`,
         )
-        .bind(id, v.spentOn, v.category, v.amountTaka * 100, v.description, v.method, voucherKey, actor, v.nonce, waits ? 'pending' : 'approved', v.projectId ?? '', v.fundId ?? '', v.party ?? '', checked ? actor : null)
+        .bind(id, v.spentOn, v.category, v.amountTaka * 100, v.description, v.method, voucherKey, actor, v.nonce, waits ? 'pending' : 'approved', v.projectId ?? '', v.fundId ?? '', v.party ?? '', checked ? actor : null, v.studentId ?? null)
         .run();
       break;
     } catch (e) {
@@ -406,6 +421,7 @@ export async function voidExpense(db: D1Database, actor: string, id: string, rea
   const r = await db
     .prepare(
       `UPDATE expenses SET voided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), voided_by = ?, void_reason = ? WHERE id = ? AND voided_at IS NULL AND spent_on > ${CLOSED_THROUGH_SQL}
+       AND NOT EXISTS (SELECT 1 FROM payroll WHERE expense_id = expenses.id AND status = 'paid')
        RETURNING amount_minor AS amount`,
     )
     .bind(actor, why, id)

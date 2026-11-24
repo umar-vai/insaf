@@ -8,7 +8,7 @@ import DonateForm from '../components/donate/DonateForm.astro';
 import FundProgress from '../components/donate/FundProgress.astro';
 import FoundationPaymentDetails from '../components/donate/FoundationPaymentDetails.astro';
 import BarChart from '../components/admin/BarChart.astro';
-import { fundUpdates, listFunds, monthlyTotals, recentGifts, storyHtml } from '../server/donations';
+import { fundUpdates, landDonorProgress, listFunds, monthlyTotals, recentGifts, storyHtml } from '../server/donations';
 import { LAND } from '../lib/land';
 import { FOUNDER } from '../lib/site';
 
@@ -26,17 +26,18 @@ if (!buy) return Astro.redirect('/donate', 302);
 
 const landIds = [buy.id, members?.id].filter(Boolean) as string[];
 const raisedMinor = buy.raisedMinor + (members?.raisedMinor ?? 0);
-const donors = buy.donors + (members?.donors ?? 0);
+
 const gifts = buy.gifts + (members?.gifts ?? 0);
 // The approved foundation goal is authoritative; keep Admin fund data synchronized.
 const goalMinor = LAND.goalMinor;
 const chairmanVideoUrl = 'https://youtu.be/3Af1wPgcbm0';
 const chairmanVideoEmbed = 'https://www.youtube-nocookie.com/embed/3Af1wPgcbm0?rel=0';
 
-const [months, recent, updates] = await Promise.all([
+const [months, recent, updates, progress] = await Promise.all([
   Promise.all(landIds.map((id) => monthlyTotals(env.DB, id, 9))),
   recentGifts(env.DB, buy.id, 10),
   fundUpdates(env.DB, buy.id),
+  landDonorProgress(env.DB, buy.id, members?.id, LAND.memberShareTaka * 100),
 ]);
 const monthRows = months[0]!.map((m, i) => ({ label: monthBn(m.month), values: [months.reduce((s, f) => s + (f[i]?.minor ?? 0), 0)] }));
 const error = Astro.url.searchParams.get('error');
@@ -131,7 +132,7 @@ const FAQ = [
         <div class="foundation-donate__goal">৳২,৫০,০০,০০০</div>
         <h2 id="donate-title">জমি ক্রয়ের লক্ষ্যে এগিয়ে চলি একসঙ্গে</h2>
         <p>ছোট-বড় প্রতিটি দান একই জমি ক্রয় লক্ষ্য পূরণে সহযোগিতা করে। এখানে প্রদর্শিত সংগ্রহ, দাতা ও দানের সংখ্যা সংরক্ষিত লেনদেনের তথ্য থেকে আসছে।</p>
-        <div class="foundation-donate__progress"><FundProgress raisedMinor={raisedMinor} goalMinor={goalMinor} donors={donors} gifts={gifts} onDark /></div>
+        <div class="foundation-donate__progress"><FundProgress raisedMinor={raisedMinor} goalMinor={goalMinor} donors={progress.donors} gifts={gifts} onDark /></div>
       </div>
       <div class="foundation-donate__form">
         <DonateForm funds={formFunds} fund={buy.slug} title="জমি ক্রয় তহবিলে দান করুন" from="/land" error={error} />
@@ -207,15 +208,16 @@ const FAQ = [
             <p class="members__eyebrow">বিশেষ আহ্বান</p>
             <h2>জমি দাতা সদস্য হোন</h2>
             <p>{'তামরিন এডুকেশন নেটওয়ার্ক ফাউন্ডেশনের জমি তহবিলে বিশেষ অংশীদার হিসেবে যুক্ত হোন। ১০০ জন সদস্যের প্রত্যেকের অংশ ২.৫ লক্ষ টাকা।'}</p>
-            <FundProgress raisedMinor={members.raisedMinor} goalMinor={members.goalMinor} donors={members.donors} memberGoal={members.memberGoal} size="sm" />
+            <FundProgress raisedMinor={members.raisedMinor} goalMinor={members.goalMinor} donors={members.donors} size="sm" />
           </div>
           <div class="members__side">
             {members.memberGoal && (
               <p class="members__count">
-                <strong>{bnDigits(members.donors)}</strong>
-                <span>/ {bnDigits(members.memberGoal)} জন সদস্য</span>
+                <strong>{bnDigits(progress.completedMembers)}</strong>
+                <span>/ {bnDigits(members.memberGoal)} জন পূর্ণ অংশ জমা দিয়েছেন</span>
               </p>
             )}
+            {progress.partialMembers > 0 && <p>{bnDigits(progress.partialMembers)} জন আংশিক জমা দিয়েছেন।</p>}
             <a class="button" href={`/donate/${members.slug}#donate-form`}>সদস্য হিসেবে দান করুন <Icon name="arrow" /></a>
           </div>
         </div>

@@ -63,7 +63,7 @@ const here = (extra: Record<string, string>) => `?${new URLSearchParams({ batch:
             {todays.map((b) => (
               <li>
                 <div><strong>{b.name}</strong> <span class="muted">· {b.courseTitle}</span><small>{[timeBn(b.startTime), b.teacherName].filter(Boolean).join(' · ')} · {bnDigits(b.students)} জন</small></div>
-                {b.marked > 0 ? <a class="pill pill--present" href={`?batch=${b.id}&day=${today}`}>নেওয়া হয়েছে, দেখুন</a> : <a class="button button--sm" href={`?batch=${b.id}&day=${today}`}>হাজিরা নিন</a>}
+                {b.students > 0 && b.marked >= b.students ? <a class="pill pill--present" href={`?batch=${b.id}&day=${today}`}>নেওয়া হয়েছে, দেখুন</a> : <a class="button button--sm" href={`?batch=${b.id}&day=${today}`}>{b.marked ? `বাকি হাজিরা (${bnDigits(b.marked)}/${bnDigits(b.students)})` : 'হাজিরা নিন'}</a>}
               </li>
             ))}
           </ul>

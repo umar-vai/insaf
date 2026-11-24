@@ -40,6 +40,16 @@ const FUND_COLS = `f.id, f.slug, f.title, f.summary, f.story_text AS storyText, 
 /** A donor is counted once per phone number (or name, for gifts without one). */
 const DONOR_KEY = `CASE WHEN d.donor_phone <> '' THEN d.donor_phone ELSE lower(d.donor_name) END`;
 
+/** Distinct people across both land funds, with completed member shares tracked separately. */
+export async function landDonorProgress(db: D1Database, purchaseId: string, memberId: string | undefined, shareMinor: number) {
+  const key = `CASE WHEN d.donor_phone <> '' THEN d.donor_phone WHEN d.donor_email <> '' THEN lower(d.donor_email) ELSE lower(trim(d.donor_name)) END`;
+  return (await db.prepare(`SELECT count(*) AS donors, coalesce(sum(memberMinor >= ?3),0) AS completedMembers,
+    coalesce(sum(memberMinor > 0 AND memberMinor < ?3),0) AS partialMembers FROM
+    (SELECT sum(CASE WHEN d.fund_id = ?2 THEN d.amount_minor ELSE 0 END) AS memberMinor
+      FROM donations d WHERE d.fund_id IN (?1, ?2) AND ${COUNTED} GROUP BY ${key})`)
+    .bind(purchaseId, memberId ?? '', shareMinor).first<{ donors: number; completedMembers: number; partialMembers: number }>())!;
+}
+
 /** Counted gifts: paid online, or recorded at the office and not voided. */
 export const COUNTED = `d.status = 'paid' AND d.voided_at IS NULL`;
 
@@ -390,7 +400,8 @@ export async function voidDonation(db: D1Database, actor: string, reference: str
   const r = await db
     .prepare(
       `UPDATE donations SET voided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), voided_by = ?, void_reason = ?
-       WHERE reference = ? AND gateway = 'manual' AND voided_at IS NULL`,
+       WHERE reference = ? AND gateway = 'manual' AND voided_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM acc_entries x WHERE x.donation_id = donations.id AND x.voided_at IS NULL)`,
     )
     .bind(actor, why, reference)
     .run();

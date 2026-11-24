@@ -4,7 +4,7 @@ import Admin from '../../../../layouts/Admin.astro';
 import Icon from '../../../../components/Icon.astro';
 import BatchFields from '../../../../components/admin/BatchFields.astro';
 import { listOfflineCourses } from '../../../../server/offline';
-import { getBatch, listTeachers, parseBatchForm, roster, saveBatch } from '../../../../server/office';
+import { conflictingBatch, getBatch, listTeachers, parseBatchForm, roster, saveBatch } from '../../../../server/office';
 import { addMaterial, hideMaterial, listMaterials } from '../../../../server/panels';
 import MaterialList from '../../../../components/MaterialList.astro';
 import { DAY_BN, parseDays, studentCode, timeBn, todayDhaka } from '../../../../lib/offline';
@@ -31,8 +31,9 @@ if (Astro.request.method === 'POST') {
     form.set('batchId', id);
     const v = parseExamForm(form);
     if (!v.ok) return Astro.redirect(`/admin/offline/batches/${id}?error=${v.error}#exams`, 303);
-    await createExam(env.DB, Astro.locals.staff!, v.value);
-    return Astro.redirect(`/admin/offline/batches/${id}?saved=1#exams`, 303);
+    if (v.value.examDate < todayDhaka()) return Astro.redirect(`/admin/offline/batches/${id}?error=examDate#exams`, 303);
+    const created = await createExam(env.DB, Astro.locals.staff!, v.value);
+    return Astro.redirect(`/admin/offline/batches/${id}?${created ? `saved=1&roster=${created.examinees}&charged=${created.charged}` : 'error=course'}#exams`, 303);
   }
   if (form.get('action') === 'cancel-exam') {
     const examId = String(form.get('examId') ?? '');
@@ -46,6 +47,7 @@ if (Astro.request.method === 'POST') {
   }
   const v = parseBatchForm(form);
   if (!v.ok) return Astro.redirect(`/admin/offline/batches/${id}?error=${v.error}`, 303);
+  if (await conflictingBatch(env.DB, id, v.value)) return Astro.redirect(`/admin/offline/batches/${id}?error=conflict`, 303);
   const ok = await saveBatch(env.DB, Astro.locals.staff!, id, v.value);
   return Astro.redirect(`/admin/offline/batches/${id}?${ok ? 'saved=1' : 'error=course'}`, 303);
 }
@@ -63,6 +65,7 @@ const [courses, teachers, students, materials, extraTeachers, exams] = await Pro
 ---
 
 <Admin title={batch.name}>
+  {Astro.url.searchParams.get('error') === 'conflict' && <p class="note note--bad" role="alert">একই সময়ে এই শিক্ষক বা কক্ষ অন্য ক্লাসে আছে। রুটিনে সময় মিলিয়ে আবার চেষ্টা করুন।</p>}
   <header class="page-head">
     <div>
       <p class="eyebrow"><a href="/admin/offline/batches">ব্যাচ ও রুটিন</a></p>
@@ -139,6 +142,8 @@ const [courses, teachers, students, materials, extraTeachers, exams] = await Pro
 
     <section class="card" id="exams">
       <div class="card__head"><h2>পরীক্ষা</h2></div>
+      {Astro.url.searchParams.has('roster') && <p class="note" role="status">পরীক্ষার্থী {bnDigits(Astro.url.searchParams.get('roster') ?? '')} জন · ফি যোগ হয়েছে {bnDigits(Astro.url.searchParams.get('charged') ?? '')} জনের হিসাবে।</p>}
+      {Astro.url.searchParams.get('error') === 'examDate' && <p class="note note--bad">আজ বা পরের কোনো তারিখ বাছুন।</p>}
       {exams.length > 0 && (
         <ul class="list">
           {exams.map((x) => (
@@ -162,7 +167,7 @@ const [courses, teachers, students, materials, extraTeachers, exams] = await Pro
         <label class="field"><span>তারিখ</span><input name="examDate" type="date" required min={today} /></label>
         <label class="field"><span>শুরুর সময় (ঐচ্ছিক)</span><input name="startTime" type="time" /></label>
         <label class="field"><span>পরীক্ষার ফি, টাকা (না থাকলে খালি)</span><input name="fee" inputmode="numeric" /></label>
-        <p class="wide muted"><small>ফি দিলে এই ব্যাচের সব চালু ছাত্রের হিসাবে পরীক্ষার দিন পর্যন্ত সময় দিয়ে ফি যোগ হবে। ছাত্র আর শিক্ষক নিজের প্যানেলে তারিখ দেখবেন।</small></p>
+        <p class="wide muted"><small>পরীক্ষার তারিখ অনুযায়ী তালিকা স্থির হবে। একই তালিকা থেকে মার্কশিট ও পরীক্ষার ফি তৈরি হবে।</small></p>
         <button class="button">পরীক্ষা যোগ করুন</button>
       </form>
     </section>

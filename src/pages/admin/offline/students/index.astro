@@ -5,7 +5,7 @@ import Icon from '../../../../components/Icon.astro';
 import EnrollFields from '../../../../components/admin/OfflineEnrollFields.astro';
 import {
   createOfflineStudent,
-  enrollOffline,
+  admitOfflineStudent,
   listOfflineCourses,
   listOfflineStudents,
   parseEnrollForm,
@@ -30,8 +30,9 @@ if (Astro.request.method === 'POST') {
   }
   const enroll = form.get('courseId') ? parseEnrollForm(form) : null;
   if (enroll && !enroll.ok) return Astro.redirect(`/admin/offline/students?new=1&error=${enroll.error}`, 303);
-  const id = await createOfflineStudent(env.DB, actor, student.value);
-  if (enroll?.ok) await enrollOffline(env.DB, actor, id, enroll.value);
+  if (enroll?.ok && !enroll.value.batchId) return Astro.redirect('/admin/offline/students?new=1&error=batch#new', 303);
+  const id = enroll?.ok ? await admitOfflineStudent(env.DB, actor, student.value, enroll.value) : await createOfflineStudent(env.DB, actor, student.value);
+  if (!id) return Astro.redirect('/admin/offline/students?new=1&error=batch#new', 303);
   return Astro.redirect(`/admin/offline/students/${id}?saved=1`, 303);
 }
 
@@ -57,6 +58,7 @@ const link = (k: string) => `/admin/offline/students?${new URLSearchParams({ ...
     </div>
   </header>
 
+  {Astro.url.searchParams.get('error') === 'batch' && <p class="note note--bad" role="alert">নির্বাচিত বিভাগের একটি চালু ক্লাস বাছুন। ছাত্রের তথ্য সংরক্ষণ হয়নি।</p>}
   <details class="card new" id="new" open={openNew}>
     <summary><strong>নতুন ছাত্র ভর্তি ফর্ম</strong></summary>
     {
@@ -80,7 +82,7 @@ const link = (k: string) => `/admin/offline/students?${new URLSearchParams({ ...
         courses.length === 0 ? (
           <p class="wide muted">এখনো কোনো চালু বিভাগ নেই। আগে <a href="/admin/offline/courses">কোর্স যোগ করুন</a>, অথবা এখন শুধু ছাত্রের তথ্য রেখে পরে ভর্তি করুন।</p>
         ) : (
-          <EnrollFields courses={courses} batches={batches} today={today} optional />
+          <EnrollFields courses={courses} batches={batches} today={today} optional requireBatch />
         )
       }
       {dup && <label class="check wide"><input type="checkbox" name="confirmDuplicate" /> তবুও নতুন করে রাখুন</label>}

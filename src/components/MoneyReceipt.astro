@@ -158,6 +158,7 @@ const { payment: p, enrollment: e, ledger: L } = r;
         {r.address && <><dt>ঠিকানা</dt><dd>{r.address}</dd></>}
         <dt>কোর্স</dt><dd>{e.courseTitle}{e.batch && ` (${e.batch})`}</dd>
         <dt>পেমেন্ট প্ল্যান</dt><dd>{planBn(e.planMonths)}</dd>
+        {p.allocationLabel && <><dt>ফির খাত</dt><dd>{p.allocationLabel}</dd></>}
         <dt>মাধ্যম</dt><dd>{METHOD_BN[p.method]}{p.reference && ` (${p.reference})`}</dd>
         {p.note && <><dt>নোট</dt><dd>{p.note}</dd></>}
       </dl>

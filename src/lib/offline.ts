@@ -79,10 +79,11 @@ export type Terms = {
   startDate: string;
 };
 
-export type InstallmentState = 'paid' | 'partial' | 'overdue' | 'upcoming';
+export type InstallmentState = 'paid' | 'partial' | 'overdue' | 'upcoming' | 'today';
 /** fee: a course fee installment. exam, late, other: a charge added on top. */
-export type ItemKind = 'fee' | 'exam' | 'late' | 'other';
+export type ItemKind = 'admission' | 'fee' | 'exam' | 'late' | 'other';
 export type Installment = {
+  key: string;
   /** Installment number for course fee items (1, 2, ...); 0 for charges. */
   n: number;
   kind: ItemKind;
@@ -93,9 +94,9 @@ export type Installment = {
   state: InstallmentState;
 };
 /** An exam fee, late fee or other charge on one enrollment (not voided). */
-export type Charge = { id: string; kind: Exclude<ItemKind, 'fee'>; label: string; amountMinor: number; dueDate: string };
+export type Charge = { id: string; kind: Exclude<ItemKind, 'fee' | 'admission'>; label: string; amountMinor: number; dueDate: string };
 
-export const ITEM_KIND_BN: Record<ItemKind, string> = { fee: 'কোর্স ফি', exam: 'পরীক্ষার ফি', late: 'লেট ফি', other: 'অন্যান্য' };
+export const ITEM_KIND_BN: Record<ItemKind, string> = { admission: 'ভর্তি ফি', fee: 'টিউশন ফি', exam: 'পরীক্ষার ফি', late: 'লেট ফি', other: 'অন্যান্য' };
 
 export type Ledger = {
   totalMinor: number;
@@ -135,23 +136,31 @@ export function schedule(t: Terms): { dueDate: string; amountMinor: number }[] {
  * late. Payments cover items in date order (a charge on the same day as an
  * installment comes after it).
  */
-export function ledger(t: Terms, paidMinor: number, today: string, charges: readonly Charge[] = []): Ledger {
+export type PaymentAllocation = { key: string; amountMinor: number };
+
+export function ledger(t: Terms, paidMinor: number, today: string, charges: readonly Charge[] = [], allocations: readonly PaymentAllocation[] = []): Ledger {
+  const admissionMinor = Math.max(0, Math.min(t.admissionFeeMinor, t.feeMinor + t.admissionFeeMinor - t.discountMinor));
   const items = [
-    ...schedule(t).map((s, i) => ({ n: i + 1, kind: 'fee' as ItemKind, label: `কিস্তি ${bnDigits(i + 1)}`, ...s, order: 0 })),
-    ...charges.map((c) => ({ n: 0, kind: c.kind as ItemKind, label: c.label, dueDate: c.dueDate, amountMinor: c.amountMinor, order: 1 })),
-  ].sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.order - b.order);
-  let left = paidMinor;
-  const installments = items.map((s): Installment => {
-    const paid = Math.min(left, s.amountMinor);
-    left -= paid;
+    ...(admissionMinor ? [{ key: 'admission', n: 0, kind: 'admission' as const, label: ITEM_KIND_BN.admission, dueDate: t.startDate, amountMinor: admissionMinor, order: -1 }] : []),
+    ...schedule(t).map((s, i) => ({ key: `fee:${i + 1}`, n: i + 1, kind: 'fee' as const, label: `টিউশন কিস্তি ${bnDigits(i + 1)}`, dueDate: s.dueDate, amountMinor: s.amountMinor - (i === 0 ? admissionMinor : 0), order: 0 })),
+    ...charges.map((c) => ({ key: `charge:${c.id}`, n: 0, kind: c.kind, label: c.label, dueDate: c.dueDate, amountMinor: c.amountMinor, order: 1 })),
+  ].filter((item) => item.amountMinor > 0).sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.order - b.order || a.key.localeCompare(b.key));
+  const selected = new Map(allocations.map((a) => [a.key, a.amountMinor]));
+  const paidToItem = items.map((item) => Math.min(item.amountMinor, selected.get(item.key) ?? 0));
+  let left = Math.max(0, paidMinor - paidToItem.reduce((sum, paid) => sum + paid, 0));
+  const installments = items.map((item, i): Installment => {
+    const allocated = paidToItem[i] ?? 0;
+    const automatic = Math.min(left, item.amountMinor - allocated);
+    const paid = allocated + automatic;
+    left -= automatic;
     const state: InstallmentState =
-      paid >= s.amountMinor ? 'paid' : s.dueDate <= today ? 'overdue' : paid > 0 ? 'partial' : 'upcoming';
-    return { n: s.n, kind: s.kind, label: s.label, dueDate: s.dueDate, amountMinor: s.amountMinor, paidMinor: paid, state };
+      paid >= item.amountMinor ? 'paid' : item.dueDate < today ? 'overdue' : item.dueDate === today ? 'today' : paid > 0 ? 'partial' : 'upcoming';
+    return { key: item.key, n: item.n, kind: item.kind, label: item.label, dueDate: item.dueDate, amountMinor: item.amountMinor, paidMinor: paid, state };
   });
   const totalMinor = installments.reduce((a, s) => a + s.amountMinor, 0);
   const overdueMinor = installments.filter((s) => s.state === 'overdue').reduce((a, s) => a + s.amountMinor - s.paidMinor, 0);
   const open = installments.find((s) => s.paidMinor < s.amountMinor);
-  const byKind = { fee: { totalMinor: 0, dueMinor: 0 }, exam: { totalMinor: 0, dueMinor: 0 }, late: { totalMinor: 0, dueMinor: 0 }, other: { totalMinor: 0, dueMinor: 0 } };
+  const byKind = { admission: { totalMinor: 0, dueMinor: 0 }, fee: { totalMinor: 0, dueMinor: 0 }, exam: { totalMinor: 0, dueMinor: 0 }, late: { totalMinor: 0, dueMinor: 0 }, other: { totalMinor: 0, dueMinor: 0 } };
   for (const s of installments) {
     byKind[s.kind].totalMinor += s.amountMinor;
     byKind[s.kind].dueMinor += s.amountMinor - s.paidMinor;

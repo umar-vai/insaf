@@ -65,6 +65,12 @@ const next = addMonths(`${month}-01`, 1).slice(0, 7);
       )}
     </section>
     <section class="card">
+      <div class="card__head"><h2>নির্বাচিত ফির খাত</h2></div>
+      {r.byHead.length === 0 ? <p class="muted">এই মাসে কিছু জমা হয়নি।</p> : (
+        <ul class="list">{r.byHead.map((g) => <li><span>{g.label}</span><strong class="num">{taka(g.totalMinor)}</strong></li>)}</ul>
+      )}
+    </section>
+    <section class="card">
       <div class="card__head"><h2>মাধ্যম অনুযায়ী</h2></div>
       {r.byMethod.length === 0 ? <p class="muted">এই মাসে কিছু জমা হয়নি।</p> : (
         <ul class="list">{r.byMethod.map((g) => <li><span>{METHOD_BN[g.label as PayMethod] ?? g.label} <small>{bnDigits(g.count)}টি</small></span><strong class="num">{taka(g.totalMinor)}</strong></li>)}</ul>

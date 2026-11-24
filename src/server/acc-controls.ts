@@ -1,5 +1,5 @@
 import { log } from './admin';
-import { balancesAsOf, fundSummary, listFunds, projectSummary, transactions, type Txn } from './accounts';
+import { balancesAsOf, DONATION_TRANSFER_CATEGORY, fundSummary, listFunds, projectSummary, transactions, type Txn } from './accounts';
 import { COUNTED } from './donations';
 
 // Controls on top of the books (migration 0009): the balance check on
@@ -8,7 +8,7 @@ import { COUNTED } from './donations';
 // and are never written into the books from here.
 
 /** Income moved over from the donation side by hand. Counted once in the consolidated report. */
-export const MOVED_FROM_DONATIONS = 'দান তহবিল থেকে স্থানান্তর';
+export const MOVED_FROM_DONATIONS = DONATION_TRANSFER_CATEGORY;
 
 export type FundShort = { fundName: string; balanceMinor: number; shortMinor: number };
 

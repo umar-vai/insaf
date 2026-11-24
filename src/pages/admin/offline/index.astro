@@ -6,7 +6,7 @@ import BarChart from '../../../components/admin/BarChart.astro';
 import { offlineOverview } from '../../../server/offline';
 import { classesOn, monthlyFigures, recentPayments, todayMoney } from '../../../server/office';
 import { workCountsFor } from '../../../server/nav-badges';
-import { mayOpenPath } from '../../../server/staff';
+import { mayDo, mayOpenPath } from '../../../server/staff';
 import { addMonths, DAY_BN, dayBn, METHOD_BN, monthBn, studentCode, timeBn, todayDhaka, weekday, type PayMethod } from '../../../lib/offline';
 import { bnDigits, taka } from '../../../lib/format';
 
@@ -37,6 +37,11 @@ const alerts = ([
   { show: w.pendingStudentLeave > 0, href: '/admin/offline/student-leave', icon: 'calendar', tone: 'warn', text: `ছাত্রের ${bnDigits(w.pendingStudentLeave)}টি ছুটির আবেদন অনুমোদনের অপেক্ষায়।` },
   { show: w.homeworkToCheck > 0, href: '/admin/offline/homework', icon: 'book', tone: 'warn', text: `${bnDigits(w.homeworkToCheck)}টি জমা দেওয়া হোমওয়ার্ক দেখা বাকি।` },
 ] as Alert[]).filter((a) => a.show && mayOpenPath(access, a.href.split('?')[0]!));
+const canSeeAccounts = mayOpenPath(access, '/admin/offline/reports');
+const canSeeClasses = mayOpenPath(access, '/admin/offline/batches');
+const canTakeAttendance = mayDo(access, 'academic', 'edit');
+const canAdmit = mayDo(access, 'office', 'edit');
+const canWriteExpenses = mayDo(access, 'accounts', 'edit');
 const net = o.collectedThisMonthMinor - money.spentMonth;
 ---
 
@@ -48,44 +53,46 @@ const net = o.collectedThisMonthMinor - money.spentMonth;
       <p>আজকের ক্লাস, টাকার হিসাব আর যাদের বকেয়া আছে, সব এক জায়গায়।</p>
     </div>
     <div class="actions">
-      <a class="button" href="/admin/offline/students?new=1"><Icon name="plus" /> নতুন ভর্তি</a>
-      <a class="button button--leaf" href="/admin/offline/collect"><Icon name="coins" /> ফি নিন</a>
-      <a class="button button--ghost" href="/admin/offline/expenses?new=1"><Icon name="wallet" /> খরচ লিখুন</a>
-      <a class="button button--ghost" href="/admin/offline/attendance"><Icon name="clipboard" /> হাজিরা</a>
+      {canAdmit && <a class="button" href="/admin/offline/applications"><Icon name="child" /> ভর্তি আবেদন</a>}
+      {canAdmit && <a class="button button--ghost" href="/admin/offline/students?new=1#new"><Icon name="plus" /> সরাসরি ভর্তি</a>}
+      {canAdmit && <a class="button button--leaf" href="/admin/offline/collect"><Icon name="coins" /> ফি নিন</a>}
+      {canWriteExpenses && <a class="button button--ghost" href="/admin/offline/expenses?new=1"><Icon name="wallet" /> খরচ লিখুন</a>}
+      {canTakeAttendance && <a class="button button--ghost" href="/admin/offline/attendance"><Icon name="clipboard" /> হাজিরা</a>}
     </div>
   </header>
 
   {
     alerts.length > 0 && (
-      <div class="alerts">
+      <section class="alerts" aria-label="অপেক্ষমাণ কাজ">
+        <h2>অপেক্ষমাণ কাজ</h2>
         {alerts.map((a) => (
           <a class={`note note--${a.tone}`} href={a.href}>
             <Icon name={a.icon} /> {a.text}
           </a>
         ))}
-      </div>
+      </section>
     )
   }
 
   <div class="kpis">
     <div class="kpi"><span class="kpi__icon"><Icon name="coins" /></span><span class="kpi__label">আজকের আদায়</span><strong class="kpi__value">{taka(money.collected)}</strong><span class="kpi__hint">{bnDigits(money.payments)}টি রসিদ</span></div>
-    <div class="kpi kpi--warn"><span class="kpi__icon"><Icon name="wallet" /></span><span class="kpi__label">আজকের খরচ</span><strong class="kpi__value">{taka(money.spent)}</strong><span class="kpi__hint">এই মাসে {taka(money.spentMonth)}</span></div>
-    <a class="kpi" href="/admin/offline/reports"><span class="kpi__icon"><Icon name="chart" /></span><span class="kpi__label">এই মাসে আদায়</span><strong class="kpi__value">{taka(o.collectedThisMonthMinor)}</strong><span class="kpi__hint">খরচ বাদে {net < 0 ? 'ঘাটতি' : 'থাকে'} {taka(Math.abs(net))}</span></a>
+    {canSeeAccounts && <div class="kpi kpi--warn"><span class="kpi__icon"><Icon name="wallet" /></span><span class="kpi__label">আজকের খরচ</span><strong class="kpi__value">{taka(money.spent)}</strong><span class="kpi__hint">এই মাসে {taka(money.spentMonth)}</span></div>}
+    {canSeeAccounts && <a class="kpi" href="/admin/offline/reports"><span class="kpi__icon"><Icon name="chart" /></span><span class="kpi__label">এই মাসে আদায়</span><strong class="kpi__value">{taka(o.collectedThisMonthMinor)}</strong><span class="kpi__hint">খরচ বাদে {net < 0 ? 'ঘাটতি' : 'থাকে'} {taka(Math.abs(net))}</span></a>}
     <a class={`kpi ${o.totalOverdueMinor ? 'kpi--bad' : ''}`} href="/admin/offline/dues"><span class="kpi__icon"><Icon name="alert" /></span><span class="kpi__label">তারিখ পার হওয়া বকেয়া</span><strong class="kpi__value">{taka(o.totalOverdueMinor)}</strong><span class="kpi__hint">{bnDigits(o.overdue.length)} জন · মোট বাকি {taka(o.totalDueMinor)}</span></a>
     <a class="kpi kpi--info" href="/admin/offline/students"><span class="kpi__icon"><Icon name="users" /></span><span class="kpi__label">চলমান ছাত্র</span><strong class="kpi__value">{bnDigits(o.activeStudents)}</strong><span class="kpi__hint">{bnDigits(o.activeCourses)}টি কোর্স · {bnDigits(money.teachers)} জন শিক্ষক</span></a>
   </div>
 
   <div class="cols cols--wide">
-    <section class="card">
+    {canSeeAccounts && <section class="card">
       <div class="card__head"><h2>শেষ ৬ মাস: আদায় ও খরচ</h2><a href="/admin/offline/reports">পুরো রিপোর্ট</a></div>
       <BarChart
         caption="শেষ ছয় মাসের ফি আদায় ও খরচ"
         series={[{ label: 'আদায়', color: 'var(--chart-income)' }, { label: 'খরচ', color: 'var(--chart-expense)' }]}
         rows={months.map((m) => ({ label: monthBn(m.month), values: [m.offlineMinor, m.expenseMinor] }))}
       />
-    </section>
+    </section>}
 
-    <section class="card">
+    {canSeeClasses && <section class="card">
       <div class="card__head"><h2>আজকের ক্লাস</h2><a href="/admin/offline/batches?view=routine">সাপ্তাহিক রুটিন</a></div>
       {
         classes.length === 0 ? (
@@ -98,17 +105,17 @@ const net = o.collectedThisMonthMinor - money.spentMonth;
                   <strong>{b.name}</strong> <span class="muted">· {b.courseTitle}</span>
                   <small>{[timeBn(b.startTime), b.teacherName, b.room].filter(Boolean).join(' · ') || 'সময় দেওয়া নেই'}</small>
                 </div>
-                {b.marked > 0 ? (
+                {b.students > 0 && b.marked >= b.students ? (
                   <span class="pill pill--present">হাজিরা নেওয়া হয়েছে</span>
                 ) : (
-                  <a class="button button--sm button--ghost" href={`/admin/offline/attendance?batch=${b.id}&day=${today}`}>হাজিরা নিন</a>
+                  <a class="button button--sm button--ghost" href={`/admin/offline/attendance?batch=${b.id}&day=${today}`}>{b.marked ? `বাকি হাজিরা (${bnDigits(b.marked)}/${bnDigits(b.students)})` : 'হাজিরা নিন'}</a>
                 )}
               </li>
             ))}
           </ul>
         )
       }
-    </section>
+    </section>}
   </div>
 
   <div class="cols">
@@ -155,7 +162,7 @@ const net = o.collectedThisMonthMinor - money.spentMonth;
     </section>
 
     <section class="card">
-      <div class="card__head"><h2>সর্বশেষ জমা</h2><a href="/admin/offline/reports">সব পেমেন্ট</a></div>
+      <div class="card__head"><h2>সর্বশেষ জমা</h2>{canSeeAccounts && <a href="/admin/offline/reports">সব পেমেন্ট</a>}</div>
       {
         recent.length === 0 ? (
           <div class="empty"><Icon name="receipt" size={28} /><p>এখনো কোনো টাকা জমা হয়নি।</p></div>

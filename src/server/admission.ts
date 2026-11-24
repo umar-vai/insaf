@@ -1,5 +1,5 @@
 import { log } from './admin';
-import { createOfflineStudent } from './offline';
+import { offlineStudentInsert, prepareOfflineEnrollment, type EnrollInput } from './offline';
 import { cleanPhone, longText, newId, PHONE, text, type Result } from './ops-util';
 import { isYmd, parseTaka } from '../lib/offline';
 import { PLEDGE_VERSION } from '../lib/pledges';
@@ -254,38 +254,36 @@ export function ageOn(birthDate: string, today: string): number | null {
   return age;
 }
 
-/**
- * Accepts a pending application: makes the student record (with the next ID
- * number, the photo and a link back to the application) and marks it accepted.
- * Returns the student id, or null when it was not pending (so a double click
- * or two staff at once make only one student).
- */
-export async function acceptApplication(db: D1Database, actor: string, id: string): Promise<{ studentId: string } | null> {
-  const claim = await db
-    .prepare(`UPDATE admission_applications SET status = 'accepted', decided_by = ?, decided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), decision_note = '', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? AND status = 'pending'`)
-    .bind(actor, id)
-    .run();
-  if (!claim.meta.changes) return null;
-  const a = (await getApplication(db, id))!;
-  try {
-    const studentId = await createOfflineStudent(db, actor, {
-      name: a.studentName,
-      phone: a.phone,
-      guardianPhone: a.pickupPhone && a.pickupPhone !== a.phone ? a.pickupPhone : '',
-      email: '',
-      address: curAddress(a) || permAddress(a),
-      note: `ভর্তির আবেদন ${applicationCode(a.appNo)}। অভিভাবক: ${a.guardianName}${a.fatherName ? `। পিতা: ${a.fatherName}` : ''}`,
-    });
-    await db.batch([
-      db.prepare('UPDATE offline_students SET photo_key = ?, application_id = ? WHERE id = ?').bind(a.photoKey, a.id, studentId),
-      db.prepare('UPDATE admission_applications SET student_id = ? WHERE id = ?').bind(studentId, a.id),
-    ]);
-    await log(db, actor, 'admission.accept', `application:${id}`, { studentId });
-    return { studentId };
-  } catch (e) {
-    await db.prepare(`UPDATE admission_applications SET status = 'pending', decided_by = NULL, decided_at = NULL WHERE id = ? AND student_id IS NULL`).bind(id).run();
-    throw e;
-  }
+/** Commit the decision, student and enrollment together. A changed application must be reviewed again. */
+export async function acceptApplication(
+  db: D1Database,
+  actor: string,
+  id: string,
+  placement?: { enrollment: EnrollInput; admissionMinor?: number; updatedAt: string; confirmFree: boolean },
+): Promise<{ studentId: string } | null> {
+  const a = await getApplication(db, id);
+  if (!a || a.status !== 'pending' || (placement && (a.updatedAt !== placement.updatedAt || !placement.enrollment.batchId))) return null;
+  const studentId = newId('ofs');
+  const terms = placement ? await prepareOfflineEnrollment(db, studentId, placement.enrollment, placement.admissionMinor) : null;
+  if (placement && (!terms || (terms.admissionMinor + terms.tuitionMinor === terms.discountMinor && !placement.confirmFree))) return null;
+  const student = offlineStudentInsert(db, studentId, {
+    name: a.studentName,
+    phone: a.phone,
+    guardianPhone: a.pickupPhone && a.pickupPhone !== a.phone ? a.pickupPhone : '',
+    email: '',
+    address: curAddress(a) || permAddress(a),
+    note: `ভর্তির আবেদন ${applicationCode(a.appNo)}। অভিভাবক: ${a.guardianName}${a.fatherName ? `। পিতা: ${a.fatherName}` : ''}`,
+  }, { id, updatedAt: a.updatedAt, photoKey: a.photoKey });
+  const decision = db.prepare(
+    `UPDATE admission_applications SET status = 'accepted', student_id = ?1, fee_minor = ?2,
+       decided_by = ?3, decided_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), decision_note = '',
+       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+     WHERE id = ?4 AND status = 'pending' AND EXISTS (SELECT 1 FROM offline_students WHERE id = ?1)`,
+  ).bind(studentId, terms?.admissionMinor ?? a.feeMinor, actor, id);
+  const [inserted] = await db.batch(terms ? [student, terms.statement, decision] : [student, decision]);
+  if (!inserted?.meta.changes) return null;
+  await log(db, actor, 'admission.accept', `application:${id}`, { studentId, enrollmentId: terms?.id });
+  return { studentId };
 }
 
 /** Rejects a pending application. The reason is required and is shown to the family. */

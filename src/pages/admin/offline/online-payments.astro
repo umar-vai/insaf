@@ -2,27 +2,28 @@
 import { env } from 'cloudflare:workers';
 import Admin from '../../../layouts/Admin.astro';
 import Icon from '../../../components/Icon.astro';
-import { feePaymentsToReview, resolveFeeReview } from '../../../server/fee-pay';
+import { FEE_RESOLUTIONS, feePaymentsToReview, resolveFeeReview } from '../../../server/fee-pay';
 import { dayBn } from '../../../lib/offline';
 import { bnDigits, dateBn, taka } from '../../../lib/format';
 
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
-  const ok = await resolveFeeReview(env.DB, Astro.locals.staff!, String(form.get('id') ?? ''), String(form.get('note') ?? ''));
+  const ok = await resolveFeeReview(env.DB, Astro.locals.staff!, String(form.get('id') ?? ''), String(form.get('note') ?? ''), String(form.get('kind') ?? ''), String(form.get('evidence') ?? ''));
   return Astro.redirect(`/admin/offline/online-payments?${ok ? 'saved=1' : 'error=note'}`, 303);
 }
 const [review, recent] = await Promise.all([
   feePaymentsToReview(env.DB),
   env.DB.prepare(
-    `SELECT p.reference, p.amount_minor AS amountMinor, p.status, p.payment_id AS paymentId, p.created_at AS createdAt, s.id AS sid, s.name, c.title
+    `SELECT p.reference, p.amount_minor AS amountMinor, p.status, p.payment_id AS paymentId, p.resolution_kind AS resolutionKind, p.resolution_reference AS resolutionReference, p.created_at AS createdAt, s.id AS sid, s.name, c.title
      FROM offline_online_payments p JOIN offline_enrollments e ON e.id = p.enrollment_id JOIN offline_students s ON s.id = e.student_id
      JOIN offline_courses c ON c.id = e.course_id ORDER BY p.created_at DESC LIMIT 60`,
-  ).all<{ reference: string; amountMinor: number; status: string; paymentId: string | null; createdAt: string; sid: string; name: string; title: string }>(),
+  ).all<{ reference: string; amountMinor: number; status: string; paymentId: string | null; resolutionKind: keyof typeof FEE_RESOLUTIONS; resolutionReference: string; createdAt: string; sid: string; name: string; title: string }>(),
 ]);
 const REASON: Record<string, string> = {
   mismatch: 'SSLCommerz এর টাকা বা রেফারেন্স আমাদের হিসাবের সাথে মেলেনি',
   risky: 'SSLCommerz পেমেন্টটিকে ঝুঁকিপূর্ণ বলেছে',
   too_much: 'এর মধ্যে অফিসে টাকা জমা হয়ে গেছে, তাই এই টাকা বাকির চেয়ে বেশি',
+  allocation: 'যে ফি খাতে টাকা দেওয়া হয়েছিল, সেখানে এখন পুরো অঙ্ক বাকি নেই',
   missing: 'ভর্তির তথ্য পাওয়া যায়নি',
 };
 const STATUS: Record<string, [string, string]> = {
@@ -44,6 +45,7 @@ const STATUS: Record<string, [string, string]> = {
     </div>
   </header>
 
+  {Astro.url.searchParams.has('error') && <p class="note note--bad" role="alert">সিদ্ধান্ত, প্রমাণ ও নোট যাচাই করুন। রসিদ হলে এই শিক্ষার্থীর একই ভর্তি ও একই অঙ্কের চালু রসিদ নম্বর দিন।</p>}
   {
     review.length > 0 && (
       <section class="card block">
@@ -54,11 +56,13 @@ const STATUS: Record<string, [string, string]> = {
               <div>
                 <a href={`/admin/offline/students/${r.offlineStudentId}`}><strong>{r.studentName}</strong></a> · {r.courseTitle} · <strong>{taka(r.amountMinor)}</strong>
                 <small>{REASON[r.reviewReason ?? ''] ?? r.reviewReason} · {r.reference}{r.bankTranId && ` · ব্যাংক ${r.bankTranId}`} · {dateBn(r.createdAt, true)}</small>
-                <small>টাকা SSLCommerz এ এসেছে। দরকার হলে ছাত্রের পাতায় হাতে জমা করুন বা ফেরত দিন, তারপর এখানে কী করলেন লিখে রাখুন।</small>
+                <small>গেটওয়ে ও ব্যাংকের তথ্য মিলিয়ে সিদ্ধান্ত নিন। জমা হয়ে থাকলে সংশ্লিষ্ট রসিদ নম্বর দিন।</small>
               </div>
               <form method="post" class="resolve">
                 <input type="hidden" name="id" value={r.id} />
-                <input name="note" required minlength="2" placeholder="কী করা হলো" aria-label="কী করা হলো" />
+                <label class="field"><span>সিদ্ধান্ত</span><select name="kind" required><option value="">বাছুন</option>{Object.entries(FEE_RESOLUTIONS).map(([k, name]) => <option value={k}>{name}</option>)}</select></label>
+                <label class="field"><span>রসিদ নম্বর বা ব্যাংক রেফারেন্স</span><input name="evidence" required maxlength="120" /></label>
+                <label class="field"><span>কী করা হলো</span><input name="note" required minlength="2" maxlength="300" /></label>
                 <button class="button button--sm">সমাধান হয়েছে</button>
               </form>
             </li>
@@ -85,7 +89,7 @@ const STATUS: Record<string, [string, string]> = {
                   <td>{r.title}</td>
                   <td class="num">{taka(r.amountMinor)}</td>
                   <td><span class={`pill pill--${STATUS[r.status]?.[1] ?? 'draft'}`}>{STATUS[r.status]?.[0] ?? r.status}</span></td>
-                  <td>{r.paymentId && <a href={`/admin/offline/receipt/${r.paymentId}`} target="_blank">দেখুন</a>}</td>
+                  <td>{r.paymentId && <a href={`/admin/offline/receipt/${r.paymentId}`} target="_blank">রসিদ দেখুন</a>}{r.resolutionReference && <small>{FEE_RESOLUTIONS[r.resolutionKind]} · {r.resolutionReference}</small>}</td>
                 </tr>
               ))}
             </tbody>
@@ -111,5 +115,7 @@ const STATUS: Record<string, [string, string]> = {
   .resolve {
     display: flex;
     gap: var(--space-2);
+    align-items: end;
+    flex-wrap: wrap;
   }
 </style>

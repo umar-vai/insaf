@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
- examAssessment, configureAssessment, examMarks, recordExamMark, publishAssessment,
+ examAssessment, configureAssessment, correctPublishedMark, examMarks, recordExamMark, publishAssessment,
  publishedResultsForEmail, saveExamMarks, markInputsFromForm, listAssessments,
  assignmentsForBatch, createAssignment, publishAssignment, closeAssignment,
  homeworkForEmail, submitHomework, assignmentSubmissions, reviewHomework, percentScore, resultLabel,
@@ -14,7 +14,7 @@ import { batchForTeacher } from '../src/server/panels';
 const db=env.DB;
 const actor='staff@example.org';
 beforeEach(async()=>{
- for(const name of ['assessment_marks','assessment_examinees','assessment_policies',
+ for(const name of ['assessment_mark_revisions','assessment_marks','assessment_examinees','assessment_policies',
    'homework_submissions','homework_assignments','academic_guardian_links',
    'academic_promotions','academic_batch_sessions','offline_charges','offline_payments',
    'offline_attendance','offline_exams','offline_enrollments','offline_batches',
@@ -67,6 +67,11 @@ describe('secure exam gradebook',()=>{
   expect(resultLabel(92,40,'present')).toBe('উত্তীর্ণ');
   expect(adminModule('/admin/offline/gradebook/ex1')).toBe('academic');
   expect(adminModule('/admin/offline/results')).toBe('academic');
+  const change = { enrollmentId: 'e1', obtained: '96', absent: false, comment: 'Rechecked' };
+  expect((await correctPublishedMark(db,actor,'ex1',change,'')).ok).toBe(false);
+  expect((await correctPublishedMark(db,actor,'ex1',change,'Rechecked script')).ok).toBe(true);
+  expect((await publishedResultsForEmail(db,'rahim@example.org'))[0]?.obtained).toBe(96);
+  expect(await db.prepare('SELECT before_mark, after_mark FROM assessment_mark_revisions').first()).toEqual({ before_mark: 92, after_mark: 96 });
  });
  it('teacher scope follows assignment, not arbitrary exam ID',async()=>{
    await seed();
