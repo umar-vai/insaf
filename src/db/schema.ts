@@ -1046,7 +1046,7 @@ export const portalNotifications = sqliteTable('portal_notifications', {
   index('portal_notifications_teacher_idx').on(t.teacherId, t.readAt, t.createdAt),
 ]);
 
-// ---- Donor CRM and accounting controls (0007) ----
+// ---- Donor CRM and accounting controls (0009) ----
 
 export const donorProfiles = sqliteTable('donor_profiles', {
   donorKey: text('donor_key').primaryKey(),

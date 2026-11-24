@@ -2,7 +2,7 @@ import { log } from './admin';
 import { balancesAsOf, fundSummary, listFunds, projectSummary, transactions, type Txn } from './accounts';
 import { COUNTED } from './donations';
 
-// Controls on top of the books (migration 0007): the balance check on
+// Controls on top of the books (migration 0009): the balance check on
 // restricted funds, line by line clearing against a bank statement, and the
 // consolidated report. The report only reads: donations stay on their side
 // and are never written into the books from here.

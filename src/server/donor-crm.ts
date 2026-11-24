@@ -4,7 +4,7 @@ import { longText, newId, text, type Result } from './ops-util';
 import { addDays, dayBn, isYmd } from '../lib/offline';
 import { bnDigits, receiptLabel, taka } from '../lib/format';
 
-// The donor CRM (migration 0007): notes, tags and segments, a contact log,
+// The donor CRM (migration 0009): notes, tags and segments, a contact log,
 // follow ups, support tickets, message templates, receipt delivery, one
 // timeline per donor and the engagement report. It only reads the donations
 // table: what counts as a gift is decided in donations.ts and nowhere else.

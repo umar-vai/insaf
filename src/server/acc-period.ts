@@ -2,7 +2,7 @@ import { log } from './admin';
 import { newId, type Result } from './ops-util';
 import { isYmd } from '../lib/offline';
 
-// Closed accounting periods (migration 0007). Once the books are closed
+// Closed accounting periods (migration 0009). Once the books are closed
 // through a day, nothing dated on or before it can be added, approved or
 // voided, so a statement already given to an auditor cannot change. Only an
 // owner reopens, with a reason. Verified online fee payments are never
